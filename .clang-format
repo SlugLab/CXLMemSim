@@ -1,0 +1,1 @@
+{ BasedOnStyle: LLVM, UseTab: Never, IndentWidth: 4, TabWidth: 4, AllowShortBlocksOnASingleLine: false,AllowShortFunctionsOnASingleLine: All, AllowShortIfStatementsOnASingleLine: false, AllowShortLoopsOnASingleLine: false, ColumnLimit: 120, AlignTrailingComments: false, AccessModifierOffset: -4}
