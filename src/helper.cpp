@@ -2,6 +2,7 @@
 // Created by victoryang00 on 1/12/23.
 //
 #include "helper.h"
+#include "logging.h"
 
 const struct ModelContext model_ctx[] = {{CPU_MDL_BDX,
                                           {
@@ -145,8 +146,43 @@ const struct ModelContext model_ctx[] = {{CPU_MDL_BDX,
                                           }},
                                          {CPU_MDL_END, {0}}};
 
-int Helper::num_of_cpu(void) { return 0; }
+int Helper::num_of_cpu() {
+    int ncpu;
+    ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+    if (ncpu < 0) {
+        LOG(ERROR) << "sysconf";
+    }
+    LOG(DEBUG) << fmt::format("num_of_cpu={}\n", ncpu);
+    return ncpu;
+}
 
 int Helper::num_of_cbo() {
-    return 0;
+    int ncbo = 0;
+    for (; ncbo < 128; ++ncbo) {
+        std::string path = fmt::format("/sys/bus/event_source/devices/uncore_cbox_{}/type", ncbo);
+        // LOG(DEBUG) << path;
+        if (!std::filesystem::exists(path)) {
+            break;
+        }
+    }
+    LOG(DEBUG) << fmt::format("num_of_cbo={}\n", ncbo);
+    return ncbo;
+}
+
+double Helper::cpu_frequency() {
+    int i = 0;
+    int cpu = 0;
+    double cpu_mhz = 0.0;
+    double max_cpu_mhz = 0.0;
+    std::ifstream fp("/proc/cpuinfo");
+
+    for (std::string line; cpu != this->cpu - 1; std::getline(fp, line)) {
+        // LOG(DEBUG) << fmt::format("line: {}\n", line);
+        i = std::sscanf(line.c_str(), "cpu MHz : %lf", &cpu_mhz);
+        max_cpu_mhz = i == 1 ? std::max(max_cpu_mhz, cpu_mhz) : max_cpu_mhz;
+        std::sscanf(line.c_str(), "processor : %d", &cpu);
+    }
+    LOG(DEBUG) << fmt::format("cpu MHz: {}\n", cpu_mhz);
+
+    return cpu_mhz;
 }

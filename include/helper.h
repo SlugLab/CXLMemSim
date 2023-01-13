@@ -8,8 +8,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <dirent.h>
 #include <fcntl.h>
+#include <filesystem>
 #include <fnmatch.h>
 #include <linux/perf_event.h>
 #include <sys/mman.h>
@@ -100,17 +100,19 @@ struct ModelContext {
 };
 
 class Helper {
+public:
     int cpu;
     int cbo;
-
+    double cpu_freq;
     Helper() {
         cpu = num_of_cpu();
         cbo = num_of_cbo();
+        cpu_freq = cpu_frequency();
     }
     int num_of_cpu();
     int num_of_cbo();
     double cpu_frequency();
-    int detect_model(const uint32_t);
+    int detect_model(uint32_t);
 };
 
 #endif // CXL_MEM_SIMULATOR_HELPER_H
