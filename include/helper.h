@@ -4,20 +4,20 @@
 
 #ifndef CXL_MEM_SIMULATOR_HELPER_H
 #define CXL_MEM_SIMULATOR_HELPER_H
+
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <dirent.h>
 #include <fcntl.h>
 #include <fnmatch.h>
 #include <linux/perf_event.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 /* CPU Models */
-enum { CPU_MDL_BDX = 63, CPU_MDL_ADL = 79, CPU_MDL_SKX = 85, CPU_MDL_END = 0x0ffff };
+enum { CPU_MDL_BDX = 63, CPU_MDL_SKX = 85, CPU_MDL_SPR = 143, CPU_MDL_ADL = 151, CPU_MDL_END = 0x0ffff };
 
 struct EmuCXLLatency {
     double read;
@@ -107,9 +107,9 @@ class Helper {
         cpu = num_of_cpu();
         cbo = num_of_cbo();
     }
-    int num_of_cpu(void);
-    int num_of_cbo(void);
-    double cpu_frequency(void);
+    int num_of_cpu();
+    int num_of_cbo();
+    double cpu_frequency();
     int detect_model(const uint32_t);
 };
 

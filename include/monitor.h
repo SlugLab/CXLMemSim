@@ -5,10 +5,6 @@
 #ifndef SLUGALLOCATOR_MONITOR_H
 #define SLUGALLOCATOR_MONITOR_H
 
+class Monitor {};
 
-class Monitor {
-
-};
-
-
-#endif //SLUGALLOCATOR_MONITOR_H
+#endif // SLUGALLOCATOR_MONITOR_H

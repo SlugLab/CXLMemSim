@@ -5,10 +5,6 @@
 #ifndef CXL_MEM_SIMULATOR_POLICY_H
 #define CXL_MEM_SIMULATOR_POLICY_H
 
+class Policy {};
 
-class Policy {
-
-};
-
-
-#endif //CXL_MEM_SIMULATOR_POLICY_H
+#endif // CXL_MEM_SIMULATOR_POLICY_H
