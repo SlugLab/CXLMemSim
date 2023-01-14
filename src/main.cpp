@@ -5,6 +5,7 @@
 #include "info.h"
 #include "logging.h"
 #include "monitor.h"
+#include "policy.h"
 #include <cmath>
 #include <cxxopts.hpp>
 #include <range/v3/view.hpp>
@@ -12,6 +13,7 @@
 int main(int argc, char *argv[]) {
     Monitor monitor;
     Info info;
+    NaivePolicy policy;
     Helper helper;
     cxxopts::Options options("CXL-MEM-Simulator",
                              "For simulation of CXL.mem Type 3 on Broadwell, Skylake, and Shaphire Rapids");
@@ -22,7 +24,7 @@ int main(int argc, char *argv[]) {
         "p,pebsperiod", "The pebs sample period", cxxopts::value<int>()->default_value("1"))(
         "f,frequency", "The frequency for the running thread", cxxopts::value<int>()->default_value("4"))(
         "l,latency", "The simulated latency by epoch based calculation for injected latency",
-        cxxopts::value<std::vector<int>>()->default_value("100"))(
+        cxxopts::value<std::vector<int>>()->default_value("100,150"))(
         "w,weight", "The simulated weight for multiplying with the LLC miss",
         cxxopts::value<std::vector<int>>()->default_value("4"))(
         "b,bandwidth", "The simulated bandwidth by linear regression",
@@ -55,10 +57,13 @@ int main(int argc, char *argv[]) {
     auto frequency = result["frequency"].as<int>();
 
     LOG(DEBUG) << fmt::format("tnum:{}, intrval:{}\n", CPU_COUNT(&use_cpuset), interval);
-    for (auto const &[idx, value] : latency | ranges::views::enumerate) {
-        LOG(DEBUG) << fmt::format("dram_latency:{}\n", value);
-        LOG(DEBUG) << fmt::format("weight:{}\n", weight[idx]);
-        LOG(DEBUG) << fmt::format("bandwidth:{}\n", bandwidth[idx]);
+    for (auto const &[idx, value] : weight | ranges::views::enumerate) {
+
+        LOG(DEBUG) << fmt::format("memory_region:{}\n", idx);
+        LOG(DEBUG) << fmt::format(" read_latency:{}\n", latency[idx * 2]);
+        LOG(DEBUG) << fmt::format(" write_latency:{}\n", latency[idx * 2 + 1]);
+        LOG(DEBUG) << fmt::format(" weight:{}\n", value);
+        LOG(DEBUG) << fmt::format(" bandwidth:{}\n", bandwidth[idx]);
     }
     LOG(DEBUG) << fmt::format("cpu_freq:{}\n", frequency);
     // LOG(DEBUG) << fmt::format("num_of_cbo:{}\n", frequency);

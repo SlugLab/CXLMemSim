@@ -3,3 +3,10 @@
 //
 
 #include "cxlcounter.h"
+
+enum CXLFabricEvent{
+    MISS,
+    FWD,
+    HITM,
+    HITN,
+};
