@@ -4,8 +4,9 @@
 
 #ifndef CXL_MEM_SIMULATOR_UNCORE_H
 #define CXL_MEM_SIMULATOR_UNCORE_H
-//#include <cstdint>
+#include <cstdint>
 #include "helper.h"
+struct PerfInfo;
 class Uncore {
     uint32_t unc_idx;
     struct PerfInfo perf;

@@ -186,3 +186,14 @@ double Helper::cpu_frequency() {
 
     return cpu_mhz;
 }
+PerfConfig Helper::detect_model( uint32_t model) {
+    int i = 0;
+    LOG(INFO) << fmt::format("Detecting model...{}\n", model);
+    while (model_ctx[i].model != CPU_MDL_END) {
+        if (model_ctx[i].model == model) {
+            return model_ctx[i].perf_conf;
+        }
+        i++;
+    }
+    throw;
+}

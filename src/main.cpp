@@ -6,17 +6,38 @@
 #include "logging.h"
 #include "monitor.h"
 #include "policy.h"
+#include <cerrno>
+#include <cinttypes>
+#include <clocale>
 #include <cmath>
+#include <csignal>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
 #include <cxxopts.hpp>
+#include <fcntl.h>
+#include <getopt.h>
 #include <range/v3/view.hpp>
+#include <sys/mman.h>
+#include <sys/poll.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#define SOCKET_PATH "/tmp/cxl_mem_simulator.sock"
 
 int main(int argc, char *argv[]) {
-    Monitor monitor;
     Info info;
     NaivePolicy policy;
     Helper helper;
     cxxopts::Options options("CXL-MEM-Simulator",
-                             "For simulation of CXL.mem Type 3 on Broadwell, Skylake, and Shaphire Rapids");
+                             "For simulation of CXL.mem Type 3 on Broadwell, Skylake, and Saphire Rapids");
     options.add_options()("t,target", "The script file to execute", cxxopts::value<std::string>()->default_value("ls"))(
         "h,help", "The value for epoch value", cxxopts::value<bool>()->default_value("false"))(
         "i,interval", "The value for epoch value", cxxopts::value<int>()->default_value("20"))(
@@ -65,8 +86,20 @@ int main(int argc, char *argv[]) {
         LOG(DEBUG) << fmt::format(" weight:{}\n", value);
         LOG(DEBUG) << fmt::format(" bandwidth:{}\n", bandwidth[idx]);
     }
+    int sock;
+    struct sockaddr_un addr {};
+
+    sock = socket(AF_UNIX, SOCK_DGRAM, 0);
+    addr.sun_family = AF_UNIX;
+    strcpy(addr.sun_path, SOCKET_PATH);
+    remove(addr.sun_path);
+    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
+        LOG(ERROR) << "Failed to execute. Can't bind to a socket.";
+        exit(1);
+    }
     LOG(DEBUG) << fmt::format("cpu_freq:{}\n", frequency);
     // LOG(DEBUG) << fmt::format("num_of_cbo:{}\n", frequency);
+    Monitors monitors{CPU_COUNT(&use_cpuset), &use_cpuset, static_cast<int>(weight.size()), helper};
 
     return 0;
 }
