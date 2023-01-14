@@ -35,7 +35,7 @@ public:
     size_t mplen;
     struct perf_event_mmap_page *mp;
     PEBS(pid_t, uint64_t);
-    int read(const int, struct RegionInfo *, struct PEBSElem *);
+    int read(int, struct RegionInfo *, struct PEBSElem *);
     int start();
     int stop();
     int finish();

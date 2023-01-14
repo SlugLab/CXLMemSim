@@ -4,11 +4,10 @@
 
 #include "monitor.h"
 Monitors::Monitors(const int tnum, cpu_set_t *use_cpuset, const int nmem, Helper h) {
-    int i, j;
-    disable(i);
     mon = std::vector<Monitor>(tnum, Monitor(nmem, h));
     /* init mon */
-    for (i = 0; i < tnum; i++) {
+    for (int i = 0; i < tnum; i++) {
+        disable(i);
         int cpucnt = 0;
         int cpuid = 0;
         for (cpuid = 0; cpuid < h.cpu; cpuid++) {
@@ -83,7 +82,7 @@ int Monitors::enable(const uint32_t tgid, const uint32_t tid, bool is_process, u
 
     if (pebs_sample_period) {
         /* pebs start */
-        mon[target].pebs_ctx = PEBS(tid, pebs_sample_period);
+        mon[target].pebs_ctx = new PEBS(tid, pebs_sample_period);
         LOG(DEBUG) << fmt::format("Process [tgid={}, tid={}]: enable to pebs.\n", mon[target].tgid, mon[target].tid);
     }
 
@@ -104,13 +103,15 @@ void Monitors::disable(const uint32_t target) {
     mon[target].injected_delay.tv_nsec = 0;
     mon[target].end_exec_ts.tv_sec = 0;
     mon[target].end_exec_ts.tv_nsec = 0;
-    mon[target].pebs_ctx.fd = -1;
-    mon[target].pebs_ctx.pid = -1;
-    mon[target].pebs_ctx.seq = 0;
-    mon[target].pebs_ctx.rdlen = 0;
-    mon[target].pebs_ctx.seq = 0;
-    mon[target].pebs_ctx.mp = nullptr;
-    mon[target].pebs_ctx.sample_period = 0;
+    if (mon[target].pebs_ctx != nullptr) {
+            mon[target].pebs_ctx->fd = -1;
+            mon[target].pebs_ctx->pid = -1;
+            mon[target].pebs_ctx->seq = 0;
+            mon[target].pebs_ctx->rdlen = 0;
+            mon[target].pebs_ctx->seq = 0;
+            mon[target].pebs_ctx->mp = nullptr;
+            mon[target].pebs_ctx->sample_period = 0;
+        }
     for (int i = 0; i < mon[target].num_of_region; i++) {
         for (auto &j : mon[target].elem) {
             j.pebs.sample[i] = 0;
@@ -148,7 +149,7 @@ int Monitors::terminate(const uint32_t tgid, const uint32_t tid, const int32_t t
         }
         target = i;
         /* pebs stop */
-        mon[target].pebs_ctx.finish();
+        mon[target].pebs_ctx->finish();
 
         /* Save end time */
         if (mon[target].end_exec_ts.tv_sec == 0 && mon[target].end_exec_ts.tv_nsec == 0) {
@@ -253,7 +254,7 @@ void Monitor::clear_time(struct timespec *time) {
 Monitor::Monitor(const int nmem, Helper h)
     : tgid(0), tid(0), cpu_core(0), status(0), injected_delay({0}), wasted_delay({0}), squabble_delay({0}),
       before(nullptr), after(nullptr), total_delay(0), start_exec_ts({0}), end_exec_ts({0}), is_process(false),
-      num_of_region(0),  pebs_ctx(0, 0) {
+      num_of_region(0), pebs_ctx(nullptr) {
     for (auto &j : this->elem) {
         j.cpus = (struct CPUElem *)calloc(sizeof(struct CPUElem), h.cpu);
         if (j.cpus == nullptr) {

@@ -5,8 +5,7 @@
 #ifndef CXL_MEM_SIMULATOR_HELPER_H
 #define CXL_MEM_SIMULATOR_HELPER_H
 
-//#include"uncore.h"
-//#include"incore.h"
+#include "logging.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -22,6 +21,7 @@
 enum { CPU_MDL_BDX = 63, CPU_MDL_SKX = 85, CPU_MDL_SPR = 143, CPU_MDL_ADL = 151, CPU_MDL_END = 0x0ffff };
 class Incore;
 class Uncore;
+class Helper;
 struct EmuCXLLatency {
     double read;
     double write;
@@ -72,9 +72,12 @@ struct Elem {
     struct PEBSElem pebs;
 };
 
-struct PMUInfo {
-    struct Uncore *cbos;
-    struct Incore *cpus;
+class PMUInfo {
+public:
+    Uncore *cbos;
+    Incore *cpus;
+    int start_all_pmcs(Helper h);
+    int stop_all_pmcs(Helper h);
 };
 
 struct RegionInfo {
@@ -90,6 +93,8 @@ struct PerfConfig {
     uint64_t cpu_l2stall_config;
     uint64_t cpu_llcl_hits_config;
     uint64_t cpu_llcl_miss_config;
+    uint64_t cpu_bandwidth_read_config;
+    uint64_t cpu_bandwidth_write_config;
 };
 
 struct ModelContext {
@@ -104,6 +109,7 @@ public:
     double cpu_freq;
     Helper() {
         cpu = num_of_cpu();
+        LOG(DEBUG)<<cpu;
         cbo = num_of_cbo();
         cpu_freq = cpu_frequency();
     }

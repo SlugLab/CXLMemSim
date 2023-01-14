@@ -38,6 +38,18 @@ const struct ModelContext model_ctx[] = {{CPU_MDL_BDX,
                                                *   cpu/umask=0x1,event=0xd3/
                                                */
                                               0x01d3,
+                                              /*
+                                               * cpu_bandwidth_read_config:
+                                               *   UNC_M_CAS_COUNT.RD * 64
+                                               *   cpu/umask=0x03,event=0x04/
+                                               */
+                                              0x0304,
+                                              /*
+                                               * cpu_bandwidth_write_config:
+                                               *   UNC_M_CAS_COUNT.WR * 64
+                                               *   cpu/umask=0x0c,event=0x04/
+                                               */
+                                              0x0c04
                                           }},
                                          {CPU_MDL_SKX,
                                           {
@@ -73,6 +85,18 @@ const struct ModelContext model_ctx[] = {{CPU_MDL_BDX,
                                                *   cpu/umask=0x1,event=0xd3/
                                                */
                                               0x01d3,
+                                              /*
+                                               * cpu_bandwidth_read_config:
+                                               *   UNC_M_CAS_COUNT.RD * 64
+                                               *   cpu/umask=0x03,event=0x04/
+                                               */
+                                              0x0304,
+                                              /*
+                                               * cpu_bandwidth_write_config:
+                                               *   UNC_M_CAS_COUNT.WR * 64
+                                               *   cpu/umask=0x0c,event=0x04/
+                                               */
+                                              0x0c04
                                           }},
                                          {CPU_MDL_SPR,
                                           {
@@ -108,6 +132,18 @@ const struct ModelContext model_ctx[] = {{CPU_MDL_BDX,
                                                *   cpu/umask=0x1,event=0xd3/
                                                */
                                               0x01d3,
+                                              /*
+                                               * cpu_bandwidth_read_config:
+                                               *   UNC_M_CAS_COUNT.RD * 64
+                                               *   cpu/umask=0xcf,event=0x05/
+                                               */
+                                              0xcf05,
+                                              /*
+                                               * cpu_bandwidth_write_config:
+                                               *   UNC_M_CAS_COUNT.WR * 64
+                                               *   cpu/umask=0xf0,event=0x05/
+                                               */
+                                              0xf005
                                           }},
                                          {CPU_MDL_ADL,
                                           {
@@ -143,6 +179,18 @@ const struct ModelContext model_ctx[] = {{CPU_MDL_BDX,
                                                *   cpu/umask=0x1,event=0xd3/
                                                */
                                               0x01d3,
+                                              /*
+                                               * cpu_bandwidth_read_config:
+                                               *   UNC_M_CAS_COUNT_RD * 64
+                                               *   cpu/umask=0x00,event=0x22/
+                                               */
+                                              0x0022,
+                                              /*
+                                               * cpu_bandwidth_write_config:
+                                               *   UNC_M_CAS_COUNT_WR * 64
+                                               *   cpu/umask=0x00,event=0x23/
+                                               */
+                                              0x0023
                                           }},
                                          {CPU_MDL_END, {0}}};
 
@@ -196,4 +244,17 @@ PerfConfig Helper::detect_model( uint32_t model) {
         i++;
     }
     throw;
+}
+int PMUInfo::start_all_pmcs(Helper h) {
+    /* enable all pmcs to count */
+    int i, r;
+
+    for (i = 0; i < h.num_of_cpu(); i++) {
+        r = this->cpus[i].start_pmc();
+        if (r < 0) {
+            fprintf(stderr, "%s start_pmc failed. cpu:%d\n", __func__, i);
+            return r;
+        }
+    }
+    return 0;
 }

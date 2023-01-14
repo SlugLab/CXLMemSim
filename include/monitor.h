@@ -46,9 +46,9 @@ public:
     pid_t tid;
     uint32_t cpu_core;
     char status;
-    struct timespec injected_delay;
-    struct timespec wasted_delay;
-    struct timespec squabble_delay;
+    struct timespec injected_delay; // recorded time for injected
+    struct timespec wasted_delay; // recorded time for calling between continue and calculation
+    struct timespec squabble_delay; // inj-was
     struct Elem elem[2];
     struct Elem *before, *after;
     double total_delay;
@@ -56,11 +56,11 @@ public:
     bool is_process;
     int num_of_region;
     struct RegionInfo *region_info;
-    struct PEBS pebs_ctx;
+    struct PEBS *pebs_ctx;
 
     Monitor(const int nmem, Helper h);
 
-    int set_region_info(const int, struct RegionInfo *);
+    int set_region_info(int, struct RegionInfo *);
     void stop();
     void run();
     void clear_time(struct timespec *);
