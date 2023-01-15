@@ -5,7 +5,9 @@
 #ifndef CXL_MEM_SIMULATOR_HELPER_H
 #define CXL_MEM_SIMULATOR_HELPER_H
 
+#include "incore.h"
 #include "logging.h"
+#include "uncore.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -16,6 +18,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <vector>
 
 /* CPU Models */
 enum { CPU_MDL_BDX = 63, CPU_MDL_SKX = 85, CPU_MDL_SPR = 143, CPU_MDL_ADL = 151, CPU_MDL_END = 0x0ffff };
@@ -30,15 +33,6 @@ struct EmuCXLLatency {
 struct EmuCXLBandwidth {
     double read;
     double write;
-};
-
-struct PerfInfo {
-    int fd;
-    int group_fd;
-    int cpu;
-    pid_t pid;
-    unsigned long flags;
-    struct perf_event_attr attr;
 };
 
 struct CBOElem {
@@ -74,15 +68,16 @@ struct Elem {
 
 class PMUInfo {
 public:
-    Uncore *cbos;
-    Incore *cpus;
-    int start_all_pmcs(Helper h);
-    int stop_all_pmcs(Helper h);
-};
-
-struct RegionInfo {
-    uint64_t addr;
-    uint64_t size;
+    std::vector<Uncore> cbos;
+    std::vector<Incore> cpus;
+    Helper *helper;
+    PMUInfo(pid_t pid, Helper *h);
+    int start_all_pmcs();
+    int stop_all_pmcs();
+    int init_all_pmcs(const pid_t pid);
+    void fini_all_pmcs();
+    int freeze_counters_cbo_all();
+    int unfreeze_counters_cbo_all();
 };
 
 struct PerfConfig {
@@ -107,12 +102,7 @@ public:
     int cpu;
     int cbo;
     double cpu_freq;
-    Helper() {
-        cpu = num_of_cpu();
-        LOG(DEBUG)<<cpu;
-        cbo = num_of_cbo();
-        cpu_freq = cpu_frequency();
-    }
+    Helper();
     int num_of_cpu();
     int num_of_cbo();
     double cpu_frequency();

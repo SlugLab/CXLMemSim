@@ -43,6 +43,8 @@ int main(int argc, char *argv[]) {
         "i,interval", "The value for epoch value", cxxopts::value<int>()->default_value("20"))(
         "c,cpuset", "The CPUSET for CPU to set affinity on", cxxopts::value<std::vector<int>>()->default_value("0,1"))(
         "p,pebsperiod", "The pebs sample period", cxxopts::value<int>()->default_value("1"))(
+        "m,mode", "Page mode or cacheline mode", cxxopts::value<std::string>()->default_value("p"))(
+        "to,topology", "The newick tree input for the CXL memory expander topology", cxxopts::value<std::string>()->default_value("(1)"))(
         "f,frequency", "The frequency for the running thread", cxxopts::value<int>()->default_value("4"))(
         "l,latency", "The simulated latency by epoch based calculation for injected latency",
         cxxopts::value<std::vector<int>>()->default_value("100,150"))(

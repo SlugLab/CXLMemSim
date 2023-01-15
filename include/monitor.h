@@ -7,6 +7,7 @@
 
 #include "helper.h"
 #include "pebs.h"
+#include "cxlregion.h"
 #include <cerrno>
 #include <csignal>
 #include <cstring>
@@ -55,12 +56,12 @@ public:
     struct timespec start_exec_ts, end_exec_ts;
     bool is_process;
     int num_of_region;
-    struct RegionInfo *region_info;
+    struct CXLRegion *region_info;
     struct PEBS *pebs_ctx;
 
     Monitor(const int nmem, Helper h);
 
-    int set_region_info(int, struct RegionInfo *);
+    int set_region_info(int, struct CXLRegion *);
     void stop();
     void run();
     void clear_time(struct timespec *);

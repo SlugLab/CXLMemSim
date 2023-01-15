@@ -25,7 +25,7 @@ long perf_event_open(struct perf_event_attr *event_attr, pid_t pid, int cpu, int
 }
 PEBS::PEBS(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_period) {
     // Configure perf_event_attr struct
-    struct perf_event_attr pe;
+    struct perf_event_attr pe {};
     memset(&pe, 0, sizeof(struct perf_event_attr));
     pe.type = PERF_TYPE_RAW;
     pe.size = sizeof(struct perf_event_attr);
@@ -42,7 +42,7 @@ PEBS::PEBS(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_p
     int group_fd = -1;
     unsigned long flags = 0;
 
-    this->fd = perf_event_open(&pe, this->pid, cpu, group_fd, flags);
+    this->fd = static_cast<int>(perf_event_open(&pe, this->pid, cpu, group_fd, flags));
     if (this->fd == -1) {
         LOG(ERROR) << "perf_event_open";
         throw;
@@ -58,7 +58,7 @@ PEBS::PEBS(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_p
 
     this->start();
 }
-int PEBS::read(const int nreg, struct RegionInfo *reg_info, struct PEBSElem *elem) {
+int PEBS::read(const int nreg, struct CXLRegion *reg_info, struct PEBSElem *elem) {
     struct perf_event_mmap_page *mp = this->mp;
 
     if (this->fd < 0) {
@@ -157,11 +157,11 @@ int PEBS::stop() {
     }
     return 0;
 }
-int PEBS::finish() {
+PEBS::~PEBS() {
     this->stop();
 
     if (this->fd < 0) {
-        return 0;
+        return;
     }
 
     if (this->mp != MAP_FAILED) {
@@ -176,5 +176,4 @@ int PEBS::finish() {
     }
 
     this->pid = -1;
-    return 0;
 }

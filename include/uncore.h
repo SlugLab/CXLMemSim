@@ -4,12 +4,19 @@
 
 #ifndef CXL_MEM_SIMULATOR_UNCORE_H
 #define CXL_MEM_SIMULATOR_UNCORE_H
-#include <cstdint>
 #include "helper.h"
-struct PerfInfo;
+#include "perf.h"
+#include <cstdint>
 class Uncore {
+public:
     uint32_t unc_idx;
-    struct PerfInfo perf;
+    PerfInfo perf;
+    Uncore(const uint32_t unc_idx);
+    ~Uncore();
+
+    int init_all_cbos();
+    void fini_all_cbos();
+    int read_cbo_elems(struct CBOElem *elem);
 };
 
 #endif // CXL_MEM_SIMULATOR_UNCORE_H

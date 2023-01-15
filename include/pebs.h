@@ -30,15 +30,15 @@ public:
     int fd;
     int pid;
     uint64_t sample_period;
-    uint32_t seq;
-    size_t rdlen;
+    uint32_t seq{};
+    size_t rdlen{};
     size_t mplen;
     struct perf_event_mmap_page *mp;
     PEBS(pid_t, uint64_t);
-    int read(int, struct RegionInfo *, struct PEBSElem *);
+    ~PEBS();
+    int read(int, struct CXLRegion *, struct PEBSElem *);
     int start();
     int stop();
-    int finish();
 };
 
 #endif // CXL_MEM_SIMULATOR_PEBS_H

@@ -6,7 +6,7 @@
 #define CXL_MEM_SIMULATOR_CXLENDPOINT_H
 
 
-class cxlendpoint {
+class CXLEndPoint {
 
 };
 

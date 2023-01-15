@@ -104,14 +104,14 @@ void Monitors::disable(const uint32_t target) {
     mon[target].end_exec_ts.tv_sec = 0;
     mon[target].end_exec_ts.tv_nsec = 0;
     if (mon[target].pebs_ctx != nullptr) {
-            mon[target].pebs_ctx->fd = -1;
-            mon[target].pebs_ctx->pid = -1;
-            mon[target].pebs_ctx->seq = 0;
-            mon[target].pebs_ctx->rdlen = 0;
-            mon[target].pebs_ctx->seq = 0;
-            mon[target].pebs_ctx->mp = nullptr;
-            mon[target].pebs_ctx->sample_period = 0;
-        }
+        mon[target].pebs_ctx->fd = -1;
+        mon[target].pebs_ctx->pid = -1;
+        mon[target].pebs_ctx->seq = 0;
+        mon[target].pebs_ctx->rdlen = 0;
+        mon[target].pebs_ctx->seq = 0;
+        mon[target].pebs_ctx->mp = nullptr;
+        mon[target].pebs_ctx->sample_period = 0;
+    }
     for (int i = 0; i < mon[target].num_of_region; i++) {
         for (auto &j : mon[target].elem) {
             j.pebs.sample[i] = 0;
@@ -149,7 +149,7 @@ int Monitors::terminate(const uint32_t tgid, const uint32_t tid, const int32_t t
         }
         target = i;
         /* pebs stop */
-        mon[target].pebs_ctx->finish();
+        delete mon[target].pebs_ctx;
 
         /* Save end time */
         if (mon[target].end_exec_ts.tv_sec == 0 && mon[target].end_exec_ts.tv_nsec == 0) {
@@ -186,7 +186,7 @@ bool Monitors::check_continue(const uint32_t target, const struct timespec w) {
     return false;
 }
 
-int Monitor::set_region_info(const int nreg, struct RegionInfo *ri) {
+int Monitor::set_region_info(const int nreg, struct CXLRegion *ri) {
     int i;
 
     this->num_of_region = nreg;
@@ -272,7 +272,7 @@ Monitor::Monitor(const int nmem, Helper h)
             throw;
         }
     }
-    this->region_info = (struct RegionInfo *)calloc(sizeof(struct RegionInfo), nmem);
+    this->region_info = (struct CXLRegion *)calloc(sizeof(struct CXLRegion), nmem);
     if (this->region_info == nullptr) {
         LOG(ERROR) << "calloc";
         throw;
