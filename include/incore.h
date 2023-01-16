@@ -27,7 +27,7 @@ public:
     void init_cpu_llcl_miss(const pid_t pid, const int cpu);
     void init_cpu_mem_read(const pid_t pid, const int cpu);
     void init_cpu_mem_write(const pid_t pid, const int cpu);
-    void init_cpu_mmap_count(const pid_t pid, const int cpu);
+    void init_cpu_ebpf(const pid_t pid, const int cpu);
 
     int read_cpu_elems(struct CPUElem *cpu_elem);
 };

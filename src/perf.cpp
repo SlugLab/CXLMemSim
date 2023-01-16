@@ -403,11 +403,11 @@ std::map<unsigned long, std::tuple<unsigned long, unsigned long long>> PerfInfo:
     unsigned long size;
     unsigned long address;
     unsigned long long time;
-    char* unused;
+    char *unused;
     std::string line;
-    while ( i!=EOF) {
-        std::getline(fp, line)
-        i = std::sscanf(line.c_str(), "%c bpf_trace_printk: %lu %lu %llu",unused, &size, &address, &time);
+    while (i != EOF) {
+        std::getline(fp, line) i =
+            std::sscanf(line.c_str(), "%c bpf_trace_printk: %lu %lu %llu", unused, &size, &address, &time);
         if (i == 1) {
             res[address] = std::make_tuple(size, time);
         }

@@ -53,7 +53,7 @@ void Incore::init_cpu_mem_read(const pid_t pid, const int cpu) {
 void Incore::init_cpu_mem_write(const pid_t pid, const int cpu) {
     this->perf[5] = init_incore_perf(pid, cpu, perf_config->cpu_bandwidth_write_config, 0);
 }
-void Incore::init_cpu_mmap_count(const pid_t pid, const int cpu) { this->perf[6] = init_incore_bpf_perf(pid, cpu); }
+void Incore::init_cpu_ebpf(const pid_t pid, const int cpu) { this->perf[6] = init_incore_bpf_perf(pid, cpu); }
 int Incore::read_cpu_elems(struct CPUElem *elem) {
     ssize_t r;
 
@@ -107,5 +107,5 @@ Incore::Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config) :
     this->init_cpu_llcl_miss(pid, cpu);
     this->init_cpu_mem_read(pid, cpu);
     this->init_cpu_mem_write(pid, cpu);
-    this->init_cpu_mmap_count(pid, cpu);
+    this->init_cpu_ebpf(pid, cpu);
 }

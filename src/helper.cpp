@@ -232,6 +232,7 @@ PerfConfig Helper::detect_model(uint32_t model) {
         }
         i++;
     }
+    LOG(ERROR) << "Failed to execute. This CPU model is not supported. Update src/types.c\n";
     throw;
 }
 Helper::Helper() : perf_conf({}) {
@@ -239,6 +240,16 @@ Helper::Helper() : perf_conf({}) {
     LOG(DEBUG) << cpu;
     cbo = num_of_cbo();
     cpu_freq = cpu_frequency();
+}
+void Helper::detach_children() {
+    struct sigaction sa;
+
+    sa.sa_handler = noop_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART | SA_NOCLDWAIT;
+    if (sigaction(SIGCHLD, &sa, NULL) < 0) {
+        DEBUG_PRINT("Failed to sigaction: %s", strerror(errno));
+    }
 }
 int PMUInfo::start_all_pmcs() {
     /* enable all pmcs to count */
@@ -252,7 +263,7 @@ int PMUInfo::start_all_pmcs() {
     }
     return 0;
 }
-PMUInfo::PMUInfo(pid_t pid, Helper *helper, struct PerfConfig* perf_config) : helper(helper) {
+PMUInfo::PMUInfo(pid_t pid, Helper *helper, struct PerfConfig *perf_config) : helper(helper) {
     int i, r, n;
 
     n = helper->num_of_cbo();
@@ -271,7 +282,7 @@ PMUInfo::PMUInfo(pid_t pid, Helper *helper, struct PerfConfig* perf_config) : he
     n = helper->num_of_cpu();
 
     for (i = 0; i < n; i++) {
-        this->cpus.emplace_back(pid, i,perf_config);
+        this->cpus.emplace_back(pid, i, perf_config);
     }
 
     r = this->start_all_pmcs();
@@ -286,7 +297,7 @@ int PMUInfo::stop_all_pmcs() {
     for (i = 0; i < helper->num_of_cpu(); i++) {
         r = this->cpus[i].stop();
         if (r < 0) {
-            fprintf(stderr, "%s stop failed. cpu:%d\n", __func__, i);
+            LOG(ERROR) << fmt::format("stop failed. cpu:{}\n", i);
             return r;
         }
     }
@@ -299,7 +310,7 @@ int PMUInfo::unfreeze_counters_cbo_all() {
     for (i = 0; i < helper->num_of_cbo(); i++) {
         r = this->cbos[i].perf.start();
         if (r < 0) {
-            LOG(DEBUG) << fmt::format("perf_start failed. cbo:{}\n", i);
+            LOG(ERROR) << fmt::format("perf_start failed. cbo:{}\n", i);
             return r;
         }
     }
@@ -311,7 +322,7 @@ int PMUInfo::freeze_counters_cbo_all() {
     for (i = 0; i < helper->num_of_cbo(); i++) {
         r = this->cbos[i].perf.stop();
         if (r < 0) {
-            LOG(DEBUG) << fmt::format("perf_stop failed. cbo:{}\n", i);
+            LOG(ERROR) << fmt::format("perf_stop failed. cbo:{}\n", i);
             return r;
         }
     }

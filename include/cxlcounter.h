@@ -18,7 +18,7 @@ union CXLRemoteEvent {
     CXLSwitchEvent switch_event;
 };// switch num
 class CXLCounter {
-    std::vector<CXLRemoteEvent> cxl_mem_load_miss_retired_remote_dram;
+    std::vector<CXLRemoteEvent> cxl_mem_load_miss_retired_remote_dram; // Only the first
     std::vector<CXLRemoteEvent> cxl_mem_load_miss_retired_remote_fwd;
     uint64_t cxl_mem_miss_retired_local_dram;
 

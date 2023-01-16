@@ -13,18 +13,18 @@ void CXLController::construct_topo(std::string newick_tree) {
     counter = new CXLCounter(num_switches);
 }
 void CXLController::insert_end_point(CXLEndPoint *end_point) { this->end_points.emplace_back(end_point); }
-void CXLController::construct_one(char *newick_tree, int &index, int end, CXLEndPoint &node) {
+void CXLController::construct_one(char *newick_tree, int &index, int end, CXLEndPoint *node) {
     if (newick_tree[index] != '(') {
         LOG(ERROR) << "topology input error\n";
         throw;
     }
     // left child name
-    node.lChild = new TreeNode;
-    node.lChild->father = &node;
-    node.lChild->cFlag = false;
+    node->lChild = new TreeNode;
+    node->lChild->father = node;
+    node->lChild->cFlag = false;
 
     if (newick_tree[++index] == '(') {
-        construct_one(newick_tree, index, end, *(node.lChild));
+        construct_one(newick_tree, index, end, node->lChild);
         while (newick_tree[index] != ':')
             index++; // pass the number
     } else {
