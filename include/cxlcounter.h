@@ -24,5 +24,4 @@ class CXLCPUEvent {
     explicit CXLCPUEvent(int num);
 };
 
-
 #endif // CXL_MEM_SIMULATOR_CXLCOUNTER_H

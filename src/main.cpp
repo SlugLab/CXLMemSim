@@ -2,7 +2,6 @@
 // Created by victoryang00 on 1/12/23.
 //
 #include "helper.h"
-#include "info.h"
 #include "logging.h"
 #include "monitor.h"
 #include "policy.h"
@@ -33,8 +32,6 @@
 #define SOCKET_PATH "/tmp/cxl_mem_simulator.sock"
 
 int main(int argc, char *argv[]) {
-    Info info;
-    NaivePolicy policy;
     Helper helper;
     cxxopts::Options options("CXL-MEM-Simulator",
                              "For simulation of CXL.mem Type 3 on Broadwell, Skylake, and Saphire Rapids");
@@ -78,6 +75,7 @@ int main(int argc, char *argv[]) {
     auto weight = result["weight"].as<std::vector<int>>();
     auto bandwidth = result["bandwidth"].as<std::vector<int>>();
     auto frequency = result["frequency"].as<int>();
+    auto topology = result["topology"].as<std::string>();
 
     LOG(DEBUG) << fmt::format("tnum:{}, intrval:{}\n", CPU_COUNT(&use_cpuset), interval);
     for (auto const &[idx, value] : weight | ranges::views::enumerate) {
@@ -90,6 +88,7 @@ int main(int argc, char *argv[]) {
     }
     int sock;
     struct sockaddr_un addr {};
+    InterleavePolicy policy{topology};
 
     sock = socket(AF_UNIX, SOCK_DGRAM, 0);
     addr.sun_family = AF_UNIX;

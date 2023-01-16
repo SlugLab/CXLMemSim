@@ -3,3 +3,4 @@
 //
 
 #include "policy.h"
+void Policy::construct_topo(std::string) {}

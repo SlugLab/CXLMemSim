@@ -15,18 +15,21 @@ union CPUID_INFO {
 
 class Incore {
 public:
-    PerfInfo perf[4];
-
+    PerfInfo perf[7];
+    PerfConfig* perf_config;
     Incore(const pid_t pid, const int cpu);
     ~Incore();
-    int start_pmc();
-    int stop_pmc();
-    int init_all_dram_rds(const pid_t pid, const int cpu);
-    int init_cpu_l2stall(const pid_t pid, const int cpu);
-    int init_cpu_llcl_hits(const pid_t pid, const int cpu);
-    int init_cpu_llcl_miss(const pid_t pid, const int cpu);
+    int start();
+    int stop();
+    void init_all_dram_rds(const pid_t pid, const int cpu);
+    void init_cpu_l2stall(const pid_t pid, const int cpu);
+    void init_cpu_llcl_hits(const pid_t pid, const int cpu);
+    void init_cpu_llcl_miss(const pid_t pid, const int cpu);
+    void init_cpu_mem_read(const pid_t pid, const int cpu);
+    void init_cpu_mem_write(const pid_t pid, const int cpu);
+    void init_cpu_mmap_count(const pid_t pid, const int cpu);
 
-    int read_cpu_elems(struct __incore *inc, struct __cpu_elem *cpu_elem);
+    int read_cpu_elems( struct CPUElem *cpu_elem);
 };
 
 void pcm_cpuid(unsigned leaf, CPUID_INFO *info);

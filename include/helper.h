@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fnmatch.h>
 #include <linux/perf_event.h>
+#include <map>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -44,6 +45,9 @@ struct CPUElem {
     uint64_t cpu_l2stall_t;
     uint64_t cpu_llcl_hits;
     uint64_t cpu_llcl_miss;
+    uint64_t cpu_bandwidth_read;
+    uint64_t cpu_bandwidth_write;
+    std::map<uint64_t, std::tuple<uint64_t, uint64_t>> cpu_mmap_address_length;
 };
 
 struct PEBSElem {
@@ -72,10 +76,9 @@ public:
     std::vector<Incore> cpus;
     Helper *helper;
     PMUInfo(pid_t pid, Helper *h);
+    ~PMUInfo();
     int start_all_pmcs();
     int stop_all_pmcs();
-    int init_all_pmcs(const pid_t pid);
-    void fini_all_pmcs();
     int freeze_counters_cbo_all();
     int unfreeze_counters_cbo_all();
 };
@@ -102,10 +105,11 @@ public:
     int cpu;
     int cbo;
     double cpu_freq;
+    PerfConfig perf_conf;
     Helper();
-    int num_of_cpu();
-    int num_of_cbo();
-    double cpu_frequency();
+    static int num_of_cpu();
+    static int num_of_cbo();
+    double cpu_frequency() const;
     PerfConfig detect_model(uint32_t);
 };
 

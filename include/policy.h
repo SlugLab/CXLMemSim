@@ -7,16 +7,20 @@
 #include "helper.h"
 #include <map>
 class Policy {
-    EmuCXLBandwidth bandwidth;
-    EmuCXLLatency latency;
-    
-    void construct_topo();
-    
+public:
+
+    Policy() {
+    }
+    void construct_topo(std::string);
 };
-// Saturate Local 90% and start interleave accrodingly the remote with topology 
+// Saturate Local 90% and start interleave accrodingly the remote with topology
 // Say 3 remote, 2 200ns, 1 400ns, will give 40% 40% 20%
-class NaivePolicy : public Policy {
+class InterleavePolicy : public Policy {
+    InterleavePolicy()
+        : Policy() {}
 
 };
+
+
 
 #endif // CXL_MEM_SIMULATOR_POLICY_H

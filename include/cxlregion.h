@@ -4,8 +4,11 @@
 
 #ifndef CXL_MEM_SIMULATOR_CXLREGION_H
 #define CXL_MEM_SIMULATOR_CXLREGION_H
-#include<cstdint>
+
+#include <cstdint>
+
 class CXLRegion {
+public:
     uint64_t addr;
     uint64_t size;
 };

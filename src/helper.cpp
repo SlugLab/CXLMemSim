@@ -205,7 +205,7 @@ int Helper::num_of_cbo() {
     return ncbo;
 }
 
-double Helper::cpu_frequency() {
+double Helper::cpu_frequency() const {
     int i = 0;
     int cpu = 0;
     double cpu_mhz = 0.0;
@@ -227,13 +227,14 @@ PerfConfig Helper::detect_model(uint32_t model) {
     LOG(INFO) << fmt::format("Detecting model...{}\n", model);
     while (model_ctx[i].model != CPU_MDL_END) {
         if (model_ctx[i].model == model) {
+            this->perf_conf = model_ctx[i].perf_conf;
             return model_ctx[i].perf_conf;
         }
         i++;
     }
     throw;
 }
-Helper::Helper() {
+Helper::Helper() : perf_conf({}) {
     cpu = num_of_cpu();
     LOG(DEBUG) << cpu;
     cbo = num_of_cbo();
@@ -242,11 +243,10 @@ Helper::Helper() {
 int PMUInfo::start_all_pmcs() {
     /* enable all pmcs to count */
     int i, r;
-
     for (i = 0; i < helper->num_of_cpu(); i++) {
-        r = this->cpus[i].start_pmc();
+        r = this->cpus[i].start();
         if (r < 0) {
-            LOG(ERROR) << fmt::format("start_pmc failed. cpu:{}\n", i);
+            LOG(ERROR) << fmt::format("start failed. cpu:{}\n", i);
             return r;
         }
     }
@@ -258,7 +258,7 @@ PMUInfo::PMUInfo(pid_t pid, Helper *helper) : helper(helper) {
     n = helper->num_of_cbo();
 
     for (i = 0; i < n; i++) {
-        this->cbos.emplace_back(Uncore(i));
+        this->cbos.emplace_back(i);
     }
 
     // unfreeze counters
@@ -271,7 +271,7 @@ PMUInfo::PMUInfo(pid_t pid, Helper *helper) : helper(helper) {
     n = helper->num_of_cpu();
 
     for (i = 0; i < n; i++) {
-         this->cpus.emplace_back(Incore(pid,i));
+        this->cpus.emplace_back(pid, i);
     }
 
     r = this->start_all_pmcs();
@@ -279,9 +279,20 @@ PMUInfo::PMUInfo(pid_t pid, Helper *helper) : helper(helper) {
         LOG(ERROR) << fmt::format("start_all_pmcs failed\n");
     }
 }
-int PMUInfo::stop_all_pmcs() { return 0; }
-int PMUInfo::init_all_pmcs(const pid_t pid) { return 0; }
-void PMUInfo::fini_all_pmcs() {}
+int PMUInfo::stop_all_pmcs() {
+    /* disable all pmcs to count */
+    int i, r;
+
+    for (i = 0; i < helper->num_of_cpu(); i++) {
+        r = this->cpus[i].stop();
+        if (r < 0) {
+            fprintf(stderr, "%s stop failed. cpu:%d\n", __func__, i);
+            return r;
+        }
+    }
+    return 0;
+}
+
 int PMUInfo::unfreeze_counters_cbo_all() {
     int i, r;
 
@@ -294,4 +305,19 @@ int PMUInfo::unfreeze_counters_cbo_all() {
     }
     return 0;
 }
-int PMUInfo::freeze_counters_cbo_all() { return 0; }
+int PMUInfo::freeze_counters_cbo_all() {
+    int i, r;
+
+    for (i = 0; i < helper->num_of_cbo(); i++) {
+        r = this->cbos[i].perf.stop();
+        if (r < 0) {
+            LOG(DEBUG) << fmt::format("perf_stop failed. cbo:{}\n", i);
+            return r;
+        }
+    }
+    return 0;
+}
+PMUInfo::~PMUInfo() {
+    this->cpus.clear();
+    this->cbos.clear();
+}

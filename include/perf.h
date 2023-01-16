@@ -25,10 +25,13 @@ public:
     unsigned long flags;
     struct perf_event_attr attr;
     PerfInfo();
+    PerfInfo(int group_fd, int cpu, pid_t pid, unsigned long flags, struct perf_event_attr attr);
     ~PerfInfo();
     ssize_t read_pmu(uint64_t *value);
     int start();
     int stop();
 };
+
+static PerfInfo init_incore_perf(const pid_t, const int, uint64_t, uint64_t);
 
 #endif // CXL_MEM_SIMULATOR_PERF_H
