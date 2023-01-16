@@ -1,6 +1,7 @@
 //
 // Created by victoryang00 on 1/12/23.
 //
+#include "cxlendpoint.h"
 #include "helper.h"
 #include "logging.h"
 #include "monitor.h"
@@ -76,19 +77,21 @@ int main(int argc, char *argv[]) {
     auto bandwidth = result["bandwidth"].as<std::vector<int>>();
     auto frequency = result["frequency"].as<int>();
     auto topology = result["topology"].as<std::string>();
-
-    LOG(DEBUG) << fmt::format("tnum:{}, intrval:{}\n", CPU_COUNT(&use_cpuset), interval);
+    InterleavePolicy policy{};
+    CXLController controller{policy,weight};
+    LOG(DEBUG) << fmt::format("tnum:{}, intrval:{}, weight:{}\n", CPU_COUNT(&use_cpuset), interval);
     for (auto const &[idx, value] : weight | ranges::views::enumerate) {
 
         LOG(DEBUG) << fmt::format("memory_region:{}\n", idx);
         LOG(DEBUG) << fmt::format(" read_latency:{}\n", latency[idx * 2]);
         LOG(DEBUG) << fmt::format(" write_latency:{}\n", latency[idx * 2 + 1]);
-        LOG(DEBUG) << fmt::format(" weight:{}\n", value);
-        LOG(DEBUG) << fmt::format(" bandwidth:{}\n", bandwidth[idx]);
+        LOG(DEBUG) << fmt::format(" read_bandwidth:{}\n", bandwidth[idx * 2]);
+        LOG(DEBUG) << fmt::format(" write_bandwidth:{}\n", bandwidth[idx * 2 + 1]);
+        CXLEndPoint *ep = new CXLEndPoint(idx, latency[idx * 2], latency[idx * 2 + 1],  bandwidth[idx * 2], bandwidth[idx * 2 + 1]);
+        controller.insert_end_point(ep);
     }
     int sock;
     struct sockaddr_un addr {};
-    InterleavePolicy policy{topology};
 
     sock = socket(AF_UNIX, SOCK_DGRAM, 0);
     addr.sun_family = AF_UNIX;

@@ -16,9 +16,9 @@ union CPUID_INFO {
 class Incore {
 public:
     PerfInfo perf[7];
-    PerfConfig* perf_config;
-    Incore(const pid_t pid, const int cpu);
-    ~Incore();
+    struct PerfConfig *perf_config;
+    Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config);
+    ~Incore() = default;
     int start();
     int stop();
     void init_all_dram_rds(const pid_t pid, const int cpu);
@@ -29,7 +29,7 @@ public:
     void init_cpu_mem_write(const pid_t pid, const int cpu);
     void init_cpu_mmap_count(const pid_t pid, const int cpu);
 
-    int read_cpu_elems( struct CPUElem *cpu_elem);
+    int read_cpu_elems(struct CPUElem *cpu_elem);
 };
 
 void pcm_cpuid(unsigned leaf, CPUID_INFO *info);

@@ -15,7 +15,7 @@ set(CMAKE_CXX_STANDARD 23)
 add_executable(CXL-MEM-Simulator ${SOURCE_FILES})
 
 include_directories(CXL-MEM-Simulator include)
-target_link_libraries(CXL-MEM-Simulator cxxopts::cxxopts fmt::fmt range-v3::range-v3)
+target_link_libraries(CXL-MEM-Simulator cxxopts::cxxopts fmt::fmt range-v3::range-v3 elf bpf)
 
 
 function(bpf prefix)

@@ -252,7 +252,7 @@ int PMUInfo::start_all_pmcs() {
     }
     return 0;
 }
-PMUInfo::PMUInfo(pid_t pid, Helper *helper) : helper(helper) {
+PMUInfo::PMUInfo(pid_t pid, Helper *helper, struct PerfConfig* perf_config) : helper(helper) {
     int i, r, n;
 
     n = helper->num_of_cbo();
@@ -271,7 +271,7 @@ PMUInfo::PMUInfo(pid_t pid, Helper *helper) : helper(helper) {
     n = helper->num_of_cpu();
 
     for (i = 0; i < n; i++) {
-        this->cpus.emplace_back(pid, i);
+        this->cpus.emplace_back(pid, i,perf_config);
     }
 
     r = this->start_all_pmcs();

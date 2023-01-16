@@ -5,9 +5,9 @@
 #ifndef SLUGALLOCATOR_MONITOR_H
 #define SLUGALLOCATOR_MONITOR_H
 
+#include "cxlcontroller.h"
 #include "helper.h"
 #include "pebs.h"
-#include "cxlregion.h"
 #include <cerrno>
 #include <csignal>
 #include <cstring>

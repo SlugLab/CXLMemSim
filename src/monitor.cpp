@@ -102,7 +102,8 @@ void Monitors::disable(const uint32_t target) {
     mon[target].injected_delay.tv_sec = 0;
     mon[target].injected_delay.tv_nsec = 0;
     mon[target].end_exec_ts.tv_sec = 0;
-    mon[target].end_exec_ts.tv_nsec = 0if (mon[target].pebs_ctx != nullptr) {
+    mon[target].end_exec_ts.tv_nsec = 0;
+    if (mon[target].pebs_ctx != nullptr) {
         mon[target].pebs_ctx->fd = -1;
         mon[target].pebs_ctx->pid = -1;
         mon[target].pebs_ctx->seq = 0;

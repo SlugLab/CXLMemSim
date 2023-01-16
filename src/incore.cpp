@@ -53,40 +53,53 @@ void Incore::init_cpu_mem_read(const pid_t pid, const int cpu) {
 void Incore::init_cpu_mem_write(const pid_t pid, const int cpu) {
     this->perf[5] = init_incore_perf(pid, cpu, perf_config->cpu_bandwidth_write_config, 0);
 }
+void Incore::init_cpu_mmap_count(const pid_t pid, const int cpu) { this->perf[6] = init_incore_bpf_perf(pid, cpu); }
 int Incore::read_cpu_elems(struct CPUElem *elem) {
-        ssize_t r;
+    ssize_t r;
 
-    r = this->perf[0].read_pmu( &elem->all_dram_rds);
+    r = this->perf[0].read_pmu(&elem->all_dram_rds);
     if (r < 0) {
-        fprintf(stderr, "%s read all_dram_rds failed.\n", __func__);
+        LOG(ERROR) << fmt::format("%s read all_dram_rds failed.\n", __func__);
         return r;
     }
     LOG(DEBUG) << fmt::format("read all_dram_rds:{}\n", elem->all_dram_rds);
 
-    r = this->perf[1].read_pmu( &elem->cpu_l2stall_t);
+    r = this->perf[1].read_pmu(&elem->cpu_l2stall_t);
     if (r < 0) {
-        fprintf(stderr, "%s read cpu_l2stall_t failled.\n", __func__);
+        LOG(ERROR) << fmt::format("read cpu_l2stall_t failled.\n");
         return r;
     }
     LOG(DEBUG) << fmt::format("read cpu_l2stall_t:{}\n", elem->cpu_l2stall_t);
 
-    r = this->perf[2].read_pmu( &elem->cpu_llcl_hits);
+    r = this->perf[2].read_pmu(&elem->cpu_llcl_hits);
     if (r < 0) {
-        fprintf(stderr, "%s read cpu_llcl_hits failed.\n", __func__);
+        LOG(ERROR) << fmt::format("read cpu_llcl_hits failed.\n");
         return r;
     }
     LOG(DEBUG) << fmt::format("read cpu_llcl_hits:{}\n", elem->cpu_llcl_hits);
 
-    r = this->perf[3].read_pmu( &elem->cpu_llcl_miss);
+    r = this->perf[3].read_pmu(&elem->cpu_llcl_miss);
     if (r < 0) {
-        fprintf(stderr, "%s read cpu_llcl_miss failed.\n", __func__);
+        LOG(ERROR) << fmt::format("read cpu_llcl_miss failed.\n");
         return r;
     }
     LOG(DEBUG) << fmt::format("read cpu_llcl_miss:{}\n", elem->cpu_llcl_miss);
 
+    r = this->perf[4].read_pmu(&elem->cpu_bandwidth_read);
+    if (r < 0) {
+        LOG(ERROR) << fmt::format("read cpu_bandwidth_read failed.\n");
+        return r;
+    }
+    LOG(DEBUG) << fmt::format("read cpu_bandwidth_read:{}\n", elem->cpu_bandwidth_read);
+    r = this->perf[5].read_pmu(&elem->cpu_bandwidth_write);
+    if (r < 0) {
+        LOG(ERROR) << fmt::format("read cpu_bandwidth_write failed.\n");
+        return r;
+    }
+    LOG(DEBUG) << fmt::format("read cpu_bandwidth_write:{}\n", elem->cpu_bandwidth_write);
+    elem->cpu_mmap_address_length = this->perf[6].read_trace_pipe();
 }
-Incore::Incore(const pid_t pid, const int cpu) {
-
+Incore::Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config) : perf_config(perf_config) {
     /* reset all pmc values */
     this->init_all_dram_rds(pid, cpu);
     this->init_cpu_l2stall(pid, cpu);
@@ -94,5 +107,5 @@ Incore::Incore(const pid_t pid, const int cpu) {
     this->init_cpu_llcl_miss(pid, cpu);
     this->init_cpu_mem_read(pid, cpu);
     this->init_cpu_mem_write(pid, cpu);
+    this->init_cpu_mmap_count(pid, cpu);
 }
-Incore::~Incore() {}

@@ -14,8 +14,6 @@ public:
     Uncore(const uint32_t unc_idx);
     ~Uncore();
 
-    int init_all_cbos();
-    void fini_all_cbos();
     int read_cbo_elems(struct CBOElem *elem);
 };
 
