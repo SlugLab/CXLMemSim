@@ -16,10 +16,10 @@ class CXLSwitchEvent {
 union CXLRemoteEvent {
     uint64_t no_switch_event;
     CXLSwitchEvent switch_event;
-};// switch num
+}; // switch num
 class CXLCounter {
-    std::vector<CXLRemoteEvent> cxl_mem_load_miss_retired_remote_dram;
-    std::vector<CXLRemoteEvent> cxl_mem_load_miss_retired_remote_fwd;
+    CXLRemoteEvent cxl_mem_load_miss_retired_remote_dram;
+    CXLRemoteEvent cxl_mem_load_miss_retired_remote_fwd;
     uint64_t cxl_mem_miss_retired_local_dram;
 
 public:

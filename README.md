@@ -1,6 +1,9 @@
 # CXL.mem Simulator
 
-
+## Prerequisite
+```bash
+sudo apt install llvm-dev clang libbpf-dev libclang-dev libcxxopts-dev libfmt-dev librange-v3-dev
+```
 ## User input
 Bandwidth, Latency: Both use 2 input in the vector, first for read, second for write
 Weight: Use the heuristic to calculate the bandwidth
