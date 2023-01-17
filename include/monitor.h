@@ -26,9 +26,8 @@ enum MONITOR_STATUS {
 
 class Monitor;
 class Monitors {
-    std::vector<Monitor> mon;
-
 public:
+    std::vector<Monitor> mon;
     Monitors(int tnum, cpu_set_t *use_cpuset, int nmem, Helper h);
     ~Monitors() = default;
 

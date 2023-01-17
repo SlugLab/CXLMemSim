@@ -22,6 +22,7 @@ public:
     void insert_end_point(CXLMemExpander *end_point);
     double calculate_latency(double weight, struct Elem *elem); // traverse the tree to calculate the latency
     double calculate_bandwidth(double weight, struct Elem *elem);
+    void delete_entry(uint64_t addr);
     void print();
 }
 

@@ -13,6 +13,10 @@ public:
     EmuCXLBandwidth bandwidth;
     EmuCXLLatency latency;
     uint64_t capacity;
+    std::map<uint64_t,  uint64_t> occupation;
+    std::vector<uint64_t> lazy_add;
+    std::vector<uint64_t> lazy_remove;
+
     int id = -1;
     CXLMemExpander(int read_bw, int write_bw, int read_lat, int write_lat, int id);
     double calculate_latency(double weight, struct Elem *elem); // traverse the tree to calculate the latency

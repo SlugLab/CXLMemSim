@@ -114,6 +114,8 @@ public:
     Helper();
     static int num_of_cpu();
     static int num_of_cbo();
+    static void detach_children();
+    static void noop_handler(int signum);
     double cpu_frequency() const;
     PerfConfig detect_model(uint32_t);
 };
