@@ -256,19 +256,20 @@ int main(int argc, char *argv[]) {
                     // no data
                     break;
                 } else {
-                    handle_error("Failed to recv");
+                    LOG(ERROR) << "Failed to recv";
+                    exit(0);
                 }
             } else if (n >= sizeof(struct op_data) && n <= sock_data_size) {
                 struct op_data *opd = (struct op_data *)sock_buf;
-                DEBUG_PRINT("received data: size=%d, tgid=%u, tid=%u, opcode=%u, num_of_region=%u\n", n, opd->tgid,
+                LOG(DEBUG) << fmt::format("received data: size=%d, tgid=%u, tid=%u, opcode=%u, num_of_region=%u\n", n, opd->tgid,
                             opd->tid, opd->opcode, opd->num_of_region);
 
                 if (opd->opcode == MES_THREAD_CREATE || opd->opcode == MES_PROCESS_CREATE) {
                     int target;
                     bool is_process = (opd->opcode == MES_PROCESS_CREATE) ? true : false;
-                    uint64_t period = (opd->num_of_region >= 2) ? pebs_sample_period : 0; // is hybrid
+                    uint64_t period = (opd->num_of_region >= 2) ? pebsperiod : 0; // is hybrid
                     // register to monitor
-                    target = enable_mon(opd->tgid, opd->tid, is_process, period, tnum, mons);
+                    target = mon.enable(opd->tgid, opd->tid, is_process, period, tnum);
                     if (target == -1) {
                         exit_with_message("Failed to enable monitor\n");
                     } else if (target < 0) {
@@ -287,7 +288,7 @@ int main(int argc, char *argv[]) {
                         }
                     }
                     // Wait the target processes until emulation process initialized.
-                    stop_mon(mon);
+                    mon.stop();
                     /* read CBo params */
                     for (j = 0; j < ncbo; j++) {
                         read_cbo_elems(&pmu.cbos[j], &mon.before->cbos[j]);
@@ -301,11 +302,12 @@ int main(int argc, char *argv[]) {
                 } else if (opd->opcode == MES_THREAD_EXIT) {
                     // unregister from monitor, and display results.
                     if (terminate_mon(opd->tgid, opd->tid, tnum, mons) < 0) {
-                        DEBUG_PRINT("It might be already terminated.\n");
+                        LOG(ERROR) <<"It might be already terminated.\n";
                     }
                 }
             } else {
-                exit_with_message("received data is invalid size: size=%d\n", n);
+                LOG(ERROR) << fmt::format("received data is invalid size: size=%d\n", n);
+                exit(0);
             }
         } while (n > 0); // check the next message.
 
@@ -369,7 +371,7 @@ int main(int argc, char *argv[]) {
                 /* read CBo values */
                 uint64_t wb_cnt = 0;
                 for (int j = 0; j < ncbo; j++) {
-                    pmu.cbos[j].read_cbo_elems( &mon.after->cbos[j]);
+                    pmu.cbos[j].read_cbo_elems(&mon.after->cbos[j]);
                     wb_cnt += mon.after->cbos[j].llc_wb - mon.before->cbos[j].llc_wb;
                 }
                 LOG(ERROR) << fmt::format("[%d:%u:%u] LLC_WB = %" PRIu64 "\n", i, mon.tgid, mon.tid, wb_cnt);
@@ -378,14 +380,14 @@ int main(int argc, char *argv[]) {
                 uint64_t cpus_dram_rds = 0;
                 uint64_t target_l2stall = 0, target_llcmiss = 0, target_llchits = 0;
                 for (int j = 0; j < ncpu; ++j) {
-                    pmu.cpus[j].read_cpu_elems( &mon.after->cpus[j]);
+                    pmu.cpus[j].read_cpu_elems(&mon.after->cpus[j]);
                     cpus_dram_rds += mon.after->cpus[j].all_dram_rds - mon.before->cpus[j].all_dram_rds;
                 }
 
                 if (mon.num_of_region >= 2) {
                     /* read PEBS sample */
                     if (mon.pebs_ctx->read(mon.num_of_region, mon.region_info, &mon.after->pebs) < 0) {
-                        LOG(ERROR) << fmt::format( "[%d:%u:%u] Warning: Failed PEBS read\n", i, mon.tgid, mon.tid);
+                        LOG(ERROR) << fmt::format("[%d:%u:%u] Warning: Failed PEBS read\n", i, mon.tgid, mon.tid);
                     }
                     target_llcmiss = mon.after->pebs.llcmiss - mon.before->pebs.llcmiss;
                 } else {
@@ -399,9 +401,10 @@ int main(int argc, char *argv[]) {
                     mon.after->cpus[mon.cpu_core].cpu_llcl_hits - mon.before->cpus[mon.cpu_core].cpu_llcl_hits;
 
                 if (cpus_dram_rds < target_llcmiss) {
-                    LOG(DEBUG) << fmt::format("[%d:%u:%u]warning: target_llcmiss is more than cpus_dram_rds. target_llcmiss %ju, "
-                                "cpus_dram_rds %ju\n",
-                                i, mon.tgid, mon.tid, target_llcmiss, cpus_dram_rds);
+                    LOG(DEBUG) << fmt::format(
+                        "[%d:%u:%u]warning: target_llcmiss is more than cpus_dram_rds. target_llcmiss %ju, "
+                        "cpus_dram_rds %ju\n",
+                        i, mon.tgid, mon.tid, target_llcmiss, cpus_dram_rds);
                 }
                 uint64_t llcmiss_wb = 0;
                 // To estimate the number of the writeback-involving LLC
@@ -421,15 +424,16 @@ int main(int argc, char *argv[]) {
 
                 uint64_t llcmiss_ro = 0;
                 if (target_llcmiss < llcmiss_wb) {
-                    LOG(ERROR) << fmt::format("[%d:%u:%u] cpus_dram_rds %lu, llcmiss_wb %lu, target_llcmiss %lu\n", i, mon.tgid,
-                                mon.tid, cpus_dram_rds, llcmiss_wb, target_llcmiss);
+                    LOG(ERROR) << fmt::format("[%d:%u:%u] cpus_dram_rds %lu, llcmiss_wb %lu, target_llcmiss %lu\n", i,
+                                              mon.tgid, mon.tid, cpus_dram_rds, llcmiss_wb, target_llcmiss);
                     printf("!!!!llcmiss_ro is %lu!!!!!\n", llcmiss_ro);
                     llcmiss_wb = target_llcmiss;
                     llcmiss_ro = 0;
                 } else {
                     llcmiss_ro = target_llcmiss - llcmiss_wb;
                 }
-                LOG(ERROR) << fmt::format("[%d:%u:%u]llcmiss_wb=%lu, llcmiss_ro=%lu\n", i, mon.tgid, mon.tid, llcmiss_wb, llcmiss_ro);
+                LOG(ERROR) << fmt::format("[%d:%u:%u]llcmiss_wb=%lu, llcmiss_ro=%lu\n", i, mon.tgid, mon.tid,
+                                          llcmiss_wb, llcmiss_ro);
 
                 uint64_t mastall_wb = 0;
                 uint64_t mastall_ro = 0;
@@ -479,12 +483,12 @@ int main(int argc, char *argv[]) {
                     mon.before->pebs.total = mon.after->pebs.total;
                 }
 
-                DEBUG_PRINT("ma_wb=%" PRIu64 ", ma_ro=%" PRIu64 ", delay=%" PRIu64 "\n", ma_wb, ma_ro, emul_delay);
+                LOG(DEBUG) << fmt::format("ma_wb=%" PRIu64 ", ma_ro=%" PRIu64 ", delay=%" PRIu64 "\n", ma_wb, ma_ro, emul_delay);
 
                 /* compensation of delay END(1) */
                 clock_gettime(CLOCK_MONOTONIC, &end_ts);
                 diff_nsec += (end_ts.tv_sec - start_ts.tv_sec) * 1000000000 + (end_ts.tv_nsec - start_ts.tv_nsec);
-                DEBUG_PRINT("dif:%'12u\n", diff_nsec);
+                LOG(DEBUG) << fmt::format("dif:%'12u\n", diff_nsec);
 
                 uint64_t calibrated_delay = (diff_nsec > emul_delay) ? 0 : emul_delay - diff_nsec;
                 // uint64_t calibrated_delay = emul_delay;
@@ -495,10 +499,10 @@ int main(int argc, char *argv[]) {
                 /* insert emulated NVM latency */
                 mon.injected_delay.tv_sec += (calibrated_delay / 1000000000);
                 mon.injected_delay.tv_nsec += (calibrated_delay % 1000000000);
-                DEBUG_PRINT("[%d:%u:%u]delay:%'10lu , total delay:%'lf\n", i, mon.tgid, mon.tid, calibrated_delay,
+                LOG(DEBUG) << fmt::format("[%d:%u:%u]delay:%'10lu , total delay:%'lf\n", i, mon.tgid, mon.tid, calibrated_delay,
                             mon.total_delay);
 #endif
-                swap = mon.before;
+                auto swap = mon.before;
                 mon.before = mon.after;
                 mon.after = swap;
 
@@ -507,9 +511,9 @@ int main(int argc, char *argv[]) {
                 // unfreeze_counters_cbo_all(fds.msr[0]);
                 // start_pmc(&fds, i);
                 if (calibrated_delay == 0) {
-                    clear_mon_time(&mon.wasted_delay);
-                    clear_mon_time(&mon.injected_delay);
-                    run_mon(mon);
+                    mon.clear_time(&mon.wasted_delay);
+                    mon.clear_time(&mon.injected_delay);
+                    mon.run()
                 }
 #endif
 
@@ -523,13 +527,14 @@ int main(int argc, char *argv[]) {
                 sleep_time.tv_nsec = sleep_diff % 1000000000;
                 mon.wasted_delay.tv_sec += sleep_time.tv_sec;
                 mon.wasted_delay.tv_nsec += sleep_time.tv_nsec;
-                DEBUG_PRINT("[%d:%u:%u][OFF] total: %'lu | wasted : %'lu | waittime : %'lu | squabble : %'lu\n", i,
-                            mon.tgid, mon.tid, mon.injected_delay.tv_nsec, mon.wasted_delay.tv_nsec, waittime.tv_nsec,
-                            mon.squabble_delay.tv_nsec);
+                LOG(DEBUG) << fmt::format(
+                    "[%d:%u:%u][OFF] total: %'lu | wasted : %'lu | waittime : %'lu | squabble : %'lu\n", i, mon.tgid,
+                    mon.tid, mon.injected_delay.tv_nsec, mon.wasted_delay.tv_nsec, waittime.tv_nsec,
+                    mon.squabble_delay.tv_nsec);
                 if (check_continue_mon(i, mons, sleep_time)) {
-                    clear_mon_time(&mon.wasted_delay);
-                    clear_mon_time(&mon.injected_delay);
-                    run_mon(mon);
+                    mon.clear_time(&mon.wasted_delay);
+                    mon.clear_time(&mon.injected_delay);
+                    mon.run();
                 }
                 clock_gettime(CLOCK_MONOTONIC, &end_ts);
                 diff_nsec += (end_ts.tv_sec - start_ts.tv_sec) * 1000000000 + (end_ts.tv_nsec - start_ts.tv_nsec);
@@ -541,15 +546,16 @@ int main(int argc, char *argv[]) {
                 if (mon.wasted_delay.tv_sec >= waittime.tv_sec && remain_time < waittime.tv_nsec) {
                     mon.squabble_delay.tv_nsec += remain_time;
                     if (mon.squabble_delay.tv_nsec < 40000000) {
-                        DEBUG_PRINT("[SQ]total: %'lu | wasted : %'lu | waittime : %'lu | squabble : %'lu\n",
-                                    mon.injected_delay.tv_nsec, mon.wasted_delay.tv_nsec, waittime.tv_nsec,
-                                    mon.squabble_delay.tv_nsec);
-                        clear_mon_time(&mon.wasted_delay);
-                        clear_mon_time(&mon.injected_delay);
-                        run_mon(mon);
+                        LOG(DEBUG) << fmt::format(
+                            "[SQ]total: %'lu | wasted : %'lu | waittime : %'lu | squabble : %'lu\n",
+                            mon.injected_delay.tv_nsec, mon.wasted_delay.tv_nsec, waittime.tv_nsec,
+                            mon.squabble_delay.tv_nsec);
+                        mon.clear_time(&mon.wasted_delay);
+                        mon.clear_time(&mon.injected_delay);
+                        mon.run();
                     } else {
                         mon.injected_delay.tv_nsec += mon.squabble_delay.tv_nsec;
-                        clear_mon_time(&mon.squabble_delay);
+                        mon.clear_time(&mon.squabble_delay);
                     }
                 }
             }
