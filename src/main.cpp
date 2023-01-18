@@ -40,6 +40,7 @@ int main(int argc, char *argv[]) {
         "h,help", "The value for epoch value", cxxopts::value<bool>()->default_value("false"))(
         "i,interval", "The value for epoch value", cxxopts::value<int>()->default_value("20"))(
         "c,cpuset", "The CPUSET for CPU to set affinity on", cxxopts::value<std::vector<int>>()->default_value("0,1"))(
+        "d,dram_latency", "The current platform's dram latency", cxxopts::value<double>()->default_value("85"))(
         "p,pebsperiod", "The pebs sample period", cxxopts::value<int>()->default_value("1"))(
         "m,mode", "Page mode or cacheline mode", cxxopts::value<std::string>()->default_value("p"))(
         "to,topology", "The newick tree input for the CXL memory expander topology",
@@ -49,7 +50,7 @@ int main(int argc, char *argv[]) {
         cxxopts::value<std::vector<int>>()->default_value("100,150"))(
         "w,weight", "The simulated weight for multiplying with the LLC miss",
         cxxopts::value<double>()->default_value("4.1"))("b,bandwidth", "The simulated bandwidth by linear regression",
-                                                        cxxopts::value<std::vector<int>>()->default_value("50"));
+                                                        cxxopts::value<std::vector<int>>()->default_value("50,50"));
 
     auto result = options.parse(argc, argv);
     if (result["help"].as<bool>()) {
@@ -59,6 +60,17 @@ int main(int argc, char *argv[]) {
     auto target = result["target"].as<std::string>();
     auto interval = result["interval"].as<int>();
     auto cpuset = result["cpuset"].as<std::vector<int>>();
+    auto pebsperiod = result["pebsperiod"].as<int>();
+    auto latency = result["latency"].as<std::vector<int>>();
+    auto weight = result["weight"].as<double>();
+    auto bandwidth = result["bandwidth"].as<std::vector<int>>();
+    auto frequency = result["frequency"].as<double>();
+    auto topology = result["topology"].as<std::string>();
+    auto capacity = result["capacity"].as<std::vector<int>>();
+    auto dram_latency = result["dram_latency"].as<double>();
+    Helper helper{};
+    InterleavePolicy policy{};
+    CXLController controller{policy};
     uint64_t use_cpus = 0;
     cpu_set_t use_cpuset;
     CPU_ZERO(&use_cpuset);
@@ -71,20 +83,11 @@ int main(int argc, char *argv[]) {
             LOG(DEBUG) << fmt::format("use cpuid: {}\n", i);
         }
     }
-    auto pebsperiod = result["pebsperiod"].as<int>();
-    auto latency = result["latency"].as<std::vector<int>>();
-    auto weight = result["weight"].as<double>();
-    auto bandwidth = result["bandwidth"].as<std::vector<int>>();
-    auto frequency = result["frequency"].as<double>();
-    auto topology = result["topology"].as<std::string>();
-    auto capacity = result["capacity"].as<std::vector<int>>();
-    Helper helper{};
-    InterleavePolicy policy{};
-    CXLController controller{policy};
     auto tnum = CPU_COUNT(&use_cpuset);
     auto cur_processes = 0;
     auto ncpu = helper.cpu;
     auto ncbo = helper.cbo;
+    auto nmem = capacity.size();
     LOG(DEBUG) << fmt::format("tnum:{}, intrval:{}, weight:{}\n", tnum, interval, weight);
     for (auto const &[idx, value] : weight | ranges::views::enumerate) {
         LOG(DEBUG) << fmt::format("memory_region:{}\n", idx + 1);
@@ -93,8 +96,8 @@ int main(int argc, char *argv[]) {
         LOG(DEBUG) << fmt::format(" write_latency:{}\n", latency[idx * 2 + 1]);
         LOG(DEBUG) << fmt::format(" read_bandwidth:{}\n", bandwidth[idx * 2]);
         LOG(DEBUG) << fmt::format(" write_bandwidth:{}\n", bandwidth[idx * 2 + 1]);
-        CXLEndPoint *ep = new CXLEndPoint(idx, latency[idx * 2], latency[idx * 2 + 1], bandwidth[idx * 2],
-                                          bandwidth[idx * 2 + 1], idx);
+        auto *ep = new CXLMemExpander(idx, latency[idx * 2], latency[idx * 2 + 1], bandwidth[idx * 2],
+                                      bandwidth[idx * 2 + 1], idx);
         controller.insert_end_point(ep);
     }
     controller.construct_topo(topology);
@@ -110,8 +113,9 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
     LOG(DEBUG) << fmt::format("cpu_freq:{}\n", frequency);
-    // LOG(DEBUG) << fmt::format("num_of_cbo:{}\n", frequency);
-    Monitors monitors{tnum, &use_cpuset, static_cast<int>(weight.size()), helper};
+    LOG(DEBUG) << fmt::format("num_of_cbo:{}\n", ncbo);
+    LOG(DEBUG) << fmt::format("num_of_cpu:{}\n", ncpu);
+    Monitors monitors{tnum, &use_cpuset, static_cast<int>(capacity.size()), helper};
 
     /* zombie avoid */
     Helper::detach_children();
@@ -224,9 +228,9 @@ int main(int argc, char *argv[]) {
      *   |  address:64bit  |  size:64bit  |
      */
     enum opcode {
-        MES_PROCESS_CREATE = 0,
-        MES_THREAD_CREATE = 1,
-        MES_THREAD_EXIT = 2,
+        CXL_MEM_PROCESS_CREATE = 0,
+        CXL_MEM_THREAD_CREATE = 1,
+        CXL_MEM_THREAD_EXIT = 2,
     };
     struct op_data {
         uint32_t tgid;
@@ -234,7 +238,7 @@ int main(int argc, char *argv[]) {
         uint32_t opcode;
         uint32_t num_of_region;
     };
-    size_t regs_size = sizeof(struct __region_info) * nmem;
+    size_t regs_size = sizeof(CXLMemExpander) * nmem;
     size_t sock_data_size = sizeof(struct op_data) + regs_size;
     size_t sock_buf_size = sock_data_size + 1 /*for size check*/;
     char *sock_buf = (char *)malloc(sock_buf_size);
@@ -247,6 +251,7 @@ int main(int argc, char *argv[]) {
         DEBUG_PRINT("sleep_start_ts: %010lu.%09lu\n", sleep_start_ts.tv_sec, sleep_start_ts.tv_nsec);
 #endif
         int n;
+        auto mon = monitors.mon[0];
         do {
             memset(sock_buf, 0, sock_buf_size);
             // without blocking
@@ -261,48 +266,51 @@ int main(int argc, char *argv[]) {
                 }
             } else if (n >= sizeof(struct op_data) && n <= sock_data_size) {
                 struct op_data *opd = (struct op_data *)sock_buf;
-                LOG(DEBUG) << fmt::format("received data: size=%d, tgid=%u, tid=%u, opcode=%u, num_of_region=%u\n", n, opd->tgid,
-                            opd->tid, opd->opcode, opd->num_of_region);
+                LOG(DEBUG) << fmt::format("received data: size=%d, tgid=%u, tid=%u, opcode=%u, num_of_region=%u\n", n,
+                                          opd->tgid, opd->tid, opd->opcode, opd->num_of_region);
 
-                if (opd->opcode == MES_THREAD_CREATE || opd->opcode == MES_PROCESS_CREATE) {
+                if (opd->opcode == CXL_MEM_THREAD_CREATE || opd->opcode == CXL_MEM_PROCESS_CREATE) {
                     int target;
-                    bool is_process = (opd->opcode == MES_PROCESS_CREATE) ? true : false;
+                    bool is_process = (opd->opcode == CXL_MEM_PROCESS_CREATE) ? true : false;
                     uint64_t period = (opd->num_of_region >= 2) ? pebsperiod : 0; // is hybrid
                     // register to monitor
-                    target = mon.enable(opd->tgid, opd->tid, is_process, period, tnum);
+                    target = monitors.enable(opd->tgid, opd->tid, is_process, period, tnum);
                     if (target == -1) {
-                        exit_with_message("Failed to enable monitor\n");
+                        LOG(ERROR) << "Failed to enable monitor\n";
+                        exit(0);
                     } else if (target < 0) {
                         // tid not found. might be already terminated.
                         continue;
                     }
-                    mon = &mons[target];
+                    mon = monitors.mon[target];
                     if (opd->num_of_region >= 2) { // Ignored if num_of_region is 1 or less
                         // pebs sampling
-                        if ((n - sizeof(struct op_data)) != (sizeof(struct __region_info) * opd->num_of_region)) {
-                            exit_with_message("Received data is invalid.\n");
+                        if ((n - sizeof(struct op_data)) != (sizeof(CXLMemExpander) * opd->num_of_region)) {
+                            LOG(ERROR) << "Received data is invalid.\n";
+                            exit(0);
                         }
-                        struct __region_info *ri = (struct __region_info *)(sock_buf + sizeof(struct op_data));
-                        if (set_region_info_mon(mon, opd->num_of_region, ri) < 0) {
-                            exit_with_message("Received data is invalid.\n");
+                        auto *ri = (CXLMemExpander *)(sock_buf + sizeof(struct op_data));
+                        if (mon.set_region_info(opd->num_of_region, ri) < 0) {
+                            LOG(ERROR) << "Received data is invalid.\n";
+                            exit(0);
                         }
                     }
                     // Wait the target processes until emulation process initialized.
                     mon.stop();
                     /* read CBo params */
-                    for (j = 0; j < ncbo; j++) {
-                        read_cbo_elems(&pmu.cbos[j], &mon.before->cbos[j]);
+                    for (auto j = 0; j < ncbo; j++) {
+                        pmu.cbos[j].read_cbo_elems(&mon.before->cbos[j]);
                     }
-                    for (j = 0; j < ncpu; j++) {
-                        read_cpu_elems(&pmu.cpus[j], &mon.before->cpus[j]);
+                    for (auto j = 0; j < ncpu; j++) {
+                        pmu.cpus[j].read_cpu_elems(&mon.before->cpus[j]);
                     }
                     // Run the target processes.
-                    run_mon(mon);
+                    mon.run();
                     clock_gettime(CLOCK_MONOTONIC, &mon.start_exec_ts);
-                } else if (opd->opcode == MES_THREAD_EXIT) {
+                } else if (opd->opcode == CXL_MEM_THREAD_EXIT) {
                     // unregister from monitor, and display results.
-                    if (terminate_mon(opd->tgid, opd->tid, tnum, mons) < 0) {
-                        LOG(ERROR) <<"It might be already terminated.\n";
+                    if (monitors.terminate(opd->tgid, opd->tid, tnum) < 0) {
+                        LOG(ERROR) << "It might be already terminated.\n";
                     }
                 }
             } else {
@@ -313,19 +321,19 @@ int main(int argc, char *argv[]) {
 
 #ifdef VERBOSE_DEBUG
         clock_gettime(CLOCK_MONOTONIC, &recv_ts);
-        DEBUG_PRINT("recv_ts       : %010lu.%09lu\n", recv_ts.tv_sec, recv_ts.tv_nsec);
+        LOG(DEBUG) << fmt::format("recv_ts       : %010lu.%09lu\n", recv_ts.tv_sec, recv_ts.tv_nsec);
         if (recv_ts.tv_nsec < sleep_start_ts.tv_nsec) {
-            DEBUG_PRINT("start - recv  : %10lu.%09lu\n", recv_ts.tv_sec - sleep_start_ts.tv_sec - 1,
-                        recv_ts.tv_nsec + 1000000000 - sleep_start_ts.tv_nsec);
+            LOG(DEBUG) << fmt::format("start - recv  : %10lu.%09lu\n", recv_ts.tv_sec - sleep_start_ts.tv_sec - 1,
+                                      recv_ts.tv_nsec + 1000000000 - sleep_start_ts.tv_nsec);
         } else {
-            DEBUG_PRINT("start - recv  : %10lu.%09lu\n", recv_ts.tv_sec - sleep_start_ts.tv_sec,
-                        recv_ts.tv_nsec - sleep_start_ts.tv_nsec);
+            LOG(DEBUG) << fmt::format("start - recv  : %10lu.%09lu\n", recv_ts.tv_sec - sleep_start_ts.tv_sec,
+                                      recv_ts.tv_nsec - sleep_start_ts.tv_nsec);
         }
 #endif
 
         struct timespec req = waittime;
         struct timespec rem = {0};
-        while (1) {
+        while (true) {
             auto ret = nanosleep(&req, &rem);
             if (ret == 0) { // success
                 break;
@@ -452,8 +460,8 @@ int main(int argc, char *argv[]) {
                                           target_l2stall, mastall_wb, mastall_ro, target_llchits, target_llcmiss,
                                           weight);
 
-                uint64_t ma_wb = (double)mastall_wb / dram_latency;
-                uint64_t ma_ro = (double)mastall_ro / dram_latency;
+                uint64_t ma_wb = (double)mastall_wb / latency;
+                uint64_t ma_ro = (double)mastall_ro / latency;
 
                 uint64_t emul_delay = 0;
                 if (mon.num_of_region < 2) {
@@ -468,8 +476,9 @@ int main(int argc, char *argv[]) {
                         // If the total is 0, divide equally.
                         sample_prop = (double)1 / (double)mon.num_of_region;
                     }
-                    DEBUG_PRINT("[%d:%u:%u] pebs: total=%lu, \n", i, mon.tgid, mon.tid, mon.after->pebs.total);
-                    for (j = 0; j < mon.num_of_region; j++) {
+                    LOG(DEBUG) << fmt::format("[%d:%u:%u] pebs: total=%lu, \n", i, mon.tgid, mon.tid,
+                                              mon.after->pebs.total);
+                    for (auto j = 0; j < mon.num_of_region; j++) {
                         if (!total_is_zero) {
                             sample = (double)(mon.after->pebs.sample[j] - mon.before->pebs.sample[j]);
                             sample_prop = sample / sample_total;
@@ -477,13 +486,14 @@ int main(int argc, char *argv[]) {
                         emul_delay += (double)(ma_ro)*sample_prop * (emul_nvm_lats[j].read - dram_latency) +
                                       (double)(ma_wb)*sample_prop * (emul_nvm_lats[j].write - dram_latency);
                         mon.before->pebs.sample[j] = mon.after->pebs.sample[j];
-                        DEBUG_PRINT("[%d:%u:%u] pebs sample[%d]: =%lu, \n", i, mon.tgid, mon.tid, j,
-                                    mon.after->pebs.sample[j]);
+                        LOG(DEBUG) << fmt::format("[%d:%u:%u] pebs sample[%d]: =%lu, \n", i, mon.tgid, mon.tid, j,
+                                                  mon.after->pebs.sample[j]);
                     }
                     mon.before->pebs.total = mon.after->pebs.total;
                 }
 
-                LOG(DEBUG) << fmt::format("ma_wb=%" PRIu64 ", ma_ro=%" PRIu64 ", delay=%" PRIu64 "\n", ma_wb, ma_ro, emul_delay);
+                LOG(DEBUG) << fmt::format("ma_wb=%" PRIu64 ", ma_ro=%" PRIu64 ", delay=%" PRIu64 "\n", ma_wb, ma_ro,
+                                          emul_delay);
 
                 /* compensation of delay END(1) */
                 clock_gettime(CLOCK_MONOTONIC, &end_ts);
@@ -499,8 +509,8 @@ int main(int argc, char *argv[]) {
                 /* insert emulated NVM latency */
                 mon.injected_delay.tv_sec += (calibrated_delay / 1000000000);
                 mon.injected_delay.tv_nsec += (calibrated_delay % 1000000000);
-                LOG(DEBUG) << fmt::format("[%d:%u:%u]delay:%'10lu , total delay:%'lf\n", i, mon.tgid, mon.tid, calibrated_delay,
-                            mon.total_delay);
+                LOG(DEBUG) << fmt::format("[%d:%u:%u]delay:%'10lu , total delay:%'lf\n", i, mon.tgid, mon.tid,
+                                          calibrated_delay, mon.total_delay);
 #endif
                 auto swap = mon.before;
                 mon.before = mon.after;
@@ -513,7 +523,7 @@ int main(int argc, char *argv[]) {
                 if (calibrated_delay == 0) {
                     mon.clear_time(&mon.wasted_delay);
                     mon.clear_time(&mon.injected_delay);
-                    mon.run()
+                    mon.run();
                 }
 #endif
 
@@ -531,7 +541,7 @@ int main(int argc, char *argv[]) {
                     "[%d:%u:%u][OFF] total: %'lu | wasted : %'lu | waittime : %'lu | squabble : %'lu\n", i, mon.tgid,
                     mon.tid, mon.injected_delay.tv_nsec, mon.wasted_delay.tv_nsec, waittime.tv_nsec,
                     mon.squabble_delay.tv_nsec);
-                if (check_continue_mon(i, mons, sleep_time)) {
+                if (monitors.check_continue(i, sleep_time)) {
                     mon.clear_time(&mon.wasted_delay);
                     mon.clear_time(&mon.injected_delay);
                     mon.run();

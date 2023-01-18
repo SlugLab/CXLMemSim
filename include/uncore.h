@@ -7,12 +7,14 @@
 #include "helper.h"
 #include "perf.h"
 #include <cstdint>
+
+struct PerfConfig;
 class Uncore {
 public:
     uint32_t unc_idx;
     PerfInfo perf;
-    Uncore(const uint32_t unc_idx);
-    ~Uncore();
+    Uncore(const uint32_t unc_idx, PerfConfig *perf_config);
+    ~Uncore() = default;
 
     int read_cbo_elems(struct CBOElem *elem);
 };

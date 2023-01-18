@@ -367,7 +367,12 @@ PerfInfo::PerfInfo(int group_fd, int cpu, pid_t pid, unsigned long flags, struct
 }
 PerfInfo::PerfInfo(int fd, int group_fd, int cpu, pid_t pid, unsigned long flags, struct perf_event_attr attr)
     : fd(fd), group_fd(group_fd), cpu(cpu), pid(pid), flags(flags), attr(attr) {}
-PerfInfo::~PerfInfo() { close(this->fd); }
+PerfInfo::~PerfInfo() {
+    if (this->fd != -1) {
+        close(this->fd);
+        this->fd = -1;
+    }
+}
 /*
  * Workaround:
  *   The expected value cannot be obtained when reading continuously.
@@ -406,8 +411,8 @@ std::map<unsigned long, std::tuple<unsigned long, unsigned long long>> PerfInfo:
     char *unused;
     std::string line;
     while (i != EOF) {
-        std::getline(fp, line) i =
-            std::sscanf(line.c_str(), "%c bpf_trace_printk: %lu %lu %llu", unused, &size, &address, &time);
+        std::getline(fp, line);
+        i = std::sscanf(line.c_str(), "%c bpf_trace_printk: %lu %lu %llu", unused, &size, &address, &time);
         if (i == 1) {
             res[address] = std::make_tuple(size, time);
         }

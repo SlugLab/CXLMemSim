@@ -16,6 +16,7 @@
 #include <fnmatch.h>
 #include <linux/perf_event.h>
 #include <map>
+#include <signal.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>

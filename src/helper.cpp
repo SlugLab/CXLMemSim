@@ -248,7 +248,7 @@ void Helper::detach_children() {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART | SA_NOCLDWAIT;
     if (sigaction(SIGCHLD, &sa, NULL) < 0) {
-        DEBUG_PRINT("Failed to sigaction: %s", strerror(errno));
+        LOG(ERROR) << fmt::format("Failed to sigaction: %s", strerror(errno));
     }
 }
 int PMUInfo::start_all_pmcs() {
@@ -269,7 +269,7 @@ PMUInfo::PMUInfo(pid_t pid, Helper *helper, struct PerfConfig *perf_config) : he
     n = helper->num_of_cbo();
 
     for (i = 0; i < n; i++) {
-        this->cbos.emplace_back(i);
+        this->cbos.emplace_back(i,perf_config);
     }
 
     // unfreeze counters

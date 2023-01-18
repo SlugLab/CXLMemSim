@@ -118,8 +118,6 @@ void Monitors::disable(const uint32_t target) {
             j.pebs.total = 0;
             j.pebs.llcmiss = 0;
         }
-        mon[target].region_info[i].addr = 0;
-        mon[target].region_info[i].size = 0;
     }
     mon[target].num_of_region = 0;
 }
@@ -186,15 +184,13 @@ bool Monitors::check_continue(const uint32_t target, const struct timespec w) {
     return false;
 }
 
-int Monitor::set_region_info(const int nreg, struct CXLRegion *ri) {
+int Monitor::set_region_info(const int nreg,  CXLMemExpander *ri) {
     int i;
 
     this->num_of_region = nreg;
-    // TODO change to cxlendpoint
     for (i = 0; i < nreg; i++) {
-        this->region_info[i].addr = ri[i].addr;
-        this->region_info[i].size = ri[i].size;
-        LOG(DEBUG) << fmt::format("  region info[{}]: addr={}, size={}\n", i, ri[i].addr, ri[i].size);
+        this->region_info.emplace_back(ri);
+        LOG(DEBUG) << fmt::format("  region info[{}]: capacity={}\n", i, ri[i].capacity);
     }
 
     return 0;
@@ -271,10 +267,5 @@ Monitor::Monitor(const int nmem, Helper h)
             LOG(ERROR) << "calloc";
             throw;
         }
-    }
-    this->region_info = (struct CXLRegion *)calloc(sizeof(struct CXLRegion), nmem);
-    if (this->region_info == nullptr) {
-        LOG(ERROR) << "calloc";
-        throw;
     }
 }

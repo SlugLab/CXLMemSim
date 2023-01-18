@@ -13,6 +13,7 @@
 #include <cstring>
 #include <ctime>
 #include <sched.h>
+#include <unistd.h>
 #include <vector>
 
 enum MONITOR_STATUS {
@@ -55,12 +56,12 @@ public:
     struct timespec start_exec_ts, end_exec_ts;
     bool is_process;
     int num_of_region;
-    struct CXLRegion *region_info;
+    std::vector<CXLMemExpander *> region_info;
     struct PEBS *pebs_ctx;
 
     Monitor(const int nmem, Helper h);
 
-    int set_region_info(int, struct CXLRegion *);
+    int set_region_info(const int nreg,  CXLMemExpander *ri);
     void stop();
     void run();
     void clear_time(struct timespec *);
