@@ -27,10 +27,6 @@ enum { CPU_MDL_BDX = 63, CPU_MDL_SKX = 85, CPU_MDL_SPR = 143, CPU_MDL_ADL = 151,
 class Incore;
 class Uncore;
 class Helper;
-struct CXLRegion {
-    uint64_t addr;
-    uint64_t size;
-};
 
 struct EmuCXLLatency {
     double read;
@@ -53,7 +49,7 @@ struct CPUElem {
     uint64_t cpu_llcl_miss;
     uint64_t cpu_bandwidth_read;
     uint64_t cpu_bandwidth_write;
-    std::map<unsigned long, std::tuple<unsigned long, unsigned long long>> cpu_mmap_address_length;
+    std::map<uint64_t, uint64_t> cpu_mmap_address_length;
 };
 
 struct PEBSElem {

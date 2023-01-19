@@ -366,7 +366,10 @@ PerfInfo::PerfInfo(int group_fd, int cpu, pid_t pid, unsigned long flags, struct
     ioctl(this->fd, PERF_EVENT_IOC_RESET, 0);
 }
 PerfInfo::PerfInfo(int fd, int group_fd, int cpu, pid_t pid, unsigned long flags, struct perf_event_attr attr)
-    : fd(fd), group_fd(group_fd), cpu(cpu), pid(pid), flags(flags), attr(attr) {}
+    : fd(fd), group_fd(group_fd), cpu(cpu), pid(pid), flags(flags), attr(attr) {
+    this->map = new ThreadSafeMap();
+    std::jthread thr{[&] { write_trace_to_map(map); }};
+}
 PerfInfo::~PerfInfo() {
     if (this->fd != -1) {
         close(this->fd);
@@ -401,23 +404,18 @@ int PerfInfo::stop() {
     }
     return 0;
 }
-std::map<unsigned long, std::tuple<unsigned long, unsigned long long>> PerfInfo::read_trace_pipe() {
-    std::ifstream fp(DEBUGFS "trace_pipe");
-    std::map<unsigned long, std::tuple<unsigned long, unsigned long long>> res;
-    int i;
-    unsigned long size;
-    unsigned long address;
-    unsigned long long time;
-    char *unused;
-    std::string line;
-    while (i != EOF) {
-        std::getline(fp, line);
-        i = std::sscanf(line.c_str(), "%c bpf_trace_printk: %lu %lu %llu", unused, &size, &address, &time);
-        if (i == 1) {
-            res[address] = std::make_tuple(size, time);
+std::map<uint64_t, uint64_t> PerfInfo::read_trace_pipe() {
+    auto traces = map->get();
+    std::map<uint64_t, uint64_t> addr_map;
+    for (auto r : traces) {
+        // mode map
+        std::cout << r.first << " " << std::get<0>(r.second) << " " << std::get<1>(r.second) << std::endl;
+        for (int i = 0; i < std::get<0>(r.second); i += 64) {
+            addr_map[r.first + i] = std::get<1>(r.second);
         }
     }
-    return res;
+    map->reset();
+    return addr_map;
 }
 
 PerfInfo init_incore_perf(const pid_t pid, const int cpu, uint64_t conf, uint64_t conf1) {
@@ -571,4 +569,24 @@ PerfInfo init_incore_bpf_perf(const pid_t pid, const int cpu) {
     }
 
     PerfInfo perf{event_fd, -1, cpu, pid, 0, attr};
+}
+
+void write_trace_to_map(ThreadSafeMap *map) {
+    std::ifstream fp(DEBUGFS "trace_pipe");
+    int i;
+    int size;
+    unsigned long address;
+    unsigned long long time;
+    std::string line;
+    while (std::getline(fp, line)) {
+        if (line.size() > 50) {
+            i = std::sscanf(line.substr(51, 57).c_str(), "bpf_trace_printk: munmap %d %lu %llu", &size, &address,
+                            &time);
+            std::cout << line.substr(51, 57).c_str() << " " << i << std::endl;
+            if (i > 1) {
+                map->insert(address, size, time);
+                std::cout << address << " " << size << " " << time << std::endl;
+            }
+        }
+    }
 }

@@ -17,6 +17,9 @@ public:
     std::vector<CXLMemExpander *> expanders{};
     uint64_t capacity;
     Policy policy;
+    std::map<uint64_t, uint64_t> occupation;
+
+    std::vector<uint64_t> lazy_remove;
     int num_switches;
     CXLController(Policy policy);
     void construct_topo(std::string_view newick_tree);
@@ -24,8 +27,8 @@ public:
     std::vector<std::string> tokenize(const std::string_view &s);
     double calculate_latency(double weight, struct Elem *elem); // traverse the tree to calculate the latency
     double calculate_bandwidth(double weight, struct Elem *elem);
-    void insert(uint64_t timestamp, uint64_t size);
-    void delete_entry(uint64_t addr);
+    void insert(uint64_t timestamp, uint64_t phys_addr,uint64_t virt_addr) override;
+    void delete_entry(uint64_t addr) override;
     void output() override;
 };
 

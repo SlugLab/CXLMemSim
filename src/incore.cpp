@@ -59,7 +59,7 @@ int Incore::read_cpu_elems(struct CPUElem *elem) {
 
     r = this->perf[0].read_pmu(&elem->all_dram_rds);
     if (r < 0) {
-        LOG(ERROR) << fmt::format("%s read all_dram_rds failed.\n", __func__);
+        LOG(ERROR) << fmt::format("read all_dram_rds failed.\n");
         return r;
     }
     LOG(DEBUG) << fmt::format("read all_dram_rds:{}\n", elem->all_dram_rds);
@@ -98,6 +98,7 @@ int Incore::read_cpu_elems(struct CPUElem *elem) {
     }
     LOG(DEBUG) << fmt::format("read cpu_bandwidth_write:{}\n", elem->cpu_bandwidth_write);
     elem->cpu_mmap_address_length = this->perf[6].read_trace_pipe();
+    LOG(DEBUG) << fmt::format("read munmap result with size:{}\n", elem->cpu_mmap_address_length.size());
 }
 Incore::Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config) : perf_config(perf_config) {
     /* reset all pmc values */
@@ -108,4 +109,48 @@ Incore::Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config) :
     this->init_cpu_mem_read(pid, cpu);
     this->init_cpu_mem_write(pid, cpu);
     this->init_cpu_ebpf(pid, cpu);
+}
+bool get_cpu_info(struct CPUInfo *cpu_info) {
+    char buffer[1024];
+    union {
+        char cbuf[16];
+        int ibuf[16 / sizeof(int)];
+    } buf;
+    CPUID_INFO cpuinfo;
+
+    pcm_cpuid(0, &cpuinfo);
+
+    memset(buffer, 0, 1024);
+    memset(buf.cbuf, 0, 16);
+    buf.ibuf[0] = cpuinfo.array[1];
+    buf.ibuf[1] = cpuinfo.array[3];
+    buf.ibuf[2] = cpuinfo.array[2];
+
+    if (strncmp(buf.cbuf, "GenuineIntel", 4 * 3) != 0) {
+        LOG(ERROR) << fmt::format("We only Support Intel CPU\n");
+        return false;
+    }
+
+    cpu_info->max_cpuid = cpuinfo.array[0];
+
+    pcm_cpuid(1, &cpuinfo);
+    cpu_info->cpu_family = (((cpuinfo.array[0]) >> 8) & 0xf) | ((cpuinfo.array[0] & 0xf00000) >> 16);
+    cpu_info->cpu_model = (((cpuinfo.array[0]) & 0xf0) >> 4) | ((cpuinfo.array[0] & 0xf0000) >> 12);
+    cpu_info->cpu_stepping = cpuinfo.array[0] & 0x0f;
+
+    if (cpuinfo.reg.ecx & (1UL << 31UL)) {
+        LOG(ERROR) << fmt::format("Detected a hypervisor/virtualization technology. "
+                                  "Some metrics might not be available due to configuration "
+                                  "or availability of virtual hardware features.\n");
+    }
+
+    if (cpu_info->cpu_family != 6) {
+        LOG(ERROR) << fmt::format("It doesn't support this CPU. CPU Family: %u\n", cpu_info->cpu_family);
+        return false;
+    }
+
+    LOG(DEBUG) << fmt::format("MAX_CPUID=%u, CPUFAMILY=%u, CPUMODEL=%u, CPUSTEPPING=%u\n", cpu_info->max_cpuid, cpu_info->cpu_family,
+                cpu_info->cpu_model, cpu_info->cpu_stepping);
+
+    return true;
 }

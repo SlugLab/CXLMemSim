@@ -23,7 +23,7 @@ struct __attribute__((packed)) perf_sample {
 long perf_event_open(struct perf_event_attr *event_attr, pid_t pid, int cpu, int group_fd, unsigned long flags) {
     return syscall(__NR_perf_event_open, event_attr, pid, cpu, group_fd, flags);
 }
-PEBS::PEBS(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_period) {
+PEBS::PEBS(pid_t pid, uint64_t sample_period, bool is_page) : pid(pid), sample_period(sample_period), is_page(is_page) {
     // Configure perf_event_attr struct
     struct perf_event_attr pe {};
     memset(&pe, 0, sizeof(struct perf_event_attr));
@@ -58,7 +58,7 @@ PEBS::PEBS(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_p
 
     this->start();
 }
-int PEBS::read(const int nreg, struct CXLRegion *reg_info, struct PEBSElem *elem) {
+int PEBS::read(const int nreg, CXLController *controller, struct PEBSElem *elem) {
     struct perf_event_mmap_page *mp = this->mp;
 
     if (this->fd < 0) {
@@ -99,13 +99,16 @@ int PEBS::read(const int nreg, struct CXLRegion *reg_info, struct PEBSElem *elem
                     LOG(DEBUG) << fmt::format("pid:{} tid:{} time:{} addr:{} phys_addr:{} llc_miss:{}\n",
                                               int(data->pid), int(data->tid), long(data->time_enabled),
                                               long(data->addr), long(data->phys_addr), long(data->value));
-                    for (i = 0; i < nreg; i++) {
-                        if (reg_info[i].addr <= data->addr && reg_info[i].addr + reg_info[i].size > data->addr) {
-                            elem->sample[i]++;
-                            LOG(DEBUG) << fmt::format("sample: region {} ({})\n", i, elem->sample[i]);
-                            elem->llcmiss = data->value;
-                        }
-                    }
+                    // for (i = 0; i < nreg; i++) {
+                    //     // checker whether they are in the reg, but we just insert them.
+                    //     if (reg_info[i].addr <= data->addr && reg_info[i].addr + reg_info[i].size
+                    //     > data->addr) {
+                    //         elem->sample[i]++;
+                    //         LOG(DEBUG) << fmt::format("sample: region {} ({})\n", i,
+                    //         elem->sample[i]); elem->llcmiss = data->value;
+                    //     }
+                    // }
+                    controller->insert(data->time_enabled, data->phys_addr, data->phys_addr);
                 }
                 break;
             case PERF_RECORD_THROTTLE:

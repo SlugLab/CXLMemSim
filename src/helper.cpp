@@ -241,6 +241,7 @@ Helper::Helper() : perf_conf({}) {
     cbo = num_of_cbo();
     cpu_freq = cpu_frequency();
 }
+void Helper::noop_handler(int sig) { ; }
 void Helper::detach_children() {
     struct sigaction sa;
 
@@ -269,7 +270,7 @@ PMUInfo::PMUInfo(pid_t pid, Helper *helper, struct PerfConfig *perf_config) : he
     n = helper->num_of_cbo();
 
     for (i = 0; i < n; i++) {
-        this->cbos.emplace_back(i,perf_config);
+        this->cbos.emplace_back(i, perf_config);
     }
 
     // unfreeze counters

@@ -3,8 +3,11 @@
 //
 
 #include "monitor.h"
-Monitors::Monitors(const int tnum, cpu_set_t *use_cpuset, const int nmem, Helper h) {
+Monitors::Monitors(int tnum, cpu_set_t *use_cpuset, int nmem, Helper h, CXLController *region_info) {
     mon = std::vector<Monitor>(tnum, Monitor(nmem, h));
+    for (auto &m : mon) {
+        m.set_region_info(region_info->expanders.size(), region_info);
+    }
     /* init mon */
     for (int i = 0; i < tnum; i++) {
         disable(i);
@@ -36,7 +39,7 @@ void Monitors::run_all(const int processes) {
     }
 }
 int Monitors::enable(const uint32_t tgid, const uint32_t tid, bool is_process, uint64_t pebs_sample_period,
-                     const int32_t tnum) {
+                     const int32_t tnum, bool is_page) {
     int target = -1;
 
     for (int i = 0; i < tnum; i++) {
@@ -82,7 +85,7 @@ int Monitors::enable(const uint32_t tgid, const uint32_t tid, bool is_process, u
 
     if (pebs_sample_period) {
         /* pebs start */
-        mon[target].pebs_ctx = new PEBS(tid, pebs_sample_period);
+        mon[target].pebs_ctx = new PEBS(tid, pebs_sample_period, is_page);
         LOG(DEBUG) << fmt::format("Process [tgid={}, tid={}]: enable to pebs.\n", mon[target].tgid, mon[target].tid);
     }
 
@@ -184,14 +187,11 @@ bool Monitors::check_continue(const uint32_t target, const struct timespec w) {
     return false;
 }
 
-int Monitor::set_region_info(const int nreg,  CXLMemExpander *ri) {
+int Monitor::set_region_info(const int nreg, CXLController *ri) {
     int i;
 
     this->num_of_region = nreg;
-    for (i = 0; i < nreg; i++) {
-        this->region_info.emplace_back(ri);
-        LOG(DEBUG) << fmt::format("  region info[{}]: capacity={}\n", i, ri[i].capacity);
-    }
+    this->region_info = ri;
 
     return 0;
 }

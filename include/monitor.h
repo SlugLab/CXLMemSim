@@ -29,12 +29,12 @@ class Monitor;
 class Monitors {
 public:
     std::vector<Monitor> mon;
-    Monitors(int tnum, cpu_set_t *use_cpuset, int nmem, Helper h);
+    Monitors(int tnum, cpu_set_t *use_cpuset, int nmem, Helper h, CXLController *region_info);
     ~Monitors() = default;
 
     void stop_all(const int);
     void run_all(const int);
-    int enable(const uint32_t, const uint32_t, bool, uint64_t, const int32_t);
+    int enable(const uint32_t, const uint32_t, bool, uint64_t, const int32_t, bool is_page);
     void disable(const uint32_t target);
     int terminate(const uint32_t, const uint32_t, const int32_t);
     bool check_all_terminated(const uint32_t);
@@ -56,12 +56,12 @@ public:
     struct timespec start_exec_ts, end_exec_ts;
     bool is_process;
     int num_of_region;
-    std::vector<CXLMemExpander *> region_info;
+    CXLController *region_info;
     struct PEBS *pebs_ctx;
 
     Monitor(const int nmem, Helper h);
 
-    int set_region_info(const int nreg,  CXLMemExpander *ri);
+    int set_region_info(const int nreg, CXLController *ri);
     void stop();
     void run();
     void clear_time(struct timespec *);

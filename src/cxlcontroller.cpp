@@ -36,9 +36,27 @@ void CXLController::construct_topo(std::string_view newick_tree) {
 
 CXLController::CXLController(Policy p) : CXLSwitch(0) { this->policy = p; }
 
-double CXLController::calculate_latency(double weight, struct Elem *elem) { return 0; }
+double CXLController::calculate_latency(double weight, struct Elem *elem) {
+    double lat = 0.0;
+    for (auto switch_ : this->switches) {
+        lat += switch_->calculate_latency(weight, elem);
+    }
+    for (auto expander_ : this->expanders) {
+        lat += expander_->calculate_latency(weight, elem);
+    }
+    return lat;
+}
 
-double CXLController::calculate_bandwidth(double weight, struct Elem *elem) { return 0; }
+double CXLController::calculate_bandwidth(double weight, struct Elem *elem) {
+    double bw = 0.0;
+    for (auto switch_ : this->switches) {
+        bw += switch_->calculate_bandwidth(weight, elem);
+    }
+    for (auto expander_ : this->expanders) {
+        bw += expander_->calculate_bandwidth(weight, elem);
+    }
+    return bw;
+}
 
 void CXLController::output() {
     if (this->switches.size()) {
@@ -49,7 +67,7 @@ void CXLController::output() {
             this->switches[i]->output();
         }
         std::cout << ")";
-    } else if (this->expanders.size()) {
+    } else if (!this->expanders.empty()) {
         std::cout << "(";
         this->expanders[0]->output();
         for (size_t i = 1; i < this->expanders.size(); ++i) {
@@ -62,9 +80,16 @@ void CXLController::output() {
     }
 }
 
-void CXLController::delete_entry(uint64_t addr) {}
+void CXLController::delete_entry(uint64_t addr) {
+    for (auto switch_ : this->switches) {
+        switch_->delete_entry(addr);
+    }
+    for (auto expander_ : this->expanders) {
+        expander_->delete_entry(addr);
+    }
+}
 
-void CXLController::insert(uint64_t timestamp, uint64_t size) {}
+void CXLController::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) {}
 
 std::vector<std::string> CXLController::tokenize(const std::string_view &s) {
     std::vector<std::string> res;

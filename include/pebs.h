@@ -5,6 +5,7 @@
 #ifndef CXL_MEM_SIMULATOR_PEBS_H
 #define CXL_MEM_SIMULATOR_PEBS_H
 
+#include "cxlcontroller.h"
 #include "helper.h"
 #include "logging.h"
 #include <asm/unistd.h>
@@ -34,9 +35,10 @@ public:
     size_t rdlen{};
     size_t mplen;
     struct perf_event_mmap_page *mp;
-    PEBS(pid_t, uint64_t);
+    bool is_page;
+    PEBS(pid_t, uint64_t,bool);
     ~PEBS();
-    int read(int, struct CXLRegion *, struct PEBSElem *);
+    int read(int, CXLController *, struct PEBSElem *);
     int start();
     int stop();
 };

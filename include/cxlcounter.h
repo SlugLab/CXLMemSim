@@ -23,7 +23,7 @@ class CXLCounter {
     uint64_t cxl_mem_miss_retired_local_dram;
 
 public:
-    explicit CXLCounter(int num);
+    explicit CXLCounter();
 };
 
 #endif // CXL_MEM_SIMULATOR_CXLCOUNTER_H

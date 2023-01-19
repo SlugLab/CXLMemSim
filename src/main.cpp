@@ -40,7 +40,7 @@ int main(int argc, char *argv[]) {
         "h,help", "The value for epoch value", cxxopts::value<bool>()->default_value("false"))(
         "i,interval", "The value for epoch value", cxxopts::value<int>()->default_value("20"))(
         "c,cpuset", "The CPUSET for CPU to set affinity on", cxxopts::value<std::vector<int>>()->default_value("0,1"))(
-        "d,dram_latency", "The current platform's dram latency", cxxopts::value<double>()->default_value("85"))(
+        "d,dramlatency", "The current platform's dram latency", cxxopts::value<double>()->default_value("85"))(
         "p,pebsperiod", "The pebs sample period", cxxopts::value<int>()->default_value("1"))(
         "m,mode", "Page mode or cacheline mode", cxxopts::value<std::string>()->default_value("p"))(
         "to,topology", "The newick tree input for the CXL memory expander topology",
@@ -67,7 +67,8 @@ int main(int argc, char *argv[]) {
     auto frequency = result["frequency"].as<double>();
     auto topology = result["topology"].as<std::string>();
     auto capacity = result["capacity"].as<std::vector<int>>();
-    auto dram_latency = result["dram_latency"].as<double>();
+    auto dramlatency = result["dramlatency"].as<double>();
+    auto mode = result["mode"].as<std::string>() == "p" ? true : false;
     Helper helper{};
     InterleavePolicy policy{};
     CXLController controller{policy};
@@ -89,15 +90,15 @@ int main(int argc, char *argv[]) {
     auto ncbo = helper.cbo;
     auto nmem = capacity.size();
     LOG(DEBUG) << fmt::format("tnum:{}, intrval:{}, weight:{}\n", tnum, interval, weight);
-    for (auto const &[idx, value] : weight | ranges::views::enumerate) {
+    for (auto const &[idx, value] : capacity | ranges::views::enumerate) {
         LOG(DEBUG) << fmt::format("memory_region:{}\n", idx + 1);
         LOG(DEBUG) << fmt::format(" capacity:{}\n", capacity[idx + 1]);
         LOG(DEBUG) << fmt::format(" read_latency:{}\n", latency[idx * 2]);
         LOG(DEBUG) << fmt::format(" write_latency:{}\n", latency[idx * 2 + 1]);
         LOG(DEBUG) << fmt::format(" read_bandwidth:{}\n", bandwidth[idx * 2]);
         LOG(DEBUG) << fmt::format(" write_bandwidth:{}\n", bandwidth[idx * 2 + 1]);
-        auto *ep = new CXLMemExpander(idx, latency[idx * 2], latency[idx * 2 + 1], bandwidth[idx * 2],
-                                      bandwidth[idx * 2 + 1], idx);
+        auto *ep =
+            new CXLMemExpander(latency[idx * 2], latency[idx * 2 + 1], bandwidth[idx * 2], bandwidth[idx * 2 + 1], idx);
         controller.insert_end_point(ep);
     }
     controller.construct_topo(topology);
@@ -115,7 +116,7 @@ int main(int argc, char *argv[]) {
     LOG(DEBUG) << fmt::format("cpu_freq:{}\n", frequency);
     LOG(DEBUG) << fmt::format("num_of_cbo:{}\n", ncbo);
     LOG(DEBUG) << fmt::format("num_of_cpu:{}\n", ncpu);
-    Monitors monitors{tnum, &use_cpuset, static_cast<int>(capacity.size()), helper};
+    Monitors monitors{tnum, &use_cpuset, static_cast<int>(capacity.size()), helper, nullptr};
 
     /* zombie avoid */
     Helper::detach_children();
@@ -157,7 +158,7 @@ int main(int argc, char *argv[]) {
     }
 
     // In case of process, use SIGSTOP.
-    auto res = monitors.enable(t_process, t_process, true, 0, tnum);
+    auto res = monitors.enable(t_process, t_process, true, 0, tnum, false);
     if (res == -1) {
         LOG(ERROR) << fmt::format("Failed to enable monitor\n");
         exit(0);
@@ -198,11 +199,11 @@ int main(int argc, char *argv[]) {
 
     /* read CBo params */
     for (auto mon : monitors.mon) {
-        for (auto const &[idx, value] : mon.before->cbos | ranges::views::enumerate) {
-            pmu.cbos[idx].read_cbo_elems(&value);
+        for (auto const &[idx, value] : pmu.cbos | ranges::views::enumerate) {
+            pmu.cbos[idx].read_cbo_elems(&mon.before->cbos[idx]);
         }
-        for (auto const &[idx, value] : mon.before->cpus | ranges::views::enumerate) {
-            pmu.cpus[idx].read_cpu_elems(&value);
+        for (auto const &[idx, value] : pmu.cpus | ranges::views::enumerate) {
+            pmu.cpus[idx].read_cpu_elems(&mon.before->cpus[idx]);
         }
     }
 
@@ -219,105 +220,15 @@ int main(int argc, char *argv[]) {
         clock_gettime(CLOCK_MONOTONIC, &monitors.mon[i].start_exec_ts);
     }
 
-    /*
-     * The format for receiving an tgid,tid,opcode via a socket is as follows.
-     *   |  tgid:32bit  |  tid:32bit  |  opcode:32bit  |  num_of_region:32bit  |
-     * To emulate the hybrid memory, specify 2 or more for num_of_region.
-     * When specifying 1 or more in num_of_region, add the following format to
-     * as repeatedly as the num_of_region in addition to the above.
-     *   |  address:64bit  |  size:64bit  |
-     */
-    enum opcode {
-        CXL_MEM_PROCESS_CREATE = 0,
-        CXL_MEM_THREAD_CREATE = 1,
-        CXL_MEM_THREAD_EXIT = 2,
-    };
-    struct op_data {
-        uint32_t tgid;
-        uint32_t tid;
-        uint32_t opcode;
-        uint32_t num_of_region;
-    };
-    size_t regs_size = sizeof(CXLMemExpander) * nmem;
-    size_t sock_data_size = sizeof(struct op_data) + regs_size;
-    size_t sock_buf_size = sock_data_size + 1 /*for size check*/;
-    char *sock_buf = (char *)malloc(sock_buf_size);
-
     while (true) {
         /* wait for pre-defined interval */
         clock_gettime(CLOCK_MONOTONIC, &sleep_start_ts);
 
 #ifdef VERBOSE_DEBUG
-        DEBUG_PRINT("sleep_start_ts: %010lu.%09lu\n", sleep_start_ts.tv_sec, sleep_start_ts.tv_nsec);
+        LOG(DEBUG) << fmt::format("sleep_start_ts: %010lu.%09lu\n", sleep_start_ts.tv_sec, sleep_start_ts.tv_nsec);
 #endif
-        int n;
         auto mon = monitors.mon[0];
-        do {
-            memset(sock_buf, 0, sock_buf_size);
-            // without blocking
-            n = recv(sock, sock_buf, sock_buf_size, MSG_DONTWAIT);
-            if (n < 1) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    // no data
-                    break;
-                } else {
-                    LOG(ERROR) << "Failed to recv";
-                    exit(0);
-                }
-            } else if (n >= sizeof(struct op_data) && n <= sock_data_size) {
-                struct op_data *opd = (struct op_data *)sock_buf;
-                LOG(DEBUG) << fmt::format("received data: size=%d, tgid=%u, tid=%u, opcode=%u, num_of_region=%u\n", n,
-                                          opd->tgid, opd->tid, opd->opcode, opd->num_of_region);
-
-                if (opd->opcode == CXL_MEM_THREAD_CREATE || opd->opcode == CXL_MEM_PROCESS_CREATE) {
-                    int target;
-                    bool is_process = (opd->opcode == CXL_MEM_PROCESS_CREATE) ? true : false;
-                    uint64_t period = (opd->num_of_region >= 2) ? pebsperiod : 0; // is hybrid
-                    // register to monitor
-                    target = monitors.enable(opd->tgid, opd->tid, is_process, period, tnum);
-                    if (target == -1) {
-                        LOG(ERROR) << "Failed to enable monitor\n";
-                        exit(0);
-                    } else if (target < 0) {
-                        // tid not found. might be already terminated.
-                        continue;
-                    }
-                    mon = monitors.mon[target];
-                    if (opd->num_of_region >= 2) { // Ignored if num_of_region is 1 or less
-                        // pebs sampling
-                        if ((n - sizeof(struct op_data)) != (sizeof(CXLMemExpander) * opd->num_of_region)) {
-                            LOG(ERROR) << "Received data is invalid.\n";
-                            exit(0);
-                        }
-                        auto *ri = (CXLMemExpander *)(sock_buf + sizeof(struct op_data));
-                        if (mon.set_region_info(opd->num_of_region, ri) < 0) {
-                            LOG(ERROR) << "Received data is invalid.\n";
-                            exit(0);
-                        }
-                    }
-                    // Wait the target processes until emulation process initialized.
-                    mon.stop();
-                    /* read CBo params */
-                    for (auto j = 0; j < ncbo; j++) {
-                        pmu.cbos[j].read_cbo_elems(&mon.before->cbos[j]);
-                    }
-                    for (auto j = 0; j < ncpu; j++) {
-                        pmu.cpus[j].read_cpu_elems(&mon.before->cpus[j]);
-                    }
-                    // Run the target processes.
-                    mon.run();
-                    clock_gettime(CLOCK_MONOTONIC, &mon.start_exec_ts);
-                } else if (opd->opcode == CXL_MEM_THREAD_EXIT) {
-                    // unregister from monitor, and display results.
-                    if (monitors.terminate(opd->tgid, opd->tid, tnum) < 0) {
-                        LOG(ERROR) << "It might be already terminated.\n";
-                    }
-                }
-            } else {
-                LOG(ERROR) << fmt::format("received data is invalid size: size=%d\n", n);
-                exit(0);
-            }
-        } while (n > 0); // check the next message.
+        /** Here was a definition for the multi process and thread to enable multiple monitor */
 
 #ifdef VERBOSE_DEBUG
         clock_gettime(CLOCK_MONOTONIC, &recv_ts);
@@ -382,7 +293,7 @@ int main(int argc, char *argv[]) {
                     pmu.cbos[j].read_cbo_elems(&mon.after->cbos[j]);
                     wb_cnt += mon.after->cbos[j].llc_wb - mon.before->cbos[j].llc_wb;
                 }
-                LOG(ERROR) << fmt::format("[%d:%u:%u] LLC_WB = %" PRIu64 "\n", i, mon.tgid, mon.tid, wb_cnt);
+                LOG(ERROR) << fmt::format("[%d:%u:%u] LLC_WB = %ld" PRIu64 "\n", i, mon.tgid, mon.tid, wb_cnt);
 
                 /* read CPU params */
                 uint64_t cpus_dram_rds = 0;
@@ -460,37 +371,37 @@ int main(int argc, char *argv[]) {
                                           target_l2stall, mastall_wb, mastall_ro, target_llchits, target_llcmiss,
                                           weight);
 
-                uint64_t ma_wb = (double)mastall_wb / latency;
-                uint64_t ma_ro = (double)mastall_ro / latency;
+                uint64_t ma_wb = (double)mastall_wb / dramlatency;
+                uint64_t ma_ro = (double)mastall_ro / dramlatency;
 
                 uint64_t emul_delay = 0;
-                if (mon.num_of_region < 2) {
-                    emul_delay = (double)(ma_ro) * (emul_nvm_lats[0].read - dram_latency) +
-                                 (double)(ma_wb) * (emul_nvm_lats[0].write - dram_latency);
-                } else { // Emulate Hybrid Memory
-                    bool total_is_zero = (mon.after->pebs.total - mon.before->pebs.total) ? false : true;
-                    double sample = 0;
-                    double sample_prop = 0;
-                    double sample_total = (double)(mon.after->pebs.total - mon.before->pebs.total);
-                    if (total_is_zero) {
-                        // If the total is 0, divide equally.
-                        sample_prop = (double)1 / (double)mon.num_of_region;
-                    }
-                    LOG(DEBUG) << fmt::format("[%d:%u:%u] pebs: total=%lu, \n", i, mon.tgid, mon.tid,
-                                              mon.after->pebs.total);
-                    for (auto j = 0; j < mon.num_of_region; j++) {
-                        if (!total_is_zero) {
-                            sample = (double)(mon.after->pebs.sample[j] - mon.before->pebs.sample[j]);
-                            sample_prop = sample / sample_total;
-                        }
-                        emul_delay += (double)(ma_ro)*sample_prop * (emul_nvm_lats[j].read - dram_latency) +
-                                      (double)(ma_wb)*sample_prop * (emul_nvm_lats[j].write - dram_latency);
-                        mon.before->pebs.sample[j] = mon.after->pebs.sample[j];
-                        LOG(DEBUG) << fmt::format("[%d:%u:%u] pebs sample[%d]: =%lu, \n", i, mon.tgid, mon.tid, j,
-                                                  mon.after->pebs.sample[j]);
-                    }
-                    mon.before->pebs.total = mon.after->pebs.total;
+
+                bool total_is_zero = (mon.after->pebs.total - mon.before->pebs.total) ? false : true;
+                double sample = 0;
+                double sample_prop = 0;
+                double sample_total = (double)(mon.after->pebs.total - mon.before->pebs.total);
+                if (total_is_zero) {
+                    // If the total is 0, divide equally.
+                    sample_prop = (double)1 / (double)mon.num_of_region;
                 }
+                LOG(DEBUG) << fmt::format("[%d:%u:%u] pebs: total=%lu, \n", i, mon.tgid, mon.tid,
+                                          mon.after->pebs.total);
+                //                for (auto j = 0; j < mon.num_of_region; j++) {
+                //                    if (!total_is_zero) {
+                //                        sample = (double)(mon.after->pebs.sample[j] - mon.before->pebs.sample[j]);
+                //                        sample_prop = sample / sample_total;
+                //                    }
+                //                    emul_delay += (double)(ma_ro)*sample_prop * (emul_nvm_lats[j].read - dramlatency)
+                //                    +
+                //                                  (double)(ma_wb)*sample_prop * (emul_nvm_lats[j].write -
+                //                                  dramlatency);
+                //                    mon.before->pebs.sample[j] = mon.after->pebs.sample[j];
+                //                    LOG(DEBUG) << fmt::format("[%d:%u:%u] pebs sample[%d]: =%lu, \n", i, mon.tgid,
+                //                    mon.tid, j,
+                //                                              mon.after->pebs.sample[j]);
+                //                }
+
+                mon.before->pebs.total = mon.after->pebs.total;
 
                 LOG(DEBUG) << fmt::format("ma_wb=%" PRIu64 ", ma_ro=%" PRIu64 ", delay=%" PRIu64 "\n", ma_wb, ma_ro,
                                           emul_delay);
