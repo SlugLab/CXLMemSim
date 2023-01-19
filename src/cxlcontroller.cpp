@@ -11,7 +11,11 @@ void CXLController::construct_topo(std::string_view newick_tree) {
     std::vector<CXLEndPoint *> stk;
     stk.push_back(this);
     for (const auto &token : tokens) {
-        if (token == "(") {
+        if (token == "(" &&num_switches==0){
+            num_switches++;
+            continue;
+        } else if (token =="(") {
+            /** if is not on the top level */
             auto cur = new CXLSwitch(num_switches++);
             reinterpret_cast<CXLSwitch *>(stk.back())->switches.push_back(cur);
         } else if (token == ")") {
@@ -34,7 +38,7 @@ void CXLController::construct_topo(std::string_view newick_tree) {
     }
 }
 
-CXLController::CXLController(Policy p) : CXLSwitch(0) { this->policy = p; }
+CXLController::CXLController(Policy p, int capacity) : CXLSwitch(0), capacity(capacity) { this->policy = p; }
 
 double CXLController::calculate_latency(double weight, struct Elem *elem) {
     double lat = 0.0;

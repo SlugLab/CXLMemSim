@@ -149,7 +149,7 @@ bool get_cpu_info(struct CPUInfo *cpu_info) {
         return false;
     }
 
-    LOG(DEBUG) << fmt::format("MAX_CPUID=%u, CPUFAMILY=%u, CPUMODEL=%u, CPUSTEPPING=%u\n", cpu_info->max_cpuid, cpu_info->cpu_family,
+    LOG(DEBUG) << fmt::format("MAX_CPUID={}, CPUFAMILY={}, CPUMODEL={}, CPUSTEPPING={}\n", cpu_info->max_cpuid, cpu_info->cpu_family,
                 cpu_info->cpu_model, cpu_info->cpu_stepping);
 
     return true;

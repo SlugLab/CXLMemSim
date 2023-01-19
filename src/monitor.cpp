@@ -89,7 +89,7 @@ int Monitors::enable(const uint32_t tgid, const uint32_t tid, bool is_process, u
         LOG(DEBUG) << fmt::format("Process [tgid={}, tid={}]: enable to pebs.\n", mon[target].tgid, mon[target].tid);
     }
 
-    std::cout << fmt::format("========== Process {}[tgid={}, tid={}] monitoring start ==========\n", target,
+    LOG(INFO) << fmt::format("========== Process {}[tgid={}, tid={}] monitoring start ==========\n", target,
                              mon[target].tgid, mon[target].tid);
 }
 void Monitors::disable(const uint32_t target) {

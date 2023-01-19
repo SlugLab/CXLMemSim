@@ -11,7 +11,9 @@ CXLMemExpander::CXLMemExpander(int read_bw, int write_bw, int read_lat, int writ
     this->latency.write = write_lat;
     this->id = id;
 }
-double CXLMemExpander::calculate_latency(double weight, struct Elem *elem) { return 0; }
+double CXLMemExpander::calculate_latency(double weight, struct Elem *elem) { 
+    
+    return 0; }
 double CXLMemExpander::calculate_bandwidth(double weight, struct Elem *elem) { return 0; }
 void CXLMemExpander::delete_entry(uint64_t addr) {
     if (occupation.find(addr) != occupation.end()) {
@@ -59,7 +61,7 @@ void CXLSwitch::delete_entry(uint64_t addr) {
 }
 CXLSwitch::CXLSwitch(int id) { this->counter = CXLCounter(); }
 double CXLSwitch::calculate_latency(double weight, struct Elem *elem) {
-    double lat;
+    double lat = 0.0;
     for (auto &expander : this->expanders) {
         lat += expander->calculate_latency(weight, elem);
     }
@@ -67,6 +69,16 @@ double CXLSwitch::calculate_latency(double weight, struct Elem *elem) {
         lat += switch_->calculate_latency(weight, elem);
     }
     return lat;
+}
+double CXLSwitch::calculate_bandwidth(double weight, struct Elem *elem) {
+    double bw = 0.0;
+    for (auto &expander : this->expanders) {
+        bw += expander->calculate_bandwidth(weight, elem);
+    }
+    for (auto &switch_ : this->switches) {
+        bw += switch_->calculate_bandwidth(weight, elem);
+    }
+    return bw;
 }
 void CXLSwitch::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) {
     for (auto &expander : this->expanders) {
