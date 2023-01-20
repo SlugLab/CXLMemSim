@@ -92,8 +92,8 @@ void CXLController::delete_entry(uint64_t addr) {
     }
 }
 
-bool CXLController::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
-    auto index_ = policy->compute_once(this)->insert(timestamp, phys_addr, virt_addr, 0);
+int CXLController::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
+    auto index_ = policy->compute_once(this);
     if (index_ == -1) {
         this->occupation.emplace(timestamp, phys_addr);
         this->va_pa_map.emplace(virt_addr, phys_addr);
@@ -133,4 +133,4 @@ std::vector<std::string> CXLController::tokenize(const std::string_view &s) {
     }
     return res;
 }
-void CXLController::add_lazy_remove(uint64_t virt_addr) {}
+

@@ -11,9 +11,7 @@ CXLMemExpander::CXLMemExpander(int read_bw, int write_bw, int read_lat, int writ
     this->latency.write = write_lat;
     this->id = id;
 }
-double CXLMemExpander::calculate_latency(LatencyPass elem) {
-
-    return 0; }
+double CXLMemExpander::calculate_latency(LatencyPass elem) { return 0; }
 double CXLMemExpander::calculate_bandwidth(BandwidthPass elem) {
     // Iterate the map within the last 20ms
 
@@ -26,21 +24,6 @@ void CXLMemExpander::delete_entry(uint64_t addr) {
     }
 }
 uint64_t CXLMemExpander::va_to_pa(uint64_t addr) {
-    // FILE *pagemap = fopen(fmt::format("/proc/{}/pagemap", pid), "rb");
-    //
-    // unsigned long offset = (unsigned long)addr / getpagesize() * PAGEMAP_LENGTH;
-    // if (fseek(pagemap, (unsigned long)offset, SEEK_SET) != 0) {
-    //     LOG(ERROR) << "Failed to seek pagemap to proper location\n";
-    //     exit(1);
-    // }
-    //
-    // unsigned long page_frame_number = 0;
-    // fread(&page_frame_number, 1, PAGEMAP_LENGTH - 1, pagemap);
-    //
-    // page_frame_number &= 0x7FFFFFFFFFFFFF;
-    //
-    // fclose(pagemap);
-    // return page_frame_number;
     if (va_pa_map.find(addr) != va_pa_map.end()) {
         auto phys = va_pa_map[addr];
         va_pa_map.erase(addr);
@@ -48,29 +31,27 @@ uint64_t CXLMemExpander::va_to_pa(uint64_t addr) {
     }
     return -1;
 }
-void CXLMemExpander::add_lazy_remove(uint64_t addr) { this->lazy_remove.push_back(va_to_pa(addr)); }
 
-bool CXLMemExpander::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
-    if (index ==this->id) {
+int CXLMemExpander::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
+    if (index == this->id) {
         if (va_pa_map.find(virt_addr) != va_pa_map.end()) {
             this->va_pa_map.emplace(virt_addr, phys_addr);
-        }else {
-            this->va_pa_map[virt_addr]= phys_addr;
-            LOG(INFO)<<fmt::format("virt:{} phys:{} conflict insertion detected", virt_addr, phys_addr);
+        } else {
+            this->va_pa_map[virt_addr] = phys_addr;
+            LOG(INFO) << fmt::format("virt:{} phys:{} conflict insertion detected", virt_addr, phys_addr);
         }
-        for(auto &it : this->occupation) {
-            if(it.second == phys_addr) {
+        for (auto it = this->occupation.cbegin(); it != this->occupation.cend(); it++) {
+            if ((*it).second == phys_addr) {
                 this->occupation.emplace(timestamp, phys_addr);
                 this->counter.inc_store();
-            } else{
+            } else {
                 this->occupation.erase(it);
                 this->occupation.emplace(timestamp, phys_addr);
                 this->counter.inc_load();
             }
         }
-
         return true;
-    }else{
+    } else {
         return false;
     }
 }
@@ -104,7 +85,7 @@ void CXLSwitch::delete_entry(uint64_t addr) {
         switch_->delete_entry(addr);
     }
 }
-CXLSwitch::CXLSwitch(int id) : id(id) { this->counter = CXLCounter(); }
+CXLSwitch::CXLSwitch(int id) : id(id) {}
 double CXLSwitch::calculate_latency(LatencyPass elem) {
     double lat = 0.0;
     for (auto &expander : this->expanders) {
@@ -125,15 +106,39 @@ double CXLSwitch::calculate_bandwidth(BandwidthPass elem) {
     }
     return bw;
 }
-bool CXLSwitch::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
+int CXLSwitch::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
     for (auto &expander : this->expanders) {
-        expander->insert(timestamp, phys_addr, virt_addr, index);
+        if (expander->insert(timestamp, phys_addr, virt_addr, index)) {
+            this->counter.inc_store();
+            return true;
+        };
     }
     for (auto &switch_ : this->switches) {
         switch_->insert(timestamp, phys_addr, virt_addr, index);
     }
 }
-double CXLSwitch::calculate_congestion() {
+std::tuple<double, std::vector<uint64_t>> CXLSwitch::calculate_congestion() {
+    double latency = 0.0;
+    std::vector<uint64_t> congestion;
+    for (auto &switch_ : this->switches) {
+        auto [lat, con] = switch_->calculate_congestion();
+        latency += lat;
+        congestion.insert(congestion.end(), con.begin(), con.end());
+    }
     for (auto &expander : this->expanders) {
+        for (auto &it : expander->occupation) {
+            // 20ms every epoch
+            if (it.first > this->last_timestamp - 20000) {
+                congestion.push_back(it.second);
+            }
+        }
+    }
+    sort(congestion.begin(), congestion.end());
+    for (auto it = congestion.begin(); it != congestion.end(); ++it) {
+        if (*(it + 1) - *it < 20) {
+            latency += this->congestion_latency;
+            this->counter.inc_conflict();
+            congestion.erase(it);
+        }
     }
 }

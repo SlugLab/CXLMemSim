@@ -409,12 +409,12 @@ int main(int argc, char *argv[]) {
                 // }
                 /** TODO: calculate latency construct the passing value and use interleaving policy and counter to get
                  * the sample_prop */
-                // emul_delay += controller.calculate_latency(weight, ma_ro, ma_wb, dramlatency);
-                // mon.before->pebs.sample[j] = mon.after->pebs.sample[j];
-                // LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs sample[%d]: ={}, \n", i, mon.tgid, mon.tid, j,
-                //                           mon.after->pebs.sample[j]);
-
-                /** TODO: calculate bandwidth */
+                 emul_delay += controller->calculate_latency(lat_pass);
+                 emul_delay += controller->calculate_bandwidth(bw_pass);
+                 emul_delay += std::get<0>(controller->calculate_congestion());
+                 mon.before->pebs.sample[j] = mon.after->pebs.sample[j];
+                 LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs sample[%d]: ={}, \n", i, mon.tgid, mon.tid, j,
+                                           mon.after->pebs.sample[j]);
 
                 mon.before->pebs.total = mon.after->pebs.total;
 
