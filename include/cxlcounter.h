@@ -13,7 +13,7 @@ class CXLSwitchEvent {
     uint64_t load=0;
     uint64_t store=0;
     uint64_t conflict=0;
-
+public:
     void inc_load();
     void inc_store();
     void inc_conflict();
@@ -23,7 +23,7 @@ class CXLMemExpanderEvent {
     uint64_t store=0;
     uint64_t migrate=0;
     uint64_t hit_old=0;
-
+public:
     void inc_load();
     void inc_store();
     void inc_migrate();
@@ -33,11 +33,10 @@ class CXLCounter{
     uint64_t local=0;
     uint64_t remote=0;
     uint64_t hitm=0;
-
-    void inc_load();
-    void inc_store();
-    void inc_migrate();
-    void inc_hit_old();
+public:
+    void inc_local();
+    void inc_remote();
+    void inc_hitm();
 };
 
 #endif // CXL_MEM_SIMULATOR_CXLCOUNTER_H

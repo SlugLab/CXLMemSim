@@ -11,7 +11,9 @@ CXLMemExpander::CXLMemExpander(int read_bw, int write_bw, int read_lat, int writ
     this->latency.write = write_lat;
     this->id = id;
 }
-double CXLMemExpander::calculate_latency(LatencyPass elem) { return 0; }
+double CXLMemExpander::calculate_latency(LatencyPass elem) {
+
+    return 0; }
 double CXLMemExpander::calculate_bandwidth(BandwidthPass elem) {
     // Iterate the map within the last 20ms
 
@@ -20,6 +22,7 @@ double CXLMemExpander::calculate_bandwidth(BandwidthPass elem) {
 void CXLMemExpander::delete_entry(uint64_t addr) {
     if (occupation.find(addr) != occupation.end()) {
         occupation.erase(addr);
+        this->counter.inc_load();
     }
 }
 uint64_t CXLMemExpander::va_to_pa(uint64_t addr) {
@@ -47,9 +50,29 @@ uint64_t CXLMemExpander::va_to_pa(uint64_t addr) {
 }
 void CXLMemExpander::add_lazy_remove(uint64_t addr) { this->lazy_remove.push_back(va_to_pa(addr)); }
 
-bool CXLMemExpander::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) {
-    this->va_pa_map.emplace(virt_addr, phys_addr);
-    this->occupation.emplace(timestamp, phys_addr);
+bool CXLMemExpander::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
+    if (index ==this->id) {
+        if (va_pa_map.find(virt_addr) != va_pa_map.end()) {
+            this->va_pa_map.emplace(virt_addr, phys_addr);
+        }else {
+            this->va_pa_map[virt_addr]= phys_addr;
+            LOG(INFO)<<fmt::format("virt:{} phys:{} conflict insertion detected", virt_addr, phys_addr);
+        }
+        for(auto &it : this->occupation) {
+            if(it.second == phys_addr) {
+                this->occupation.emplace(timestamp, phys_addr);
+                this->counter.inc_store();
+            } else{
+                this->occupation.erase(it);
+                this->occupation.emplace(timestamp, phys_addr);
+                this->counter.inc_load();
+            }
+        }
+
+        return true;
+    }else{
+        return false;
+    }
 }
 std::string CXLMemExpander::output() { return fmt::format("CXLMemExpander {}", this->id); }
 std::string CXLSwitch::output() {
@@ -102,11 +125,15 @@ double CXLSwitch::calculate_bandwidth(BandwidthPass elem) {
     }
     return bw;
 }
-bool CXLSwitch::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) {
+bool CXLSwitch::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
     for (auto &expander : this->expanders) {
-        expander->insert(timestamp, phys_addr, virt_addr);
+        expander->insert(timestamp, phys_addr, virt_addr, index);
     }
     for (auto &switch_ : this->switches) {
-        switch_->insert(timestamp, phys_addr, virt_addr);
+        switch_->insert(timestamp, phys_addr, virt_addr, index);
+    }
+}
+double CXLSwitch::calculate_congestion() {
+    for (auto &expander : this->expanders) {
     }
 }

@@ -108,7 +108,9 @@ int PEBS::read(const int nreg, CXLController *controller, struct PEBSElem *elem)
                     //         elem->sample[i]); elem->llcmiss = data->value;
                     //     }
                     // }
-                    controller->insert(data->time_enabled, data->phys_addr, data->phys_addr);
+                    controller->insert(data->time_enabled, data->phys_addr, data->phys_addr, 0);
+                    elem->sample[i]++;
+                    elem->llcmiss = data->value;
                 }
                 break;
             case PERF_RECORD_THROTTLE:

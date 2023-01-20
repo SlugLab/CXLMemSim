@@ -75,7 +75,7 @@ int main(int argc, char *argv[]) {
     auto dramlatency = result["dramlatency"].as<double>();
     auto mode = result["mode"].as<std::string>() == "p" ? true : false;
     Helper helper{};
-    InterleavePolicy policy{};
+    InterleavePolicy *policy = new InterleavePolicy();
     CXLController *controller;
     uint64_t use_cpus = 0;
     cpu_set_t use_cpuset;
@@ -99,7 +99,7 @@ int main(int argc, char *argv[]) {
     for (auto const &[idx, value] : capacity | ranges::views::enumerate) {
         if (idx == 0) {
             LOG(DEBUG) << fmt::format("local_memory_region capacity:{}\n", value);
-            controller = new CXLController(policy, capacity[0]);
+            controller = new CXLController(policy, capacity[0], mode);
         } else {
             LOG(DEBUG) << fmt::format("memory_region:{}\n", (idx - 1) + 1);
             LOG(DEBUG) << fmt::format(" capacity:{}\n", capacity[(idx - 1) + 1]);
@@ -161,7 +161,7 @@ int main(int argc, char *argv[]) {
             }
 
             args[current_arg_idx] = current_arg;
-           LOG(INFO) << fmt::format("args[{}] = {}\n", current_arg_idx, args[current_arg_idx]);
+            LOG(INFO) << fmt::format("args[{}] = {}\n", current_arg_idx, args[current_arg_idx]);
         }
         execv(filename, args);
         /* We do not need to check the return value */
@@ -348,8 +348,8 @@ int main(int argc, char *argv[]) {
                 if (wb_cnt <= cpus_dram_rds && target_llcmiss <= cpus_dram_rds && cpus_dram_rds > 0) {
                     llcmiss_wb = wb_cnt * ((double)target_llcmiss / cpus_dram_rds);
                 } else {
-                    LOG(DEBUG) << fmt::format( "[{}:{}:{}]warning: wb_cnt {}, target_llcmiss {}, cpus_dram_rds {}\n", i,
-                            mon.tgid, mon.tid, wb_cnt, target_llcmiss, cpus_dram_rds);
+                    LOG(DEBUG) << fmt::format("[{}:{}:{}]warning: wb_cnt {}, target_llcmiss {}, cpus_dram_rds {}\n", i,
+                                              mon.tgid, mon.tid, wb_cnt, target_llcmiss, cpus_dram_rds);
                     llcmiss_wb = target_llcmiss;
                 }
 
@@ -378,9 +378,9 @@ int main(int argc, char *argv[]) {
                         (double)(target_l2stall / frequency) *
                         ((double)(weight * llcmiss_ro) / (double)(target_llchits + (weight * target_llcmiss))) * 1000;
                 }
-                LOG(DEBUG) << fmt::format("l2stall={}, mastall_wb={}, mastall_ro={}, target_llchits={}, target_llcmiss={}, weight={}\n",
-                                          target_l2stall, mastall_wb, mastall_ro, target_llchits, target_llcmiss,
-                                          weight);
+                LOG(DEBUG) << fmt::format(
+                    "l2stall={}, mastall_wb={}, mastall_ro={}, target_llchits={}, target_llcmiss={}, weight={}\n",
+                    target_l2stall, mastall_wb, mastall_ro, target_llchits, target_llcmiss, weight);
 
                 auto ma_wb = (double)mastall_wb / dramlatency;
                 auto ma_ro = (double)mastall_ro / dramlatency;
@@ -418,8 +418,7 @@ int main(int argc, char *argv[]) {
 
                 mon.before->pebs.total = mon.after->pebs.total;
 
-                LOG(DEBUG) << fmt::format("ma_wb={}, ma_ro={}, delay={}\n", ma_wb, ma_ro,
-                                          emul_delay);
+                LOG(DEBUG) << fmt::format("ma_wb={}, ma_ro={}, delay={}\n", ma_wb, ma_ro, emul_delay);
 
                 /* compensation of delay END(1) */
                 clock_gettime(CLOCK_MONOTONIC, &end_ts);

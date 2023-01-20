@@ -32,7 +32,9 @@ void CXLController::construct_topo(std::string_view newick_tree) {
     }
 }
 
-CXLController::CXLController(Policy p, int capacity) : CXLSwitch(0), capacity(capacity) { this->policy = p; }
+CXLController::CXLController(Policy *p, int capacity, bool is_page)
+    : CXLSwitch(0), capacity(capacity), policy(p), is_page(is_page) {
+}
 
 double CXLController::calculate_latency(LatencyPass elem) {
     double lat = 0.0;
@@ -90,12 +92,26 @@ void CXLController::delete_entry(uint64_t addr) {
     }
 }
 
-bool CXLController::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) {
-    for (auto switch_ : this->switches) {
-        switch_->insert(timestamp,phys_addr,virt_addr);
-    }
-    for (auto expander_ : this->expanders) {
-        expander_->insert(timestamp,phys_addr,virt_addr);
+bool CXLController::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
+    auto index_ = policy->compute_once(this)->insert(timestamp, phys_addr, virt_addr, 0);
+    if (index_ == -1) {
+        this->occupation.emplace(timestamp, phys_addr);
+        this->va_pa_map.emplace(virt_addr, phys_addr);
+        this->counter.inc_local();
+        return true;
+    } else {
+        this->counter.inc_remote();
+        for (auto switch_ : this->switches) {
+            if (switch_->insert(timestamp, phys_addr, virt_addr, index_)) {
+                return true;
+            }
+        }
+        for (auto expander_ : this->expanders) {
+            if (expander_->insert(timestamp, phys_addr, virt_addr, index_)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
 
@@ -117,3 +133,4 @@ std::vector<std::string> CXLController::tokenize(const std::string_view &s) {
     }
     return res;
 }
+void CXLController::add_lazy_remove(uint64_t virt_addr) {}

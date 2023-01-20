@@ -8,10 +8,11 @@
 #include "cxlendpoint.h"
 #include "helper.h"
 #include <map>
+
 class Policy {
 public:
     Policy();
-    virtual CXLEndPoint *compute_once(CXLController *);
+    virtual int compute_once(CXLController *) = 0;
 };
 // Saturate Local 90% and start interleave accrodingly the remote with topology
 // Say 3 remote, 2 200ns, 1 400ns, will give 40% 40% 20%
@@ -19,7 +20,10 @@ class InterleavePolicy : public Policy {
 
 public:
     InterleavePolicy();
-    CXLEndPoint *compute_once() override;
+    int last_remote = 0;
+    int all_size = 0;
+    std::vector<double> percentage;
+    int compute_once(CXLController *) override;
 };
 
 #endif // CXL_MEM_SIMULATOR_POLICY_H
