@@ -72,6 +72,14 @@ struct Elem {
     struct PEBSElem pebs;
 };
 
+struct BandwidthPass{
+
+};
+
+struct LatencyPass{
+
+};
+
 class PMUInfo {
 public:
     std::vector<Uncore> cbos;

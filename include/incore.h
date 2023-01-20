@@ -15,7 +15,7 @@ union CPUID_INFO {
 
 class Incore {
 public:
-    PerfInfo perf[7];
+    PerfInfo *perf[7];
     struct PerfConfig *perf_config;
     Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config);
     ~Incore() = default;

@@ -6,7 +6,7 @@
 Monitors::Monitors(int tnum, cpu_set_t *use_cpuset, int nmem, Helper h, CXLController *region_info) {
     mon = std::vector<Monitor>(tnum, Monitor(nmem, h));
     for (auto &m : mon) {
-        m.set_region_info(region_info->expanders.size(), region_info);
+        m.set_region_info(region_info->cur_expanders.size(), region_info);
     }
     /* init mon */
     for (int i = 0; i < tnum; i++) {

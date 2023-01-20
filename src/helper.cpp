@@ -309,7 +309,7 @@ int PMUInfo::unfreeze_counters_cbo_all() {
     int i, r;
 
     for (i = 0; i < helper->num_of_cbo(); i++) {
-        r = this->cbos[i].perf.start();
+        r = this->cbos[i].perf->start();
         if (r < 0) {
             LOG(ERROR) << fmt::format("perf_start failed. cbo:{}\n", i);
             return r;
@@ -321,7 +321,7 @@ int PMUInfo::freeze_counters_cbo_all() {
     int i, r;
 
     for (i = 0; i < helper->num_of_cbo(); i++) {
-        r = this->cbos[i].perf.stop();
+        r = this->cbos[i].perf->stop();
         if (r < 0) {
             LOG(ERROR) << fmt::format("perf_stop failed. cbo:{}\n", i);
             return r;

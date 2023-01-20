@@ -59,7 +59,7 @@ public:
     unsigned long flags;
     struct perf_event_attr attr;
     ThreadSafeMap *map;
-    PerfInfo();
+//    PerfInfo();
     PerfInfo(int group_fd, int cpu, pid_t pid, unsigned long flags, struct perf_event_attr attr);
     PerfInfo(int fd, int group_fd, int cpu, pid_t pid, unsigned long flags, struct perf_event_attr attr);
     ~PerfInfo();
@@ -69,7 +69,7 @@ public:
     int stop();
 };
 
-PerfInfo init_incore_perf(const pid_t, const int, uint64_t, uint64_t);
-PerfInfo init_incore_bpf_perf(const pid_t, const int);
+PerfInfo *init_incore_perf(const pid_t pid, const int cpu, uint64_t conf, uint64_t conf1);
+PerfInfo *init_incore_bpf_perf(const pid_t pid, const int cpu);
 void write_trace_to_map(ThreadSafeMap *map);
 #endif // CXL_MEM_SIMULATOR_PERF_H

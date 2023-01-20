@@ -4,20 +4,20 @@
 
 #include "cxlcontroller.h"
 
-void CXLController::insert_end_point(CXLMemExpander *end_point) { this->expanders.emplace_back(end_point); }
+void CXLController::insert_end_point(CXLMemExpander *end_point) { this->cur_expanders.emplace_back(end_point); }
 
 void CXLController::construct_topo(std::string_view newick_tree) {
     auto tokens = tokenize(newick_tree);
-    std::vector<CXLEndPoint *> stk;
+    std::vector<CXLSwitch *> stk;
     stk.push_back(this);
     for (const auto &token : tokens) {
-        if (token == "(" &&num_switches==0){
+        if (token == "(" && num_switches == 0) {
             num_switches++;
-            continue;
-        } else if (token =="(") {
+        } else if (token == "(") {
             /** if is not on the top level */
             auto cur = new CXLSwitch(num_switches++);
-            reinterpret_cast<CXLSwitch *>(stk.back())->switches.push_back(cur);
+            stk.back()->switches.push_back(cur);
+            stk.push_back(cur);
         } else if (token == ")") {
             if (!stk.empty()) {
                 stk.pop_back();
@@ -25,15 +25,9 @@ void CXLController::construct_topo(std::string_view newick_tree) {
                 throw std::invalid_argument("Unbalanced number of parentheses");
             }
         } else if (token == ",") {
-            if (!stk.empty()) {
-                stk.pop_back();
-            } else {
-                throw std::invalid_argument("Unbalanced number of parentheses");
-            }
-            auto cur = new CXLSwitch(num_switches++);
-            reinterpret_cast<CXLSwitch *>(stk.back())->switches.push_back(cur);
+            continue;
         } else {
-            reinterpret_cast<CXLSwitch *>(stk.back())->expanders.emplace_back(this->expanders[atoi(token.c_str())]);
+            stk.back()->expanders.emplace_back(this->cur_expanders[atoi(token.c_str()) - 1]);
         }
     }
 }
@@ -51,37 +45,39 @@ double CXLController::calculate_latency(double weight, struct Elem *elem) {
     return lat;
 }
 
-double CXLController::calculate_bandwidth(double weight, struct Elem *elem) {
+double CXLController::calculate_bandwidth(BandwidthPass elem) {
     double bw = 0.0;
     for (auto switch_ : this->switches) {
-        bw += switch_->calculate_bandwidth(weight, elem);
+        bw += switch_->calculate_bandwidth(elem);
     }
     for (auto expander_ : this->expanders) {
-        bw += expander_->calculate_bandwidth(weight, elem);
+        bw += expander_->calculate_bandwidth(elem);
     }
     return bw;
 }
 
-void CXLController::output() {
-    if (this->switches.size()) {
-        std::cout << "(";
+std::string CXLController::output() {
+    std::stringstream out;
+    if (!this->switches.empty()) {
+        out << "(";
         this->switches[0]->output();
         for (size_t i = 1; i < this->switches.size(); ++i) {
-            std::cout << ",";
+            out << ",";
             this->switches[i]->output();
         }
-        std::cout << ")";
+        out << ")";
     } else if (!this->expanders.empty()) {
-        std::cout << "(";
+        out << "(";
         this->expanders[0]->output();
         for (size_t i = 1; i < this->expanders.size(); ++i) {
-            std::cout << ",";
+            out << ",";
             this->expanders[i]->output();
         }
-        std::cout << ")";
+        out << ")";
     } else {
-        std::cout << this->id;
+        out << this->id;
     }
+    return out.str();
 }
 
 void CXLController::delete_entry(uint64_t addr) {

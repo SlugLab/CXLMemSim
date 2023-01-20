@@ -348,14 +348,14 @@ static perf_event_attr load_and_attach(const char *event, struct bpf_insn *prog,
     return attr;
 }
 
-PerfInfo::PerfInfo() {
-    this->fd = perf_event_open(&this->attr, this->pid, this->cpu, this->group_fd, this->flags);
-    if (this->fd == -1) {
-        LOG(ERROR) << "perf_event_open";
-        throw;
-    }
-    ioctl(this->fd, PERF_EVENT_IOC_RESET, 0);
-}
+//PerfInfo::PerfInfo() {
+//    this->fd = perf_event_open(&this->attr, this->pid, this->cpu, this->group_fd, this->flags);
+//    if (this->fd == -1) {
+//        LOG(ERROR) << "perf_event_open";
+//        throw;
+//    }
+//    ioctl(this->fd, PERF_EVENT_IOC_RESET, 0);
+//}
 PerfInfo::PerfInfo(int group_fd, int cpu, pid_t pid, unsigned long flags, struct perf_event_attr attr)
     : group_fd(group_fd), cpu(cpu), pid(pid), flags(flags), attr(attr) {
     this->fd = perf_event_open(&this->attr, this->pid, this->cpu, this->group_fd, this->flags);
@@ -418,10 +418,11 @@ std::map<uint64_t, uint64_t> PerfInfo::read_trace_pipe() {
     return addr_map;
 }
 
-PerfInfo init_incore_perf(const pid_t pid, const int cpu, uint64_t conf, uint64_t conf1) {
+PerfInfo *init_incore_perf(const pid_t pid, const int cpu, uint64_t conf, uint64_t conf1) {
     int r, n_pid, n_cpu, group_fd, flags;
     struct perf_event_attr attr {
-        .type = PERF_TYPE_RAW, .size = sizeof(attr), .config = conf, .disabled = 1, .inherit = 1, .config1 = conf1
+        .type = PERF_TYPE_RAW, .size = sizeof(attr), .config = conf, .disabled = 1, .inherit = 1, .config1 = conf1,
+        .clockid = 0
     };
     if ((0 <= cpu) && (cpu < Helper::num_of_cpu())) {
         n_pid = -1;
@@ -434,10 +435,10 @@ PerfInfo init_incore_perf(const pid_t pid, const int cpu, uint64_t conf, uint64_
     group_fd = -1;
     flags = 0x08;
 
-    PerfInfo perf{group_fd, n_cpu, n_pid, static_cast<unsigned long>(flags), attr};
+   return new PerfInfo(group_fd, n_cpu, n_pid, static_cast<unsigned long>(flags), attr);
 }
 
-PerfInfo init_incore_bpf_perf(const pid_t pid, const int cpu) {
+PerfInfo *init_incore_bpf_perf(const pid_t pid, const int cpu) {
     int fd, i, ret, maps_shndx = -1, strtabidx = -1;
     struct perf_event_attr attr {};
     Elf *elf;
@@ -568,7 +569,7 @@ PerfInfo init_incore_bpf_perf(const pid_t pid, const int cpu) {
             attr = load_and_attach(shname, (struct bpf_insn *)data->d_buf, data->d_size, pid, cpu);
     }
 
-    PerfInfo perf{event_fd, -1, cpu, pid, 0, attr};
+    return new PerfInfo(event_fd, -1, cpu, pid, 0, attr);
 }
 
 void write_trace_to_map(ThreadSafeMap *map) {

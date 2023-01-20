@@ -36,7 +36,8 @@ int main(int argc, char *argv[]) {
 
     cxxopts::Options options("CXL-MEM-Simulator",
                              "For simulation of CXL.mem Type 3 on Broadwell, Skylake, and Saphire Rapids");
-    options.add_options()("t,target", "The script file to execute", cxxopts::value<std::string>()->default_value("ls"))(
+    options.add_options()("t,target", "The script file to execute",
+                          cxxopts::value<std::string>()->default_value("ls -alu"))(
         "h,help", "The value for epoch value", cxxopts::value<bool>()->default_value("false"))(
         "i,interval", "The value for epoch value", cxxopts::value<int>()->default_value("20"))(
         "c,cpuset", "The CPUSET for CPU to set affinity on",
@@ -45,15 +46,16 @@ int main(int argc, char *argv[]) {
         "p,pebsperiod", "The pebs sample period", cxxopts::value<int>()->default_value("1"))(
         "m,mode", "Page mode or cacheline mode", cxxopts::value<std::string>()->default_value("p"))(
         "o,topology", "The newick tree input for the CXL memory expander topology",
-        cxxopts::value<std::string>()->default_value("(1)"))(
+        cxxopts::value<std::string>()->default_value("(1,(2,3))"))(
         "s,capacity", "The capacity vector of the CXL memory expander with the firsgt local",
-        cxxopts::value<std::vector<int>>()->default_value("10,20"))(
+        cxxopts::value<std::vector<int>>()->default_value("10,20,20,20"))(
         "f,frequency", "The frequency for the running thread", cxxopts::value<double>()->default_value("4000"))(
         "l,latency", "The simulated latency by epoch based calculation for injected latency",
-        cxxopts::value<std::vector<int>>()->default_value("100,150"))(
+        cxxopts::value<std::vector<int>>()->default_value("100,150,100,150,100,150"))(
         "w,weight", "The simulated weight for multiplying with the LLC miss",
-        cxxopts::value<double>()->default_value("4.1"))("b,bandwidth", "The simulated bandwidth by linear regression",
-                                                        cxxopts::value<std::vector<int>>()->default_value("50,50"));
+        cxxopts::value<double>()->default_value("4.1"))(
+        "b,bandwidth", "The simulated bandwidth by linear regression",
+        cxxopts::value<std::vector<int>>()->default_value("50,50,50,50,50,50"));
 
     auto result = options.parse(argc, argv);
     if (result["help"].as<bool>()) {
@@ -84,7 +86,8 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < helper.cpu; i++) {
         if (!(!use_cpus || use_cpus & 1UL << i)) {
             CPU_SET(i, &use_cpuset);
-            LOG(DEBUG) << fmt::format("use cpuid: {}\n", i);
+            LOG(DEBUG) << fmt::format("use cpuid: {}\n", i); /** TODO: set CAT here */
+            break;
         }
     }
     auto tnum = CPU_COUNT(&use_cpuset);
@@ -95,6 +98,7 @@ int main(int argc, char *argv[]) {
     LOG(DEBUG) << fmt::format("tnum:{}, intrval:{}, weight:{}\n", tnum, interval, weight);
     for (auto const &[idx, value] : capacity | ranges::views::enumerate) {
         if (idx == 0) {
+            LOG(DEBUG) << fmt::format("local_memory_region capacity:{}\n", value);
             controller = new CXLController(policy, capacity[0]);
         } else {
             LOG(DEBUG) << fmt::format("memory_region:{}\n", (idx - 1) + 1);
@@ -109,6 +113,7 @@ int main(int argc, char *argv[]) {
         }
     }
     controller->construct_topo(topology);
+    LOG(INFO) << controller->output() << "\n";
     Monitors monitors{tnum, &use_cpuset, static_cast<int>(capacity.size()) - 1, helper, controller};
     int sock;
     struct sockaddr_un addr {};
@@ -118,7 +123,7 @@ int main(int argc, char *argv[]) {
     strcpy(addr.sun_path, SOCKET_PATH);
     remove(addr.sun_path);
     if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
-        LOG(ERROR) << "Failed to execute. Can't bind to a socket.";
+        LOG(ERROR) << "Failed to execute. Can't bind to a socket.\n";
         exit(1);
     }
     LOG(DEBUG) << fmt::format("cpu_freq:{}\n", frequency);
@@ -156,14 +161,14 @@ int main(int argc, char *argv[]) {
             }
 
             args[current_arg_idx] = current_arg;
-            std::cout << fmt::format("args[%d] = %s\n", current_arg_idx, args[current_arg_idx]);
+            std::cout << fmt::format("args[{}] = {}\n", current_arg_idx, args[current_arg_idx]);
         }
         execv(filename, args);
         /* We do not need to check the return value */
         LOG(ERROR) << "Exec: failed to create target process";
         exit(1);
     }
-    // TODO: bind the rest of core in 0-7 and affine the CXL Simulator to 8
+    /** TODO: bind the rest of core in 0-7 and affine the CXL Simulator to 8 */
     // In case of process, use SIGSTOP.
     auto res = monitors.enable(t_process, t_process, true, 0, tnum, false);
     if (res == -1) {
@@ -174,7 +179,7 @@ int main(int argc, char *argv[]) {
         LOG(DEBUG) << fmt::format("pid({}) not found. might be already terminated.\n", t_process);
     }
     cur_processes++;
-    LOG(DEBUG) << fmt::format("pid of mes = {}, cur process={}\n", t_process, cur_processes);
+    LOG(DEBUG) << fmt::format("pid of CXLMemSim = {}, cur process={}\n", t_process, cur_processes);
 
     if (cur_processes >= ncpu) {
         LOG(ERROR) << fmt::format(
@@ -202,7 +207,7 @@ int main(int argc, char *argv[]) {
     waittime.tv_nsec = (interval % 1000) * 1000000;
 
     LOG(DEBUG) << "The target process starts running.\n";
-    LOG(DEBUG) << fmt::format("set nano sec = %lu\n", waittime.tv_nsec);
+    LOG(DEBUG) << fmt::format("set nano sec = {}\n", waittime.tv_nsec);
 
     /* read CBo params */
     for (auto mon : monitors.mon) {
@@ -287,7 +292,7 @@ int main(int argc, char *argv[]) {
             }
             if (mon.status == MONITOR_ON) {
                 clock_gettime(CLOCK_MONOTONIC, &start_ts);
-                LOG(DEBUG) << fmt::format("[{}:{}:{}] start_ts: %010lu.%09lu\n", i, mon.tgid, mon.tid, start_ts.tv_sec,
+                LOG(DEBUG) << fmt::format("[{}:{}:{}] start_ts: {}.{}\n", i, mon.tgid, mon.tid, start_ts.tv_sec,
                                           start_ts.tv_nsec);
 
 #ifndef ONLY_CALCULATION
@@ -300,7 +305,7 @@ int main(int argc, char *argv[]) {
                     pmu.cbos[j].read_cbo_elems(&mon.after->cbos[j]);
                     wb_cnt += mon.after->cbos[j].llc_wb - mon.before->cbos[j].llc_wb;
                 }
-                LOG(ERROR) << fmt::format("[{}:{}:{}] LLC_WB = %ld" PRIu64 "\n", i, mon.tgid, mon.tid, wb_cnt);
+                LOG(ERROR) << fmt::format("[{}:{}:{}] LLC_WB = {}" PRIu64 "\n", i, mon.tgid, mon.tid, wb_cnt);
 
                 /* read CPU params */
                 uint64_t cpus_dram_rds = 0;
@@ -350,16 +355,16 @@ int main(int argc, char *argv[]) {
 
                 uint64_t llcmiss_ro = 0;
                 if (target_llcmiss < llcmiss_wb) {
-                    LOG(ERROR) << fmt::format("[{}:{}:{}] cpus_dram_rds %lu, llcmiss_wb %lu, target_llcmiss %lu\n", i,
+                    LOG(ERROR) << fmt::format("[{}:{}:{}] cpus_dram_rds {}, llcmiss_wb {}, target_llcmiss {}\n", i,
                                               mon.tgid, mon.tid, cpus_dram_rds, llcmiss_wb, target_llcmiss);
-                    printf("!!!!llcmiss_ro is %lu!!!!!\n", llcmiss_ro);
+                    printf("!!!!llcmiss_ro is {}!!!!!\n", llcmiss_ro);
                     llcmiss_wb = target_llcmiss;
                     llcmiss_ro = 0;
                 } else {
                     llcmiss_ro = target_llcmiss - llcmiss_wb;
                 }
-                LOG(ERROR) << fmt::format("[{}:{}:{}]llcmiss_wb=%lu, llcmiss_ro=%lu\n", i, mon.tgid, mon.tid,
-                                          llcmiss_wb, llcmiss_ro);
+                LOG(ERROR) << fmt::format("[{}:{}:{}]llcmiss_wb={}, llcmiss_ro={}\n", i, mon.tgid, mon.tid, llcmiss_wb,
+                                          llcmiss_ro);
 
                 uint64_t mastall_wb = 0;
                 uint64_t mastall_ro = 0;
@@ -391,8 +396,7 @@ int main(int argc, char *argv[]) {
                 //     // If the total is 0, divide equally.
                 //     sample_prop = (double)1 / (double)mon.num_of_region;
                 // }
-                LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs: total=%lu, \n", i, mon.tgid, mon.tid,
-                                          mon.after->pebs.total);
+                LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs: total={}, \n", i, mon.tgid, mon.tid, mon.after->pebs.total);
                 // for (auto j = 0; j < mon.num_of_region; j++) {
                 //     if (!total_is_zero) {
                 //         sample = (double)(mon.after->pebs.sample[j] - mon.before->pebs.sample[j]);
@@ -401,14 +405,14 @@ int main(int argc, char *argv[]) {
                 //     emul_delay += (double)(ma_ro)*sample_prop * (emul_nvm_lats[j].read - dramlatency) +
                 //                   (double)(ma_wb)*sample_prop * (emul_nvm_lats[j].write - dramlatency);
                 //     mon.before->pebs.sample[j] = mon.after->pebs.sample[j];
-                //     LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs sample[%d]: =%lu, \n", i, mon.tgid, mon.tid, j,
+                //     LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs sample[%d]: ={}, \n", i, mon.tgid, mon.tid, j,
                 //                               mon.after->pebs.sample[j]);
                 // }
                 /** TODO: calculate latency construct the passing value and use interleaving policy and counter to get
                  * the sample_prop */
                 // emul_delay += controller.calculate_latency(weight, ma_ro, ma_wb, dramlatency);
                 // mon.before->pebs.sample[j] = mon.after->pebs.sample[j];
-                // LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs sample[%d]: =%lu, \n", i, mon.tgid, mon.tid, j,
+                // LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs sample[%d]: ={}, \n", i, mon.tgid, mon.tid, j,
                 //                           mon.after->pebs.sample[j]);
 
                 /** TODO: calculate bandwidth */
