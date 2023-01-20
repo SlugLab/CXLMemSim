@@ -11,7 +11,7 @@ CXLMemExpander::CXLMemExpander(int read_bw, int write_bw, int read_lat, int writ
     this->latency.write = write_lat;
     this->id = id;
 }
-double CXLMemExpander::calculate_latency(double weight, struct Elem *elem) { return 0; }
+double CXLMemExpander::calculate_latency(LatencyPass elem) { return 0; }
 double CXLMemExpander::calculate_bandwidth(BandwidthPass elem) {
     // Iterate the map within the last 20ms
 
@@ -47,32 +47,31 @@ uint64_t CXLMemExpander::va_to_pa(uint64_t addr) {
 }
 void CXLMemExpander::add_lazy_remove(uint64_t addr) { this->lazy_remove.push_back(va_to_pa(addr)); }
 
-void CXLMemExpander::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) {
+bool CXLMemExpander::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) {
     this->va_pa_map.emplace(virt_addr, phys_addr);
     this->occupation.emplace(timestamp, phys_addr);
 }
 std::string CXLMemExpander::output() { return fmt::format("CXLMemExpander {}", this->id); }
 std::string CXLSwitch::output() {
-    std::stringstream out;
-    out << "CXLSwitch " << this->id;
+    std::string res = fmt::format("CXLSwitch {} ", this->id);
     if (!this->switches.empty()) {
-        out << "(";
-        this->switches[0]->output();
+        res += "(";
+        res += this->switches[0]->output();
         for (size_t i = 1; i < this->switches.size(); ++i) {
-            out << ",";
-            this->switches[i]->output();
+            res += ",";
+            res += this->switches[i]->output();
         }
-        out << ")";
+        res += ")";
     } else if (!this->expanders.empty()) {
-        out << "(";
-        this->expanders[0]->output();
+        res += "(";
+        res += this->expanders[0]->output();
         for (size_t i = 1; i < this->expanders.size(); ++i) {
-            out << ",";
-            this->expanders[i]->output();
+            res += ",";
+            res += this->expanders[i]->output();
         }
-        out << ")";
+        res += ")";
     }
-    return out.str();
+    return res;
 }
 void CXLSwitch::delete_entry(uint64_t addr) {
     for (auto &expander : this->expanders) {
@@ -83,13 +82,13 @@ void CXLSwitch::delete_entry(uint64_t addr) {
     }
 }
 CXLSwitch::CXLSwitch(int id) : id(id) { this->counter = CXLCounter(); }
-double CXLSwitch::calculate_latency(double weight, struct Elem *elem) {
+double CXLSwitch::calculate_latency(LatencyPass elem) {
     double lat = 0.0;
     for (auto &expander : this->expanders) {
-        lat += expander->calculate_latency(weight, elem);
+        lat += expander->calculate_latency(elem);
     }
     for (auto &switch_ : this->switches) {
-        lat += switch_->calculate_latency(weight, elem);
+        lat += switch_->calculate_latency(elem);
     }
     return lat;
 }
@@ -103,7 +102,7 @@ double CXLSwitch::calculate_bandwidth(BandwidthPass elem) {
     }
     return bw;
 }
-void CXLSwitch::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) {
+bool CXLSwitch::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) {
     for (auto &expander : this->expanders) {
         expander->insert(timestamp, phys_addr, virt_addr);
     }

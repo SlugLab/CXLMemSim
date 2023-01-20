@@ -34,13 +34,13 @@ void CXLController::construct_topo(std::string_view newick_tree) {
 
 CXLController::CXLController(Policy p, int capacity) : CXLSwitch(0), capacity(capacity) { this->policy = p; }
 
-double CXLController::calculate_latency(double weight, struct Elem *elem) {
+double CXLController::calculate_latency(LatencyPass elem) {
     double lat = 0.0;
     for (auto switch_ : this->switches) {
-        lat += switch_->calculate_latency(weight, elem);
+        lat += switch_->calculate_latency(elem);
     }
     for (auto expander_ : this->expanders) {
-        lat += expander_->calculate_latency(weight, elem);
+        lat += expander_->calculate_latency(elem);
     }
     return lat;
 }
@@ -57,27 +57,28 @@ double CXLController::calculate_bandwidth(BandwidthPass elem) {
 }
 
 std::string CXLController::output() {
-    std::stringstream out;
+    std::string res;
     if (!this->switches.empty()) {
-        out << "(";
-        this->switches[0]->output();
+        res += "(";
+        std::basic_string<char, std::char_traits<char>, std::allocator<char>> &string = res +=
+            this->switches[0]->output();
         for (size_t i = 1; i < this->switches.size(); ++i) {
-            out << ",";
-            this->switches[i]->output();
+            res += ",";
+            res += this->switches[i]->output();
         }
-        out << ")";
+        res += ")";
     } else if (!this->expanders.empty()) {
-        out << "(";
-        this->expanders[0]->output();
+        res += "(";
+        res += this->expanders[0]->output();
         for (size_t i = 1; i < this->expanders.size(); ++i) {
-            out << ",";
-            this->expanders[i]->output();
+            res += ",";
+            res += this->expanders[i]->output();
         }
-        out << ")";
+        res += ")";
     } else {
-        out << this->id;
+        res += this->id;
     }
-    return out.str();
+    return res;
 }
 
 void CXLController::delete_entry(uint64_t addr) {
@@ -89,7 +90,14 @@ void CXLController::delete_entry(uint64_t addr) {
     }
 }
 
-void CXLController::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) {}
+bool CXLController::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) {
+    for (auto switch_ : this->switches) {
+        switch_->insert(timestamp,phys_addr,virt_addr);
+    }
+    for (auto expander_ : this->expanders) {
+        expander_->insert(timestamp,phys_addr,virt_addr);
+    }
+}
 
 std::vector<std::string> CXLController::tokenize(const std::string_view &s) {
     std::vector<std::string> res;

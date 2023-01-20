@@ -66,7 +66,7 @@ static int load_maps(struct bpf_map_data *maps, int nr_maps) {
                                        maps[i].def.value_size, maps[i].def.max_entries, &opt);
         }
         if (map_fd[i] < 0) {
-            printf("failed to create a map: %d %s\n", errno, strerror(errno));
+            printf("failed to create a map: {} {}\n", errno, strerror(errno));
             return 1;
         }
         maps[i].fd = map_fd[i];
@@ -97,7 +97,7 @@ static int parse_relo_and_apply(Elf_Data *data, Elf_Data *symbols, GElf_Shdr *sh
         gelf_getsym(symbols, GELF_R_SYM(rel.r_info), &sym);
 
         if (insn[insn_idx].code != (BPF_LD | BPF_IMM | BPF_DW)) {
-            printf("invalid relo for insn[%d].code 0x%x\n", insn_idx, insn[insn_idx].code);
+            printf("invalid relo for insn[{}].code 0x%x\n", insn_idx, insn[insn_idx].code);
             return 1;
         }
         insn[insn_idx].src_reg = BPF_PSEUDO_MAP_FD;
@@ -112,7 +112,7 @@ static int parse_relo_and_apply(Elf_Data *data, Elf_Data *symbols, GElf_Shdr *sh
         if (match) {
             insn[insn_idx].imm = maps[map_idx].fd;
         } else {
-            printf("invalid relo for insn[%d] no map_data match\n", insn_idx);
+            printf("invalid relo for insn[{}] no map_data match\n", insn_idx);
             return 1;
         }
     }
@@ -161,7 +161,7 @@ static int load_elf_maps_section(struct bpf_map_data *maps, int maps_shndx, Elf 
     if (scn)
         data_maps = elf_getdata(scn, NULL);
     if (!scn || !data_maps) {
-        printf("Failed to get Elf_Data from maps section %d\n", maps_shndx);
+        printf("Failed to get Elf_Data from maps section {}\n", maps_shndx);
         return -EINVAL;
     }
 
@@ -207,7 +207,7 @@ static int load_elf_maps_section(struct bpf_map_data *maps, int maps_shndx, Elf 
         map_name = elf_strptr(elf, strtabidx, sym[i].st_name);
         maps[i].name = strdup(map_name);
         if (!maps[i].name) {
-            printf("strdup(%s): %s(%d)\n", map_name, strerror(errno), errno);
+            printf("strdup({}): {}({})\n", map_name, strerror(errno), errno);
             free(sym);
             return -errno;
         }
@@ -277,7 +277,7 @@ static perf_event_attr load_and_attach(const char *event, struct bpf_insn *prog,
 
     fd = bpf_load_program(prog_type, prog, insns_cnt, license, kern_version, bpf_log_buf, BPF_LOG_BUF_SIZE);
     if (fd < 0) {
-        LOG(ERROR) << fmt::format("bpf_load_program() err=%d\n%s", errno, bpf_log_buf);
+        LOG(ERROR) << fmt::format("bpf_load_program() err={}\n{}", errno, bpf_log_buf);
         throw;
     }
 
@@ -297,10 +297,10 @@ static perf_event_attr load_and_attach(const char *event, struct bpf_insn *prog,
         snprintf(buf, sizeof(buf), "echo '%c:%s %s' >> /sys/kernel/debug/tracing/kprobe_events", is_kprobe ? 'p' : 'r',
                  event, event);
         err = system(buf);
-        if (err < 0) {
-            LOG(ERROR) << fmt::format("failed to create kprobe '%s' error '%s'\n", event, strerror(errno));
-            throw;
-        }
+        //        if (err < 0) {
+        //            LOG(ERROR) << fmt::format("failed to create kprobe '{}' error '{}'\n", event, strerror(errno));
+        //            throw;
+        //        }
 
         strcpy(buf, DEBUGFS);
         strcat(buf, "events/kprobes/");
@@ -321,13 +321,13 @@ static perf_event_attr load_and_attach(const char *event, struct bpf_insn *prog,
 
     efd = open(buf, O_RDONLY, 0);
     if (efd < 0) {
-        LOG(ERROR) << fmt::format("failed to open event %s\n", event);
+        LOG(ERROR) << fmt::format("failed to open event {}\n", event);
         throw;
     }
 
     err = read(efd, buf, sizeof(buf));
     if (err < 0 || err >= sizeof(buf)) {
-        LOG(ERROR) << fmt::format("read from '%s' failed '%s'\n", event, strerror(errno));
+        LOG(ERROR) << fmt::format("read from '{}' failed '{}'\n", event, strerror(errno));
         throw;
     }
 
@@ -339,7 +339,7 @@ static perf_event_attr load_and_attach(const char *event, struct bpf_insn *prog,
 
     efd = perf_event_open(&attr, pid, cpu, -1 /*group_fd*/, 0);
     if (efd < 0) {
-        LOG(ERROR) << fmt::format("event %d fd %d err %s\n", id, efd, strerror(errno));
+        LOG(ERROR) << fmt::format("event {} fd {} err {}\n", id, efd, strerror(errno));
         throw;
     }
     event_fd = efd;
@@ -348,14 +348,14 @@ static perf_event_attr load_and_attach(const char *event, struct bpf_insn *prog,
     return attr;
 }
 
-//PerfInfo::PerfInfo() {
-//    this->fd = perf_event_open(&this->attr, this->pid, this->cpu, this->group_fd, this->flags);
-//    if (this->fd == -1) {
-//        LOG(ERROR) << "perf_event_open";
-//        throw;
-//    }
-//    ioctl(this->fd, PERF_EVENT_IOC_RESET, 0);
-//}
+// PerfInfo::PerfInfo() {
+//     this->fd = perf_event_open(&this->attr, this->pid, this->cpu, this->group_fd, this->flags);
+//     if (this->fd == -1) {
+//         LOG(ERROR) << "perf_event_open";
+//         throw;
+//     }
+//     ioctl(this->fd, PERF_EVENT_IOC_RESET, 0);
+// }
 PerfInfo::PerfInfo(int group_fd, int cpu, pid_t pid, unsigned long flags, struct perf_event_attr attr)
     : group_fd(group_fd), cpu(cpu), pid(pid), flags(flags), attr(attr) {
     this->fd = perf_event_open(&this->attr, this->pid, this->cpu, this->group_fd, this->flags);
@@ -368,9 +368,10 @@ PerfInfo::PerfInfo(int group_fd, int cpu, pid_t pid, unsigned long flags, struct
 PerfInfo::PerfInfo(int fd, int group_fd, int cpu, pid_t pid, unsigned long flags, struct perf_event_attr attr)
     : fd(fd), group_fd(group_fd), cpu(cpu), pid(pid), flags(flags), attr(attr) {
     this->map = new ThreadSafeMap();
-    std::jthread thr{[&] { write_trace_to_map(map); }};
+    this->j = std::jthread{[&] { write_trace_to_map(map); }};
 }
 PerfInfo::~PerfInfo() {
+    this->j.join();
     if (this->fd != -1) {
         close(this->fd);
         this->fd = -1;
@@ -435,7 +436,7 @@ PerfInfo *init_incore_perf(const pid_t pid, const int cpu, uint64_t conf, uint64
     group_fd = -1;
     flags = 0x08;
 
-   return new PerfInfo(group_fd, n_cpu, n_pid, static_cast<unsigned long>(flags), attr);
+    return new PerfInfo(group_fd, n_cpu, n_pid, static_cast<unsigned long>(flags), attr);
 }
 
 PerfInfo *init_incore_bpf_perf(const pid_t pid, const int cpu) {
@@ -575,13 +576,13 @@ PerfInfo *init_incore_bpf_perf(const pid_t pid, const int cpu) {
 void write_trace_to_map(ThreadSafeMap *map) {
     std::ifstream fp(DEBUGFS "trace_pipe");
     int i;
-    int size;
+    unsigned long size;
     unsigned long address;
     unsigned long long time;
     std::string line;
     while (std::getline(fp, line)) {
-        if (line.size() > 50) {
-            i = std::sscanf(line.substr(51, 57).c_str(), "bpf_trace_printk: munmap %d %lu %llu", &size, &address,
+        if (line.size() > 50 && line.contains("ls")) {
+            i = std::sscanf(line.substr(51, 57).c_str(), "bpf_trace_printk: munmap %lu %lu %llu", &size, &address,
                             &time);
             std::cout << line.substr(51, 57).c_str() << " " << i << std::endl;
             if (i > 1) {

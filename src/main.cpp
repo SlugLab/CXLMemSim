@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
     cxxopts::Options options("CXL-MEM-Simulator",
                              "For simulation of CXL.mem Type 3 on Broadwell, Skylake, and Saphire Rapids");
     options.add_options()("t,target", "The script file to execute",
-                          cxxopts::value<std::string>()->default_value("ls -alu"))(
+                          cxxopts::value<std::string>()->default_value("./microbench/many_calloc"))(
         "h,help", "The value for epoch value", cxxopts::value<bool>()->default_value("false"))(
         "i,interval", "The value for epoch value", cxxopts::value<int>()->default_value("20"))(
         "c,cpuset", "The CPUSET for CPU to set affinity on",
@@ -114,7 +114,6 @@ int main(int argc, char *argv[]) {
     }
     controller->construct_topo(topology);
     LOG(INFO) << controller->output() << "\n";
-    Monitors monitors{tnum, &use_cpuset, static_cast<int>(capacity.size()) - 1, helper, controller};
     int sock;
     struct sockaddr_un addr {};
 
@@ -129,6 +128,7 @@ int main(int argc, char *argv[]) {
     LOG(DEBUG) << fmt::format("cpu_freq:{}\n", frequency);
     LOG(DEBUG) << fmt::format("num_of_cbo:{}\n", ncbo);
     LOG(DEBUG) << fmt::format("num_of_cpu:{}\n", ncpu);
+    Monitors monitors{tnum, &use_cpuset, static_cast<int>(capacity.size()) - 1, helper, controller};
 
     /* zombie avoid */
     Helper::detach_children();
@@ -161,11 +161,11 @@ int main(int argc, char *argv[]) {
             }
 
             args[current_arg_idx] = current_arg;
-            std::cout << fmt::format("args[{}] = {}\n", current_arg_idx, args[current_arg_idx]);
+           LOG(INFO) << fmt::format("args[{}] = {}\n", current_arg_idx, args[current_arg_idx]);
         }
         execv(filename, args);
         /* We do not need to check the return value */
-        LOG(ERROR) << "Exec: failed to create target process";
+        LOG(ERROR) << "Exec: failed to create target process\n";
         exit(1);
     }
     /** TODO: bind the rest of core in 0-7 and affine the CXL Simulator to 8 */
@@ -305,7 +305,7 @@ int main(int argc, char *argv[]) {
                     pmu.cbos[j].read_cbo_elems(&mon.after->cbos[j]);
                     wb_cnt += mon.after->cbos[j].llc_wb - mon.before->cbos[j].llc_wb;
                 }
-                LOG(ERROR) << fmt::format("[{}:{}:{}] LLC_WB = {}" PRIu64 "\n", i, mon.tgid, mon.tid, wb_cnt);
+                LOG(INFO) << fmt::format("[{}:{}:{}] LLC_WB = {}\n", i, mon.tgid, mon.tid, wb_cnt);
 
                 /* read CPU params */
                 uint64_t cpus_dram_rds = 0;
@@ -348,7 +348,7 @@ int main(int argc, char *argv[]) {
                 if (wb_cnt <= cpus_dram_rds && target_llcmiss <= cpus_dram_rds && cpus_dram_rds > 0) {
                     llcmiss_wb = wb_cnt * ((double)target_llcmiss / cpus_dram_rds);
                 } else {
-                    fprintf(stderr, "[{}:{}:{}]warning: wb_cnt %ju, target_llcmiss %ju, cpus_dram_rds %ju\n", i,
+                    LOG(DEBUG) << fmt::format( "[{}:{}:{}]warning: wb_cnt {}, target_llcmiss {}, cpus_dram_rds {}\n", i,
                             mon.tgid, mon.tid, wb_cnt, target_llcmiss, cpus_dram_rds);
                     llcmiss_wb = target_llcmiss;
                 }
@@ -357,13 +357,13 @@ int main(int argc, char *argv[]) {
                 if (target_llcmiss < llcmiss_wb) {
                     LOG(ERROR) << fmt::format("[{}:{}:{}] cpus_dram_rds {}, llcmiss_wb {}, target_llcmiss {}\n", i,
                                               mon.tgid, mon.tid, cpus_dram_rds, llcmiss_wb, target_llcmiss);
-                    printf("!!!!llcmiss_ro is {}!!!!!\n", llcmiss_ro);
+                    LOG(ERROR) << fmt::format("!!!!llcmiss_ro is {}!!!!!\n", llcmiss_ro);
                     llcmiss_wb = target_llcmiss;
                     llcmiss_ro = 0;
                 } else {
                     llcmiss_ro = target_llcmiss - llcmiss_wb;
                 }
-                LOG(ERROR) << fmt::format("[{}:{}:{}]llcmiss_wb={}, llcmiss_ro={}\n", i, mon.tgid, mon.tid, llcmiss_wb,
+                LOG(DEBUG) << fmt::format("[{}:{}:{}]llcmiss_wb={}, llcmiss_ro={}\n", i, mon.tgid, mon.tid, llcmiss_wb,
                                           llcmiss_ro);
 
                 uint64_t mastall_wb = 0;
@@ -378,8 +378,7 @@ int main(int argc, char *argv[]) {
                         (double)(target_l2stall / frequency) *
                         ((double)(weight * llcmiss_ro) / (double)(target_llchits + (weight * target_llcmiss))) * 1000;
                 }
-                LOG(DEBUG) << fmt::format("l2stall=%" PRIu64 ", mastall_wb=%" PRIu64 ", mastall_ro=%" PRIu64
-                                          ", target_llchits=%" PRIu64 ", target_llcmiss=%" PRIu64 ", weight=%lf\n",
+                LOG(DEBUG) << fmt::format("l2stall={}, mastall_wb={}, mastall_ro={}, target_llchits={}, target_llcmiss={}, weight={}\n",
                                           target_l2stall, mastall_wb, mastall_ro, target_llchits, target_llcmiss,
                                           weight);
 
@@ -419,13 +418,13 @@ int main(int argc, char *argv[]) {
 
                 mon.before->pebs.total = mon.after->pebs.total;
 
-                LOG(DEBUG) << fmt::format("ma_wb=%" PRIu64 ", ma_ro=%" PRIu64 ", delay=%" PRIu64 "\n", ma_wb, ma_ro,
+                LOG(DEBUG) << fmt::format("ma_wb={}, ma_ro={}, delay={}\n", ma_wb, ma_ro,
                                           emul_delay);
 
                 /* compensation of delay END(1) */
                 clock_gettime(CLOCK_MONOTONIC, &end_ts);
                 diff_nsec += (end_ts.tv_sec - start_ts.tv_sec) * 1000000000 + (end_ts.tv_nsec - start_ts.tv_nsec);
-                LOG(DEBUG) << fmt::format("dif:%'12u\n", diff_nsec);
+                LOG(DEBUG) << fmt::format("dif:{}\n", diff_nsec);
 
                 uint64_t calibrated_delay = (diff_nsec > emul_delay) ? 0 : emul_delay - diff_nsec;
                 // uint64_t calibrated_delay = emul_delay;
@@ -436,7 +435,7 @@ int main(int argc, char *argv[]) {
                 /* insert emulated NVM latency */
                 mon.injected_delay.tv_sec += (calibrated_delay / 1000000000);
                 mon.injected_delay.tv_nsec += (calibrated_delay % 1000000000);
-                LOG(DEBUG) << fmt::format("[{}:{}:{}]delay:%'10lu , total delay:%'lf\n", i, mon.tgid, mon.tid,
+                LOG(DEBUG) << fmt::format("[{}:{}:{}]delay:{} , total delay:{}\n", i, mon.tgid, mon.tid,
                                           calibrated_delay, mon.total_delay);
 #endif
                 auto swap = mon.before;

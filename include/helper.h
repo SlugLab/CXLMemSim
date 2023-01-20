@@ -49,7 +49,7 @@ struct CPUElem {
     uint64_t cpu_llcl_miss;
     uint64_t cpu_bandwidth_read;
     uint64_t cpu_bandwidth_write;
-    std::map<uint64_t, uint64_t> cpu_mmap_address_length;
+    std::map<uint64_t, uint64_t> cpu_munmap_address_length;
 };
 
 struct PEBSElem {

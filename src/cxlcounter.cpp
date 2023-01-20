@@ -4,6 +4,10 @@
 
 #include "cxlcounter.h"
 
-CXLCounter::CXLCounter()
-    : cxl_mem_load_miss_retired_remote_dram({0}), cxl_mem_load_miss_retired_remote_fwd({0}),
-      cxl_mem_miss_retired_local_dram(0) {}
+void CXLSwitchEvent::inc_load() {}
+void CXLSwitchEvent::inc_store() {}
+void CXLSwitchEvent::inc_conflict() {}
+void CXLMemExpanderEvent::inc_load() {}
+void CXLMemExpanderEvent::inc_store() {}
+void CXLMemExpanderEvent::inc_migrate() {}
+void CXLMemExpanderEvent::inc_hit_old() {}

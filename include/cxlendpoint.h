@@ -9,10 +9,10 @@
 class CXLEndPoint {
     virtual std::string output() = 0;
     virtual void delete_entry(uint64_t addr) = 0;
-    virtual double calculate_latency(double weight,
-                                     struct Elem *elem) = 0; // traverse the tree to calculate the latency
+    virtual double calculate_latency(LatencyPass elem) = 0; // traverse the tree to calculate the latency
     virtual double calculate_bandwidth(BandwidthPass elem) = 0;
-    virtual void insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) = 0;
+    virtual bool insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) = 0;
+    virtual void add_lazy_remove(uint64_t addr);
 };
 
 class CXLMemExpander : public CXLEndPoint {
@@ -25,10 +25,10 @@ public:
     std::map<uint64_t, uint64_t> va_pa_map;
     int id = -1;
     CXLMemExpander(int read_bw, int write_bw, int read_lat, int write_lat, int id);
-    void add_lazy_remove(uint64_t addr);
     uint64_t va_to_pa(uint64_t addr);
-    void insert(uint64_t timestamp, uint64_t phys_addr,uint64_t virt_addr) override;
-    double calculate_latency(double weight, struct Elem *elem) override; // traverse the tree to calculate the latency
+    void add_lazy_remove(uint64_t addr);
+    bool insert(uint64_t timestamp, uint64_t phys_addr,uint64_t virt_addr) override;
+    double calculate_latency(LatencyPass elem) override; // traverse the tree to calculate the latency
     double calculate_bandwidth(BandwidthPass elem) override;
     void delete_entry(uint64_t addr) override;
     std::string output() override;
@@ -41,9 +41,9 @@ public:
     int id = -1;
     explicit CXLSwitch(int id);
     double calculate_congestion();
-    double calculate_latency(double weight, struct Elem *elem) override; // traverse the tree to calculate the latency
+    double calculate_latency(LatencyPass elem) override; // traverse the tree to calculate the latency
     double calculate_bandwidth(BandwidthPass elem) override;
-    void insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) override;
+    bool insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr) override;
     void delete_entry(uint64_t addr) override;
     std::string output() override;
 };

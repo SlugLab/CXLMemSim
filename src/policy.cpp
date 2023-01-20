@@ -4,7 +4,11 @@
 
 #include "policy.h"
 Policy::Policy() {
+
 }
 InterleavePolicy::InterleavePolicy() {
 
+}
+CXLEndPoint *InterleavePolicy::compute_once() {
+    return Policy::compute_once();
 }

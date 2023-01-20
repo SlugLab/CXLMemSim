@@ -97,8 +97,8 @@ int Incore::read_cpu_elems(struct CPUElem *elem) {
         return r;
     }
     LOG(DEBUG) << fmt::format("read cpu_bandwidth_write:{}\n", elem->cpu_bandwidth_write);
-    elem->cpu_mmap_address_length = this->perf[6]->read_trace_pipe();
-    LOG(DEBUG) << fmt::format("read munmap result with size:{}\n", elem->cpu_mmap_address_length.size());
+//    elem->cpu_munmap_address_length = this->perf[6]->read_trace_pipe();
+//    LOG(DEBUG) << fmt::format("read munmap result with size:{}\n", elem->cpu_munmap_address_length.size());
 }
 Incore::Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config) : perf_config(perf_config) {
     /* reset all pmc values */
@@ -108,7 +108,7 @@ Incore::Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config) :
     this->init_cpu_llcl_miss(pid, cpu);
     this->init_cpu_mem_read(pid, cpu);
     this->init_cpu_mem_write(pid, cpu);
-    this->init_cpu_ebpf(pid, cpu);
+//    this->init_cpu_ebpf(pid, cpu);
 }
 bool get_cpu_info(struct CPUInfo *cpu_info) {
     char buffer[1024];

@@ -59,7 +59,7 @@ public:
     unsigned long flags;
     struct perf_event_attr attr;
     ThreadSafeMap *map;
-//    PerfInfo();
+    std::jthread j;
     PerfInfo(int group_fd, int cpu, pid_t pid, unsigned long flags, struct perf_event_attr attr);
     PerfInfo(int fd, int group_fd, int cpu, pid_t pid, unsigned long flags, struct perf_event_attr attr);
     ~PerfInfo();
