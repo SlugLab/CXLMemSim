@@ -38,7 +38,7 @@ public:
     bool is_page;
     PEBS(pid_t, uint64_t,bool);
     ~PEBS();
-    int read(int, CXLController *, struct PEBSElem *);
+    int read(CXLController *, struct PEBSElem *);
     int start();
     int stop();
 };

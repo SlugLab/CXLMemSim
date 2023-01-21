@@ -317,7 +317,7 @@ int main(int argc, char *argv[]) {
 
                 if (mon.num_of_region >= 2) {
                     /* read PEBS sample */
-                    if (mon.pebs_ctx->read(mon.num_of_region, mon.region_info, &mon.after->pebs) < 0) {
+                    if (mon.pebs_ctx->read(mon.region_info, &mon.after->pebs) < 0) {
                         LOG(ERROR) << fmt::format("[{}:{}:{}] Warning: Failed PEBS read\n", i, mon.tgid, mon.tid);
                     }
                     target_llcmiss = mon.after->pebs.llcmiss - mon.before->pebs.llcmiss;
@@ -398,8 +398,8 @@ int main(int argc, char *argv[]) {
                 LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs: total={}, \n", i, mon.tgid, mon.tid, mon.after->pebs.total);
                 // for (auto j = 0; j < mon.num_of_region; j++) {
                 //     if (!total_is_zero) {
-                //         sample = (double)(mon.after->pebs.sample[j] - mon.before->pebs.sample[j]);
-                //         sample_prop = sample / sample_total;
+                //         sample = (double)(mon.after->pebs.sample[j] - mon.before->pebs.sample[j]); // not caluated
+                //         this way sample_prop = sample / sample_total;
                 //     }
                 //     emul_delay += (double)(ma_ro)*sample_prop * (emul_nvm_lats[j].read - dramlatency) +
                 //                   (double)(ma_wb)*sample_prop * (emul_nvm_lats[j].write - dramlatency);
@@ -409,12 +409,21 @@ int main(int argc, char *argv[]) {
                 // }
                 /** TODO: calculate latency construct the passing value and use interleaving policy and counter to get
                  * the sample_prop */
-                 emul_delay += controller->calculate_latency(lat_pass);
-                 emul_delay += controller->calculate_bandwidth(bw_pass);
-                 emul_delay += std::get<0>(controller->calculate_congestion());
-                 mon.before->pebs.sample[j] = mon.after->pebs.sample[j];
-                 LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs sample[%d]: ={}, \n", i, mon.tgid, mon.tid, j,
-                                           mon.after->pebs.sample[j]);
+                 auto all_access = controller->get_all_access();
+                LatencyPass lat_pass = {
+
+                };
+                BandwidthPass bw_pass = {
+
+                };
+                emul_delay += controller->calculate_latency(lat_pass);
+                emul_delay += controller->calculate_bandwidth(bw_pass);
+                emul_delay += std::get<0>(controller->calculate_congestion());
+                //mon.before->pebs.sample[j] = mon.after->pebs.sample[j];
+                //
+                //LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs sample[{}]: ={}, \n", i, mon.tgid,
+                //mon.tid, j,
+                //                          mon.after->pebs.sample[j]);
 
                 mon.before->pebs.total = mon.after->pebs.total;
 

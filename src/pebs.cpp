@@ -18,6 +18,7 @@ struct __attribute__((packed)) perf_sample {
     uint64_t value;
     uint64_t time_enabled;
     uint64_t phys_addr;
+    uint64_t timestamp;
 };
 
 long perf_event_open(struct perf_event_attr *event_attr, pid_t pid, int cpu, int group_fd, unsigned long flags) {
@@ -33,7 +34,7 @@ PEBS::PEBS(pid_t pid, uint64_t sample_period, bool is_page) : pid(pid), sample_p
     pe.config1 = 3;
     pe.disabled = 1; // Event is initially disabled
     pe.read_format = PERF_FORMAT_TOTAL_TIME_ENABLED;
-    pe.sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_ADDR | PERF_SAMPLE_READ | PERF_SAMPLE_PHYS_ADDR;
+    pe.sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_ADDR | PERF_SAMPLE_READ | PERF_SAMPLE_PHYS_ADDR | PERF_SAMPLE_TIME;
     pe.sample_period = this->sample_period;
     pe.precise_ip = 1;
     pe.exclude_kernel = 1; // excluding events that happen in the kernel-space
@@ -58,7 +59,7 @@ PEBS::PEBS(pid_t pid, uint64_t sample_period, bool is_page) : pid(pid), sample_p
 
     this->start();
 }
-int PEBS::read(const int nreg, CXLController *controller, struct PEBSElem *elem) {
+int PEBS::read(CXLController *controller, struct PEBSElem *elem) {
     struct perf_event_mmap_page *mp = this->mp;
 
     if (this->fd < 0) {
@@ -96,20 +97,11 @@ int PEBS::read(const int nreg, CXLController *controller, struct PEBSElem *elem)
                     continue;
                 }
                 if (this->pid == data->pid) {
-                    LOG(DEBUG) << fmt::format("pid:{} tid:{} time:{} addr:{} phys_addr:{} llc_miss:{}\n",
+                    LOG(DEBUG) << fmt::format("pid:{} tid:{} time:{} addr:{} phys_addr:{} llc_miss:{} timestamp\n",
                                               int(data->pid), int(data->tid), long(data->time_enabled),
-                                              long(data->addr), long(data->phys_addr), long(data->value));
-                    // for (i = 0; i < nreg; i++) {
-                    //     // checker whether they are in the reg, but we just insert them.
-                    //     if (reg_info[i].addr <= data->addr && reg_info[i].addr + reg_info[i].size
-                    //     > data->addr) {
-                    //         elem->sample[i]++;
-                    //         LOG(DEBUG) << fmt::format("sample: region {} ({})\n", i,
-                    //         elem->sample[i]); elem->llcmiss = data->value;
-                    //     }
-                    // }
+                                              long(data->addr), long(data->phys_addr), long(data->value),long(data->timestamp));
                     controller->insert(data->time_enabled, data->phys_addr, data->phys_addr, 0);
-                    elem->sample[i]++;
+                    elem->total++;
                     elem->llcmiss = data->value;
                 }
                 break;
@@ -133,11 +125,6 @@ int PEBS::read(const int nreg, CXLController *controller, struct PEBSElem *elem)
         mp->data_tail = last_head;
         barrier();
     } while (mp->lock != this->seq);
-
-    elem->total = 0;
-    for (i = 0; i < nreg; i++) {
-        elem->total += elem->sample[i];
-    }
 
     return r;
 }

@@ -40,22 +40,31 @@ int CXLMemExpander::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt
             this->va_pa_map[virt_addr] = phys_addr;
             LOG(INFO) << fmt::format("virt:{} phys:{} conflict insertion detected", virt_addr, phys_addr);
         }
+        last_timestamp = last_timestamp > timestamp ? last_timestamp : timestamp; // Update the last timestamp
+        // Check if the address is already in the map
         for (auto it = this->occupation.cbegin(); it != this->occupation.cend(); it++) {
             if ((*it).second == phys_addr) {
                 this->occupation.emplace(timestamp, phys_addr);
                 this->counter.inc_store();
+                return 1;
             } else {
                 this->occupation.erase(it);
                 this->occupation.emplace(timestamp, phys_addr);
                 this->counter.inc_load();
+                return 2;
             }
         }
-        return true;
     } else {
-        return false;
+        return 0;
     }
 }
 std::string CXLMemExpander::output() { return fmt::format("CXLMemExpander {}", this->id); }
+std::tuple<int, int> CXLMemExpander::get_all_access() {
+    this->last_read = this->counter.load - this->last_counter.load;
+    this->last_write = this->counter.store - this->last_counter.store;
+    last_counter = CXLMemExpanderEvent(counter);
+    return std::make_tuple(this->last_read, this->last_write);
+}
 std::string CXLSwitch::output() {
     std::string res = fmt::format("CXLSwitch {} ", this->id);
     if (!this->switches.empty()) {
@@ -108,13 +117,28 @@ double CXLSwitch::calculate_bandwidth(BandwidthPass elem) {
 }
 int CXLSwitch::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
     for (auto &expander : this->expanders) {
-        if (expander->insert(timestamp, phys_addr, virt_addr, index)) {
+        auto ret = expander->insert(timestamp, phys_addr, virt_addr, index);
+        if (ret == 1) {
             this->counter.inc_store();
-            return true;
+            return 1;
+        } else if (ret == 2) {
+            this->counter.inc_load();
+            return 2;
+        } else {
+            return 0;
         };
     }
     for (auto &switch_ : this->switches) {
-        switch_->insert(timestamp, phys_addr, virt_addr, index);
+        auto ret = switch_->insert(timestamp, phys_addr, virt_addr, index);
+        if (ret == 1) {
+            this->counter.inc_store();
+            return 1;
+        } else if (ret == 2) {
+            this->counter.inc_load();
+            return 2;
+        } else {
+            return 0;
+        };
     }
 }
 std::tuple<double, std::vector<uint64_t>> CXLSwitch::calculate_congestion() {
@@ -141,4 +165,19 @@ std::tuple<double, std::vector<uint64_t>> CXLSwitch::calculate_congestion() {
             congestion.erase(it);
         }
     }
+    return std::make_tuple(latency, congestion);
+}
+std::tuple<int, int> CXLSwitch::get_all_access() {
+    int read, write;
+    for (auto &expander : this->expanders) {
+        auto [r, w] = expander->get_all_access();
+        read += r;
+        write += w;
+    }
+    for (auto &switch_ : this->switches) {
+        auto [r, w] = switch_->get_all_access();
+        read += r;
+        write += w;
+    }
+    return std::make_tuple(read, write);
 }

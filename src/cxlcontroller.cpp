@@ -33,8 +33,7 @@ void CXLController::construct_topo(std::string_view newick_tree) {
 }
 
 CXLController::CXLController(Policy *p, int capacity, bool is_page)
-    : CXLSwitch(0), capacity(capacity), policy(p), is_page(is_page) {
-}
+    : CXLSwitch(0), capacity(capacity), policy(p), is_page(is_page) {}
 
 double CXLController::calculate_latency(LatencyPass elem) {
     double lat = 0.0;
@@ -62,8 +61,7 @@ std::string CXLController::output() {
     std::string res;
     if (!this->switches.empty()) {
         res += "(";
-        std::basic_string<char, std::char_traits<char>, std::allocator<char>> &string = res +=
-            this->switches[0]->output();
+        res += this->switches[0]->output();
         for (size_t i = 1; i < this->switches.size(); ++i) {
             res += ",";
             res += this->switches[i]->output();
@@ -133,4 +131,3 @@ std::vector<std::string> CXLController::tokenize(const std::string_view &s) {
     }
     return res;
 }
-

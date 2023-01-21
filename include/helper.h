@@ -55,7 +55,6 @@ struct CPUElem {
 struct PEBSElem {
     uint64_t total;
     uint64_t llcmiss;
-    uint64_t *sample;
 };
 
 struct CPUInfo {
@@ -73,10 +72,12 @@ struct Elem {
 };
 
 struct BandwidthPass{
-
+    uint64_t read_config;
+    uint64_t write_config;
 };
 
 struct LatencyPass{
+        double weight;
 
 };
 
