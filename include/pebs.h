@@ -36,7 +36,7 @@ public:
     size_t mplen;
     struct perf_event_mmap_page *mp;
     bool is_page;
-    PEBS(pid_t, uint64_t,bool);
+    PEBS(pid_t, uint64_t, bool);
     ~PEBS();
     int read(CXLController *, struct PEBSElem *);
     int start();

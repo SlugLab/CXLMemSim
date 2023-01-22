@@ -7,27 +7,16 @@
 #include "monitor.h"
 #include "policy.h"
 #include <cerrno>
-#include <cinttypes>
-#include <clocale>
 #include <cmath>
-#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <cxxopts.hpp>
-#include <fcntl.h>
-#include <getopt.h>
 #include <range/v3/view.hpp>
-#include <sys/mman.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/syscall.h>
-#include <sys/time.h>
-#include <sys/types.h>
 #include <sys/un.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 #define SOCKET_PATH "/tmp/cxl_mem_simulator.sock"
@@ -170,7 +159,7 @@ int main(int argc, char *argv[]) {
     }
     /** TODO: bind the rest of core in 0-7 and affine the CXL Simulator to 8 */
     // In case of process, use SIGSTOP.
-    auto res = monitors.enable(t_process, t_process, true, 0, tnum, false);
+    auto res = monitors.enable(t_process, t_process, true, pebsperiod, tnum, mode);
     if (res == -1) {
         LOG(ERROR) << fmt::format("Failed to enable monitor\n");
         exit(0);
@@ -309,22 +298,19 @@ int main(int argc, char *argv[]) {
 
                 /* read CPU params */
                 uint64_t cpus_dram_rds = 0;
+                uint64_t read_config, write_config = 0;
                 uint64_t target_l2stall = 0, target_llcmiss = 0, target_llchits = 0;
                 for (int j = 0; j < ncpu; ++j) {
                     pmu.cpus[j].read_cpu_elems(&mon.after->cpus[j]);
                     cpus_dram_rds += mon.after->cpus[j].all_dram_rds - mon.before->cpus[j].all_dram_rds;
+                    read_config += mon.after->cpus[j].cpu_bandwidth_read - mon.before->cpus[j].cpu_bandwidth_read;
+                    write_config += mon.after->cpus[j].cpu_bandwidth_write - mon.before->cpus[j].cpu_bandwidth_write;
                 }
-
-                if (mon.num_of_region >= 2) {
-                    /* read PEBS sample */
-                    if (mon.pebs_ctx->read(mon.region_info, &mon.after->pebs) < 0) {
-                        LOG(ERROR) << fmt::format("[{}:{}:{}] Warning: Failed PEBS read\n", i, mon.tgid, mon.tid);
-                    }
-                    target_llcmiss = mon.after->pebs.llcmiss - mon.before->pebs.llcmiss;
-                } else {
-                    target_llcmiss =
-                        mon.after->cpus[mon.cpu_core].cpu_llcl_miss - mon.before->cpus[mon.cpu_core].cpu_llcl_miss;
+                /* read PEBS sample */
+                if (mon.pebs_ctx->read(mon.region_info, &mon.after->pebs) < 0) {
+                    LOG(ERROR) << fmt::format("[{}:{}:{}] Warning: Failed PEBS read\n", i, mon.tgid, mon.tid);
                 }
+                target_llcmiss = mon.after->pebs.llcmiss - mon.before->pebs.llcmiss;
 
                 target_l2stall =
                     mon.after->cpus[mon.cpu_core].cpu_l2stall_t - mon.before->cpus[mon.cpu_core].cpu_l2stall_t;
@@ -391,39 +377,25 @@ int main(int argc, char *argv[]) {
                 double sample = 0;
                 double sample_prop = 0;
                 double sample_total = (double)(mon.after->pebs.total - mon.before->pebs.total);
-                // if (total_is_zero) {
-                //     // If the total is 0, divide equally.
-                //     sample_prop = (double)1 / (double)mon.num_of_region;
-                // }
                 LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs: total={}, \n", i, mon.tgid, mon.tid, mon.after->pebs.total);
-                // for (auto j = 0; j < mon.num_of_region; j++) {
-                //     if (!total_is_zero) {
-                //         sample = (double)(mon.after->pebs.sample[j] - mon.before->pebs.sample[j]); // not caluated
-                //         this way sample_prop = sample / sample_total;
-                //     }
-                //     emul_delay += (double)(ma_ro)*sample_prop * (emul_nvm_lats[j].read - dramlatency) +
-                //                   (double)(ma_wb)*sample_prop * (emul_nvm_lats[j].write - dramlatency);
-                //     mon.before->pebs.sample[j] = mon.after->pebs.sample[j];
-                //     LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs sample[%d]: ={}, \n", i, mon.tgid, mon.tid, j,
-                //                               mon.after->pebs.sample[j]);
-                // }
+
                 /** TODO: calculate latency construct the passing value and use interleaving policy and counter to get
                  * the sample_prop */
-                 auto all_access = controller->get_all_access();
+                auto all_access = controller->get_all_access();
                 LatencyPass lat_pass = {
-
+                    .all_access = all_access,
+                    .dramlatency = dramlatency,
+                    .ma_ro = ma_ro,
+                    .ma_wb = ma_wb,
                 };
                 BandwidthPass bw_pass = {
-
+                    .all_access = all_access,
+                    .read_config = read_config,
+                    .write_config = write_config,
                 };
                 emul_delay += controller->calculate_latency(lat_pass);
                 emul_delay += controller->calculate_bandwidth(bw_pass);
                 emul_delay += std::get<0>(controller->calculate_congestion());
-                //mon.before->pebs.sample[j] = mon.after->pebs.sample[j];
-                //
-                //LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs sample[{}]: ={}, \n", i, mon.tgid,
-                //mon.tid, j,
-                //                          mon.after->pebs.sample[j]);
 
                 mon.before->pebs.total = mon.after->pebs.total;
 
@@ -472,7 +444,7 @@ int main(int argc, char *argv[]) {
                 mon.wasted_delay.tv_sec += sleep_time.tv_sec;
                 mon.wasted_delay.tv_nsec += sleep_time.tv_nsec;
                 LOG(DEBUG) << fmt::format(
-                    "[{}:{}:{}][OFF] total: %'lu | wasted : %'lu | waittime : %'lu | squabble : %'lu\n", i, mon.tgid,
+                    "[{}:{}:{}][OFF] total: {}| wasted : {}| waittime : {}| squabble : {}\n", i, mon.tgid,
                     mon.tid, mon.injected_delay.tv_nsec, mon.wasted_delay.tv_nsec, waittime.tv_nsec,
                     mon.squabble_delay.tv_nsec);
                 if (monitors.check_continue(i, sleep_time)) {
@@ -491,7 +463,7 @@ int main(int argc, char *argv[]) {
                     mon.squabble_delay.tv_nsec += remain_time;
                     if (mon.squabble_delay.tv_nsec < 40000000) {
                         LOG(DEBUG) << fmt::format(
-                            "[SQ]total: %'lu | wasted : %'lu | waittime : %'lu | squabble : %'lu\n",
+                            "[SQ]total: {}| wasted : {}| waittime : {}| squabble : {}\n",
                             mon.injected_delay.tv_nsec, mon.wasted_delay.tv_nsec, waittime.tv_nsec,
                             mon.squabble_delay.tv_nsec);
                         mon.clear_time(&mon.wasted_delay);

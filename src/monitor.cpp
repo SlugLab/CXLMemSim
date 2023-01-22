@@ -85,7 +85,7 @@ int Monitors::enable(const uint32_t tgid, const uint32_t tid, bool is_process, u
 
     if (pebs_sample_period) {
         /* pebs start */
-        mon[target].pebs_ctx = new PEBS(tid, pebs_sample_period, is_page);
+        mon[target].pebs_ctx = new PEBS(tgid, pebs_sample_period, is_page);
         LOG(DEBUG) << fmt::format("Process [tgid={}, tid={}]: enable to pebs.\n", mon[target].tgid, mon[target].tid);
     }
 
@@ -118,7 +118,6 @@ void Monitors::disable(const uint32_t target) {
     }
     for (int i = 0; i < mon[target].num_of_region; i++) {
         for (auto &j : mon[target].elem) {
-            j.pebs.sample[i] = 0;
             j.pebs.total = 0;
             j.pebs.llcmiss = 0;
         }
@@ -165,9 +164,8 @@ int Monitors::terminate(const uint32_t tgid, const uint32_t tid, const int32_t t
             (double)(mon[target].end_exec_ts.tv_nsec - mon[target].start_exec_ts.tv_nsec) / 1000000000;
         LOG(INFO) << fmt::format("emulated time ={}\n", emulated_time);
         LOG(INFO) << fmt::format("total delay   ={}\n", mon[target].total_delay);
-        for (int j; j < mon[target].num_of_region; j++) {
-            LOG(INFO) << fmt::format("PEBS sample {} ={}\n", j, mon[target].before->pebs.sample[j]);
-        }
+
+        LOG(INFO) << fmt::format("PEBS sample total {}\n", mon[target].before->pebs.total);
 
         /* init */
         disable(target);
@@ -191,7 +189,7 @@ bool Monitors::check_continue(const uint32_t target, const struct timespec w) {
 int Monitor::set_region_info(const int nreg, CXLController *ri) {
     int i;
 
-    this->num_of_region = nreg;
+    this->num_of_region = ri->cur_expanders.size() + 1;
     this->region_info = ri;
 
     return 0;
@@ -260,11 +258,6 @@ Monitor::Monitor(const int nmem, Helper h)
         }
         j.cbos = (struct CBOElem *)calloc(sizeof(struct CBOElem), h.cbo);
         if (j.cbos == nullptr) {
-            LOG(ERROR) << "calloc";
-            throw;
-        }
-        j.pebs.sample = (uint64_t *)calloc(sizeof(uint64_t), nmem);
-        if (j.pebs.sample == nullptr) {
             LOG(ERROR) << "calloc";
             throw;
         }

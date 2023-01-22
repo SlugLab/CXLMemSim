@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <vector>
 
-/** TODO: Whether to using the pebs to record the state. */
+/** TODO: Whether to using the pebs to record the state. add back invalidation */
 class CXLSwitchEvent {
 public:
     uint64_t load = 0;

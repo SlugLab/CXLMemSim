@@ -26,41 +26,41 @@ long perf_event_open(struct perf_event_attr *event_attr, pid_t pid, int cpu, int
 }
 PEBS::PEBS(pid_t pid, uint64_t sample_period, bool is_page) : pid(pid), sample_period(sample_period), is_page(is_page) {
     // Configure perf_event_attr struct
-    struct perf_event_attr pe {};
-    memset(&pe, 0, sizeof(struct perf_event_attr));
-    pe.type = PERF_TYPE_RAW;
-    pe.size = sizeof(struct perf_event_attr);
-    pe.config = 0x20d1; // mem_load_retired.l3_miss
-    pe.config1 = 3;
-    pe.disabled = 1; // Event is initially disabled
-    pe.read_format = PERF_FORMAT_TOTAL_TIME_ENABLED;
-    pe.sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_ADDR | PERF_SAMPLE_READ | PERF_SAMPLE_PHYS_ADDR | PERF_SAMPLE_TIME;
-    pe.sample_period = this->sample_period;
-    pe.precise_ip = 1;
-    pe.exclude_kernel = 1; // excluding events that happen in the kernel-space
+    struct perf_event_attr pe = {
+        .type = PERF_TYPE_RAW,
+        .size = sizeof(struct perf_event_attr),
+        .config = 0x20d1, // mem_load_retired.l3_miss
+        .sample_period = this->sample_period,
+        .sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_ADDR | PERF_SAMPLE_READ | PERF_SAMPLE_PHYS_ADDR,
+        .read_format = PERF_FORMAT_TOTAL_TIME_ENABLED,
+        .disabled = 1, // Event is initially disabled
+        .exclude_kernel = 1,
+        .precise_ip = 1,
+        .config1 = 3,
+    }; // excluding events that happen in the kernel-space
 
     int cpu = -1; // measure on any cpu
     int group_fd = -1;
     unsigned long flags = 0;
 
-    this->fd = static_cast<int>(perf_event_open(&pe, this->pid, cpu, group_fd, flags));
+    this->fd = perf_event_open(&pe, this->pid, cpu, group_fd, flags);
     if (this->fd == -1) {
-        LOG(ERROR) << "perf_event_open";
+        perror("perf_event_open");
         throw;
     }
 
     this->mplen = MMAP_SIZE;
-    this->mp = reinterpret_cast<struct perf_event_mmap_page *>(
-        mmap(nullptr, MMAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd, 0));
+    this->mp =
+        static_cast<perf_event_mmap_page *>(mmap(NULL, MMAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd, 0));
     if (this->mp == MAP_FAILED) {
-        LOG(ERROR) << "mmap";
+        perror("mmap");
         throw;
     }
 
     this->start();
 }
 int PEBS::read(CXLController *controller, struct PEBSElem *elem) {
-    struct perf_event_mmap_page *mp = this->mp;
+    //    struct perf_event_mmap_page *mp = this->mp;
 
     if (this->fd < 0) {
         return 0;
@@ -80,7 +80,7 @@ int PEBS::read(CXLController *controller, struct PEBSElem *elem) {
         this->seq = mp->lock;
         barrier();
         last_head = mp->data_head;
-
+        LOG(ERROR) << "sbssbsb " << this->rdlen << " " << last_head << "\n";
         while ((uint64_t)this->rdlen < last_head) {
             header = (struct perf_event_header *)(dp + this->rdlen % DATA_SIZE);
 
@@ -97,7 +97,7 @@ int PEBS::read(CXLController *controller, struct PEBSElem *elem) {
                     continue;
                 }
                 if (this->pid == data->pid) {
-                    LOG(DEBUG) << fmt::format("pid:{} tid:{} time:{} addr:{} phys_addr:{} llc_miss:{} timestamp\n",
+                    LOG(DEBUG) << fmt::format("pid:{} tid:{} time:{} addr:{} phys_addr:{} llc_miss:{} timestamp={}\n",
                                               int(data->pid), int(data->tid), long(data->time_enabled),
                                               long(data->addr), long(data->phys_addr), long(data->value),long(data->timestamp));
                     controller->insert(data->time_enabled, data->phys_addr, data->phys_addr, 0);
@@ -132,6 +132,7 @@ int PEBS::start() {
     if (this->fd < 0) {
         return 0;
     }
+    LOG(ERROR) << "start" << this->fd;
     if (ioctl(this->fd, PERF_EVENT_IOC_ENABLE, 0) < 0) {
         perror("ioctl");
         return -1;

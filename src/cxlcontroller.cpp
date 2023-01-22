@@ -131,3 +131,20 @@ std::vector<std::string> CXLController::tokenize(const std::string_view &s) {
     }
     return res;
 }
+std::tuple<int, int> CXLController::get_all_access() {
+    int read, write;
+    for (auto &expander : this->expanders) {
+        auto [r, w] = expander->get_all_access();
+        read += r;
+        write += w;
+    }
+    for (auto &switch_ : this->switches) {
+        auto [r, w] = switch_->get_all_access();
+        read += r;
+        write += w;
+    }
+    return std::make_tuple(read, write);
+}
+std::tuple<double, std::vector<uint64_t>> CXLController::calculate_congestion() {
+    return CXLSwitch::calculate_congestion();
+}

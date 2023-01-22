@@ -71,14 +71,17 @@ struct Elem {
     struct PEBSElem pebs;
 };
 
-struct BandwidthPass{
+struct BandwidthPass {
+    std::tuple<int, int> all_access;
     uint64_t read_config;
     uint64_t write_config;
 };
 
-struct LatencyPass{
-        double weight;
-
+struct LatencyPass {
+    std::tuple<int, int> all_access;
+    double dramlatency;
+    double ma_ro;
+    double ma_wb;
 };
 
 class PMUInfo {

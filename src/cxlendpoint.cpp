@@ -3,7 +3,7 @@
 //
 
 #include "cxlendpoint.h"
-#define PAGEMAP_LENGTH 8
+
 CXLMemExpander::CXLMemExpander(int read_bw, int write_bw, int read_lat, int write_lat, int id) {
     this->bandwidth.read = read_bw;
     this->bandwidth.write = write_bw;
@@ -11,11 +11,30 @@ CXLMemExpander::CXLMemExpander(int read_bw, int write_bw, int read_lat, int writ
     this->latency.write = write_lat;
     this->id = id;
 }
-double CXLMemExpander::calculate_latency(LatencyPass elem) { return 0; }
-double CXLMemExpander::calculate_bandwidth(BandwidthPass elem) {
+double CXLMemExpander::calculate_latency(LatencyPass lat) {
+    auto all_access = lat.all_access;
+    auto dramlatency = lat.dramlatency;
+    auto ma_ro = lat.ma_ro;
+    auto ma_wb = lat.ma_wb;
+    auto read_sample = last_read / std::get<0>(all_access);
+    auto write_sample = last_write / std::get<1>(all_access);
+    return ma_ro * read_sample * (latency.read - dramlatency) + ma_wb * write_sample * (latency.write - dramlatency);
+}
+double CXLMemExpander::calculate_bandwidth(BandwidthPass bw) {
     // Iterate the map within the last 20ms
-
-    return 0;
+    auto all_access = bw.all_access;
+    auto read_config = bw.read_config;
+    auto write_config = bw.write_config;
+    auto read_sample = last_read / std::get<0>(all_access);
+    auto write_sample = last_write / std::get<1>(all_access);
+    double res = 0.0;
+    if (read_sample * 64 * read_config / 1024 / 1024 * 50 > bandwidth.read) {
+        res+=read_sample * 64 * read_config / 1024 / 1024 * 50 /bandwidth.read-0.02;
+    }
+    if (write_sample * 64 * write_config / 1024 / 1024 * 50 > bandwidth.write) {
+        res+=write_sample * 64 * write_config / 1024 / 1024 * 50 /bandwidth.write-0.02;
+    }
+    return res;
 }
 void CXLMemExpander::delete_entry(uint64_t addr) {
     if (occupation.find(addr) != occupation.end()) {

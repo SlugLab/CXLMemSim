@@ -15,6 +15,8 @@ int Incore::start() {
     int i, r = -1;
 
     for (i = 0; i < 7; i++) {
+        if (!this->perf[i])
+            continue;
         r = this->perf[i]->start();
         if (r < 0) {
             LOG(ERROR) << fmt::format("perf_start failed. i:{}\n", i);
@@ -100,8 +102,10 @@ int Incore::read_cpu_elems(struct CPUElem *elem) {
         return r;
     }
     LOG(DEBUG) << fmt::format("read cpu_bandwidth_write:{}\n", elem->cpu_bandwidth_write);
-    elem->cpu_munmap_address_length = this->perf[6]->read_trace_pipe();
-    LOG(DEBUG) << fmt::format("read munmap result with size:{}\n", elem->cpu_munmap_address_length.size());
+    if (this->perf[6]!= nullptr) {
+        elem->cpu_munmap_address_length = this->perf[6]->read_trace_pipe();
+        LOG(DEBUG) << fmt::format("read munmap result with size:{}\n", elem->cpu_munmap_address_length.size());
+    }
 }
 Incore::Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config) : perf_config(perf_config) {
     /* reset all pmc values */

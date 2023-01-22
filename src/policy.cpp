@@ -23,12 +23,19 @@ int InterleavePolicy::compute_once(CXLController *controller) {
             }
             this->all_size = std::accumulate(this->percentage.begin(), this->percentage.end(), 0);
         }
+    next:
         last_remote = (last_remote + 1) % all_size;
-        int sum,index;
-        for (index = 0, sum = 0; sum <= last_remote; index++) {
+        int sum, index;
+        for (index = 0, sum = 0; sum <= last_remote; index++) { // 5 2 2 to get the next
             sum += this->percentage[index];
             if (sum > last_remote) {
-                break;
+                if (controller->cur_expanders[index]->occupation.size() * per_size / 1024 / 1024 <
+                    controller->cur_expanders[index]->capacity) {
+                    break;
+                } else {
+                    /** TODO: capacity bound */
+                    goto next;
+                }
             }
         }
         return index;

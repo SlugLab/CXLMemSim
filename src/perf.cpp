@@ -66,7 +66,7 @@ static int load_maps(struct bpf_map_data *maps, int nr_maps) {
                                        maps[i].def.value_size, maps[i].def.max_entries, &opt);
         }
         if (map_fd[i] < 0) {
-            printf("failed to create a map: {} {}\n", errno, strerror(errno));
+            LOG(ERROR) << fmt::format("failed to create a map: {} {}\n", errno, strerror(errno));
             return 1;
         }
         maps[i].fd = map_fd[i];
@@ -88,7 +88,7 @@ static int parse_relo_and_apply(Elf_Data *data, Elf_Data *symbols, GElf_Shdr *sh
         GElf_Rel rel;
         unsigned int insn_idx;
         bool match = false;
-        int j, map_idx;
+        int  map_idx;
 
         gelf_getrel(data, i, &rel);
 
@@ -97,7 +97,7 @@ static int parse_relo_and_apply(Elf_Data *data, Elf_Data *symbols, GElf_Shdr *sh
         gelf_getsym(symbols, GELF_R_SYM(rel.r_info), &sym);
 
         if (insn[insn_idx].code != (BPF_LD | BPF_IMM | BPF_DW)) {
-            printf("invalid relo for insn[{}].code 0x%x\n", insn_idx, insn[insn_idx].code);
+            LOG(ERROR) << fmt::format("invalid relo for insn[{}].code 0x%x\n", insn_idx, insn[insn_idx].code);
             return 1;
         }
         insn[insn_idx].src_reg = BPF_PSEUDO_MAP_FD;
@@ -112,7 +112,7 @@ static int parse_relo_and_apply(Elf_Data *data, Elf_Data *symbols, GElf_Shdr *sh
         if (match) {
             insn[insn_idx].imm = maps[map_idx].fd;
         } else {
-            printf("invalid relo for insn[{}] no map_data match\n", insn_idx);
+            LOG(ERROR) << fmt::format("invalid relo for insn[{}] no map_data match\n", insn_idx);
             return 1;
         }
     }
@@ -337,7 +337,7 @@ static perf_event_attr load_and_attach(const char *event, struct bpf_insn *prog,
     id = atoi(buf);
     attr.config = id;
 
-    efd = perf_event_open(&attr, pid, cpu, -1 /*group_fd*/, 0);
+    efd = perf_event_open(&attr, pid, cpu, -1, 0);
     if (efd < 0) {
         LOG(ERROR) << fmt::format("event {} fd {} err {}\n", id, efd, strerror(errno));
         throw;
