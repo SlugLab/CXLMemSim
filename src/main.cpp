@@ -209,9 +209,6 @@ int main(int argc, char *argv[]) {
     struct timespec start_ts, end_ts;
     struct timespec sleep_start_ts, sleep_end_ts;
 
-#ifdef VERBOSE_DEBUG
-    struct timespec recv_ts;
-#endif
     // Wait all the target processes until emulation process initialized.
     monitors.run_all(cur_processes);
     for (int i = 0; i < cur_processes; i++) {
@@ -222,23 +219,8 @@ int main(int argc, char *argv[]) {
         /* wait for pre-defined interval */
         clock_gettime(CLOCK_MONOTONIC, &sleep_start_ts);
 
-#ifdef VERBOSE_DEBUG
-        LOG(DEBUG) << fmt::format("sleep_start_ts: %010lu.%09lu\n", sleep_start_ts.tv_sec, sleep_start_ts.tv_nsec);
-#endif
         auto mon = monitors.mon[0];
         /** Here was a definition for the multi process and thread to enable multiple monitor */
-
-#ifdef VERBOSE_DEBUG
-        clock_gettime(CLOCK_MONOTONIC, &recv_ts);
-        LOG(DEBUG) << fmt::format("recv_ts       : %010lu.%09lu\n", recv_ts.tv_sec, recv_ts.tv_nsec);
-        if (recv_ts.tv_nsec < sleep_start_ts.tv_nsec) {
-            LOG(DEBUG) << fmt::format("start - recv  : %10lu.%09lu\n", recv_ts.tv_sec - sleep_start_ts.tv_sec - 1,
-                                      recv_ts.tv_nsec + 1000000000 - sleep_start_ts.tv_nsec);
-        } else {
-            LOG(DEBUG) << fmt::format("start - recv  : %10lu.%09lu\n", recv_ts.tv_sec - sleep_start_ts.tv_sec,
-                                      recv_ts.tv_nsec - sleep_start_ts.tv_nsec);
-        }
-#endif
 
         struct timespec req = waittime;
         struct timespec rem = {0};
@@ -261,17 +243,6 @@ int main(int argc, char *argv[]) {
         }
         clock_gettime(CLOCK_MONOTONIC, &sleep_end_ts);
 
-#ifdef VERBOSE_DEBUG
-        DEBUG_PRINT("sleep_end_ts  : %010lu.%09lu\n", sleep_end_ts.tv_sec, sleep_end_ts.tv_nsec);
-        if (sleep_end_ts.tv_nsec < sleep_start_ts.tv_nsec) {
-            DEBUG_PRINT("start - end   : %10lu.%09lu\n", sleep_end_ts.tv_sec - sleep_start_ts.tv_sec - 1,
-                        sleep_end_ts.tv_nsec + 1000000000 - sleep_start_ts.tv_nsec);
-        } else {
-            DEBUG_PRINT("start - end   : %10lu.%09lu\n", sleep_end_ts.tv_sec - sleep_start_ts.tv_sec,
-                        sleep_end_ts.tv_nsec - sleep_start_ts.tv_nsec);
-        }
-#endif
-
         for (auto const &[i, mon] : monitors.mon | ranges::views::enumerate) {
             if (mon.status == MONITOR_DISABLE) {
                 continue;
@@ -281,10 +252,6 @@ int main(int argc, char *argv[]) {
                 LOG(DEBUG) << fmt::format("[{}:{}:{}] start_ts: {}.{}\n", i, mon.tgid, mon.tid, start_ts.tv_sec,
                                           start_ts.tv_nsec);
 
-#ifndef ONLY_CALCULATION
-                /*stop target process group: send SIGSTOP */
-                mon.run();
-#endif
                 /* read CBo values */
                 uint64_t wb_cnt = 0;
                 for (int j = 0; j < ncbo; j++) {
@@ -406,18 +373,15 @@ int main(int argc, char *argv[]) {
                 mon.total_delay += (double)calibrated_delay / 1000000000;
                 diff_nsec = 0;
 
-#ifndef ONLY_CALCULATION
                 /* insert emulated NVM latency */
                 mon.injected_delay.tv_sec += (calibrated_delay / 1000000000);
                 mon.injected_delay.tv_nsec += (calibrated_delay % 1000000000);
                 LOG(DEBUG) << fmt::format("[{}:{}:{}]delay:{} , total delay:{}\n", i, mon.tgid, mon.tid,
                                           calibrated_delay, mon.total_delay);
-#endif
                 auto swap = mon.before;
                 mon.before = mon.after;
                 mon.after = swap;
 
-#ifndef ONLY_CALCULATION
                 /* continue suspended processes: send SIGCONT */
                 // unfreeze_counters_cbo_all(fds.msr[0]);
                 // start_pmc(&fds, i);
@@ -426,8 +390,6 @@ int main(int argc, char *argv[]) {
                     mon.clear_time(&mon.injected_delay);
                     mon.run();
                 }
-#endif
-
             } else if (mon.status == MONITOR_OFF) {
                 // Wasted epoch time
                 clock_gettime(CLOCK_MONOTONIC, &start_ts);
@@ -470,9 +432,6 @@ int main(int argc, char *argv[]) {
             }
         } // End for-loop for all target processes
         if (monitors.check_all_terminated(tnum)) {
-#ifdef VERBOSE_DEBUG
-            LOG(DEBUG) << "All processes have already been terminated.\n";
-#endif
             break;
         }
     } // End while-loop for emulation
