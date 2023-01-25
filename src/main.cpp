@@ -113,7 +113,7 @@ int main(int argc, char *argv[]) {
     LOG(DEBUG) << fmt::format("cpu_freq:{}\n", frequency);
     LOG(DEBUG) << fmt::format("num_of_cbo:{}\n", ncbo);
     LOG(DEBUG) << fmt::format("num_of_cpu:{}\n", ncpu);
-    Monitors monitors{tnum, &use_cpuset, static_cast<int>(capacity.size()) - 1, helper, controller};
+    Monitors monitors{tnum, &use_cpuset, static_cast<int>(capacity.size()) - 1, helper};
 
     // https://stackoverflow.com/questions/24796266/tokenizing-a-string-to-pass-as-char-into-execve
     char cmd_buf[1024] = {0};
@@ -304,7 +304,7 @@ int main(int argc, char *argv[]) {
                     write_config += mon.after->cpus[j].cpu_bandwidth_write - mon.before->cpus[j].cpu_bandwidth_write;
                 }
                 /* read PEBS sample */
-                if (mon.pebs_ctx->read(mon.region_info, &mon.after->pebs) < 0) {
+                if (mon.pebs_ctx->read(controller, &mon.after->pebs) < 0) {
                     LOG(ERROR) << fmt::format("[{}:{}:{}] Warning: Failed PEBS read\n", i, mon.tgid, mon.tid);
                 }
                 target_llcmiss = mon.after->pebs.llcmiss - mon.before->pebs.llcmiss;

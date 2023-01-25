@@ -29,7 +29,7 @@ class Monitor;
 class Monitors {
 public:
     std::vector<Monitor> mon;
-    Monitors(int tnum, cpu_set_t *use_cpuset, int nmem, Helper h, CXLController *region_info);
+    Monitors(int tnum, cpu_set_t *use_cpuset, int nmem, Helper h);
     ~Monitors() = default;
 
     void stop_all(const int);
@@ -55,13 +55,10 @@ public:
     double total_delay;
     struct timespec start_exec_ts, end_exec_ts;
     bool is_process;
-    int num_of_region;
-    CXLController *region_info;
     struct PEBS *pebs_ctx;
 
     Monitor(const int nmem, Helper h);
 
-    int set_region_info(const int nreg, CXLController *ri);
     void stop();
     void run();
     void clear_time(struct timespec *);

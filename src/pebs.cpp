@@ -97,7 +97,7 @@ int PEBS::read(CXLController *controller, struct PEBSElem *elem) {
                     LOG(ERROR) << fmt::format("pid:{} tid:{} time:{} addr:{} phys_addr:{} llc_miss:{} timestamp={}\n",
                                               data->pid, data->tid, data->time_enabled, data->addr, data->phys_addr,
                                               data->value, data->timestamp);
-                    controller->insert(data->time_enabled, data->phys_addr, data->phys_addr, 0);
+                    controller->insert(data->timestamp, data->phys_addr, data->phys_addr, 0);
                     elem->total++;
                     elem->llcmiss = data->value;
                 }
