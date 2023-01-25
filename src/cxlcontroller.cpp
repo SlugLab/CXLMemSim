@@ -67,7 +67,8 @@ std::string CXLController::output() {
             res += this->switches[i]->output();
         }
         res += ")";
-    } else if (!this->expanders.empty()) {
+    }
+    if (!this->expanders.empty()) {
         res += "(";
         res += this->expanders[0]->output();
         for (size_t i = 1; i < this->expanders.size(); ++i) {
@@ -75,8 +76,6 @@ std::string CXLController::output() {
             res += this->expanders[i]->output();
         }
         res += ")";
-    } else {
-        res += this->id;
     }
     return res;
 }
@@ -100,14 +99,10 @@ int CXLController::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_
     } else {
         this->counter.inc_remote();
         for (auto switch_ : this->switches) {
-            if (switch_->insert(timestamp, phys_addr, virt_addr, index_)) {
-                return true;
-            }
+            return switch_->insert(timestamp, phys_addr, virt_addr, index_);
         }
         for (auto expander_ : this->expanders) {
-            if (expander_->insert(timestamp, phys_addr, virt_addr, index_)) {
-                return true;
-            }
+            return expander_->insert(timestamp, phys_addr, virt_addr, index_);
         }
         return false;
     }

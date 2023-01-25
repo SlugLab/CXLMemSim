@@ -10,15 +10,15 @@
 
 #define barrier() _mm_mfence()
 
-struct __attribute__((packed)) perf_sample {
+struct perf_sample {
     struct perf_event_header header;
     uint32_t pid;
     uint32_t tid;
+    uint64_t timestamp;
     uint64_t addr;
     uint64_t value;
     uint64_t time_enabled;
     uint64_t phys_addr;
-    uint64_t timestamp;
 };
 
 long perf_event_open(struct perf_event_attr *event_attr, pid_t pid, int cpu, int group_fd, unsigned long flags) {
@@ -30,11 +30,11 @@ PEBS::PEBS(pid_t pid, uint64_t sample_period, bool is_page) : pid(pid), sample_p
         .type = PERF_TYPE_RAW,
         .size = sizeof(struct perf_event_attr),
         .config = 0x20d1, // mem_load_retired.l3_miss
-        .sample_period = this->sample_period,
-        .sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_ADDR | PERF_SAMPLE_READ | PERF_SAMPLE_PHYS_ADDR,
+        .sample_period = 1,
+        .sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_TIME | PERF_SAMPLE_ADDR | PERF_SAMPLE_READ | PERF_SAMPLE_PHYS_ADDR,
         .read_format = PERF_FORMAT_TOTAL_TIME_ENABLED,
         .disabled = 1, // Event is initially disabled
-        .exclude_kernel = 1,
+        .exclude_kernel = 0,
         .precise_ip = 1,
         .config1 = 3,
     }; // excluding events that happen in the kernel-space
@@ -43,15 +43,15 @@ PEBS::PEBS(pid_t pid, uint64_t sample_period, bool is_page) : pid(pid), sample_p
     int group_fd = -1;
     unsigned long flags = 0;
 
-    this->fd = perf_event_open(&pe, this->pid, cpu, group_fd, flags);
+    this->fd = perf_event_open(&pe, pid, cpu, group_fd, flags);
     if (this->fd == -1) {
         perror("perf_event_open");
         throw;
     }
 
     this->mplen = MMAP_SIZE;
-    this->mp =
-        static_cast<perf_event_mmap_page *>(mmap(NULL, MMAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd, 0));
+    this->mp = (perf_event_mmap_page *)mmap(NULL, MMAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd, 0);
+
     if (this->mp == MAP_FAILED) {
         perror("mmap");
         throw;
@@ -60,8 +60,6 @@ PEBS::PEBS(pid_t pid, uint64_t sample_period, bool is_page) : pid(pid), sample_p
     this->start();
 }
 int PEBS::read(CXLController *controller, struct PEBSElem *elem) {
-    //    struct perf_event_mmap_page *mp = this->mp;
-
     if (this->fd < 0) {
         return 0;
     }
@@ -80,7 +78,6 @@ int PEBS::read(CXLController *controller, struct PEBSElem *elem) {
         this->seq = mp->lock;
         barrier();
         last_head = mp->data_head;
-        LOG(ERROR) << "sbssbsb " << this->rdlen << " " << last_head << "\n";
         while ((uint64_t)this->rdlen < last_head) {
             header = (struct perf_event_header *)(dp + this->rdlen % DATA_SIZE);
 
@@ -97,9 +94,9 @@ int PEBS::read(CXLController *controller, struct PEBSElem *elem) {
                     continue;
                 }
                 if (this->pid == data->pid) {
-                    LOG(DEBUG) << fmt::format("pid:{} tid:{} time:{} addr:{} phys_addr:{} llc_miss:{} timestamp={}\n",
-                                              int(data->pid), int(data->tid), long(data->time_enabled),
-                                              long(data->addr), long(data->phys_addr), long(data->value),long(data->timestamp));
+                    LOG(ERROR) << fmt::format("pid:{} tid:{} time:{} addr:{} phys_addr:{} llc_miss:{} timestamp={}\n",
+                                              data->pid, data->tid, data->time_enabled, data->addr, data->phys_addr,
+                                              data->value, data->timestamp);
                     controller->insert(data->time_enabled, data->phys_addr, data->phys_addr, 0);
                     elem->total++;
                     elem->llcmiss = data->value;
@@ -132,7 +129,6 @@ int PEBS::start() {
     if (this->fd < 0) {
         return 0;
     }
-    LOG(ERROR) << "start" << this->fd;
     if (ioctl(this->fd, PERF_EVENT_IOC_ENABLE, 0) < 0) {
         perror("ioctl");
         return -1;

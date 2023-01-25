@@ -14,9 +14,7 @@ void pcm_cpuid(const unsigned leaf, CPUID_INFO *info) {
 int Incore::start() {
     int i, r = -1;
 
-    for (i = 0; i < 7; i++) {
-        if (!this->perf[i])
-            continue;
+    for (i = 0; i < 6; i++) {
         r = this->perf[i]->start();
         if (r < 0) {
             LOG(ERROR) << fmt::format("perf_start failed. i:{}\n", i);
@@ -56,8 +54,10 @@ void Incore::init_cpu_mem_write(const pid_t pid, const int cpu) {
     this->perf[5] = init_incore_perf(pid, cpu, perf_config->cpu_bandwidth_write_config, 0);
 }
 void Incore::init_cpu_ebpf(const pid_t pid, const int cpu) {
-    if (cpu == 0)
-        this->perf[6] = init_incore_bpf_perf(pid, cpu);
+    // if (cpu == 0)
+    //     this->perf[6] = init_incore_bpf_perf(pid, cpu);
+    // else 
+        this->perf[6] = nullptr;
 }
 int Incore::read_cpu_elems(struct CPUElem *elem) {
     ssize_t r;

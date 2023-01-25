@@ -86,7 +86,7 @@ int Monitors::enable(const uint32_t tgid, const uint32_t tid, bool is_process, u
     if (pebs_sample_period) {
         /* pebs start */
         mon[target].pebs_ctx = new PEBS(tgid, pebs_sample_period, is_page);
-        LOG(DEBUG) << fmt::format("Process [tgid={}, tid={}]: enable to pebs.\n", mon[target].tgid, mon[target].tid);
+        LOG(DEBUG) << fmt::format("{}Process [tgid={}, tid={}]: enable to pebs.\n",target, mon[target].tgid, mon[target].tid);
     }
 
     LOG(INFO) << fmt::format("========== Process {}[tgid={}, tid={}] monitoring start ==========\n", target,

@@ -88,7 +88,7 @@ static int parse_relo_and_apply(Elf_Data *data, Elf_Data *symbols, GElf_Shdr *sh
         GElf_Rel rel;
         unsigned int insn_idx;
         bool match = false;
-        int  map_idx;
+        int map_idx;
 
         gelf_getrel(data, i, &rel);
 
@@ -368,7 +368,7 @@ PerfInfo::PerfInfo(int group_fd, int cpu, pid_t pid, unsigned long flags, struct
 PerfInfo::PerfInfo(int fd, int group_fd, int cpu, pid_t pid, unsigned long flags, struct perf_event_attr attr)
     : fd(fd), group_fd(group_fd), cpu(cpu), pid(pid), flags(flags), attr(attr) {
     this->map = new ThreadSafeMap();
-    this->j = std::jthread{[&] { write_trace_to_map(map); }};
+    this->j= std::jthread{[&] { write_trace_to_map(map); }};
 }
 PerfInfo::~PerfInfo() {
     this->j.join();

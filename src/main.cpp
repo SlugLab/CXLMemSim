@@ -30,7 +30,7 @@ int main(int argc, char *argv[]) {
         "h,help", "The value for epoch value", cxxopts::value<bool>()->default_value("false"))(
         "i,interval", "The value for epoch value", cxxopts::value<int>()->default_value("20"))(
         "c,cpuset", "The CPUSET for CPU to set affinity on",
-        cxxopts::value<std::vector<int>>()->default_value("0,1,2,3,4,5,6,7"))(
+        cxxopts::value<std::vector<int>>()->default_value("0,1,2,3,4,5,6,7,8,9,10,11,12,13,14"))(
         "d,dramlatency", "The current platform's dram latency", cxxopts::value<double>()->default_value("85"))(
         "p,pebsperiod", "The pebs sample period", cxxopts::value<int>()->default_value("1"))(
         "m,mode", "Page mode or cacheline mode", cxxopts::value<std::string>()->default_value("p"))(
@@ -69,14 +69,10 @@ int main(int argc, char *argv[]) {
     uint64_t use_cpus = 0;
     cpu_set_t use_cpuset;
     CPU_ZERO(&use_cpuset);
-    for (auto c : cpuset) {
-        use_cpus += std::pow(2, c);
-    }
     for (int i = 0; i < helper.cpu; i++) {
-        if (!(!use_cpus || use_cpus & 1UL << i)) {
+        if (!use_cpus || use_cpus & 1UL << i) {
             CPU_SET(i, &use_cpuset);
-            LOG(DEBUG) << fmt::format("use cpuid: {}\n", i); /** TODO: set CAT here */
-            break;
+            LOG(DEBUG) << fmt::format("use cpuid: {}{}\n", i, use_cpus); /** TODO: set CAT here */
         }
     }
     auto tnum = CPU_COUNT(&use_cpuset);
@@ -119,6 +115,32 @@ int main(int argc, char *argv[]) {
     LOG(DEBUG) << fmt::format("num_of_cpu:{}\n", ncpu);
     Monitors monitors{tnum, &use_cpuset, static_cast<int>(capacity.size()) - 1, helper, controller};
 
+    // https://stackoverflow.com/questions/24796266/tokenizing-a-string-to-pass-as-char-into-execve
+    char cmd_buf[1024] = {0};
+    strncpy(cmd_buf, target.c_str(), sizeof(cmd_buf));
+
+    /* This strtok_r() call puts '\0' after the first token in the buffer,
+     * It saves the state to the strtok_state and subsequent calls resume from that point. */
+    char *strtok_state = nullptr;
+    char *filename = strtok_r(cmd_buf, " ", &strtok_state);
+
+    /* Allocate an array of pointers.
+     * We will make them point to certain locations inside the cmd_buf. */
+    char *args[32] = {nullptr};
+    /* loop the strtok_r() call while there are tokens and free space in the array */
+    size_t current_arg_idx;
+    for (current_arg_idx = 0; current_arg_idx < 32; ++current_arg_idx) {
+        /* Note that the first argument to strtok_r() is nullptr.
+         * That means resume from a point saved in the strtok_state. */
+        char *current_arg = strtok_r(nullptr, " ", &strtok_state);
+        if (current_arg == nullptr) {
+            break;
+        }
+
+        args[current_arg_idx] = current_arg;
+        LOG(INFO) << fmt::format("args[{}] = {}\n", current_arg_idx, args[current_arg_idx]);
+    }
+
     /* zombie avoid */
     Helper::detach_children();
     /* create target process */
@@ -127,31 +149,6 @@ int main(int argc, char *argv[]) {
         LOG(ERROR) << "Fork: failed to create target process";
         exit(1);
     } else if (t_process == 0) {
-        // https://stackoverflow.com/questions/24796266/tokenizing-a-string-to-pass-as-char-into-execve
-        char cmd_buf[1024] = {0};
-        strncpy(cmd_buf, target.c_str(), sizeof(cmd_buf));
-
-        /* This strtok_r() call puts '\0' after the first token in the buffer,
-         * It saves the state to the strtok_state and subsequent calls resume from that point. */
-        char *strtok_state = nullptr;
-        char *filename = strtok_r(cmd_buf, " ", &strtok_state);
-
-        /* Allocate an array of pointers.
-         * We will make them point to certain locations inside the cmd_buf. */
-        char *args[32] = {nullptr};
-        /* loop the strtok_r() call while there are tokens and free space in the array */
-        size_t current_arg_idx;
-        for (current_arg_idx = 0; current_arg_idx < 32; ++current_arg_idx) {
-            /* Note that the first argument to strtok_r() is nullptr.
-             * That means resume from a point saved in the strtok_state. */
-            char *current_arg = strtok_r(nullptr, " ", &strtok_state);
-            if (current_arg == nullptr) {
-                break;
-            }
-
-            args[current_arg_idx] = current_arg;
-            LOG(INFO) << fmt::format("args[{}] = {}\n", current_arg_idx, args[current_arg_idx]);
-        }
         execv(filename, args);
         /* We do not need to check the return value */
         LOG(ERROR) << "Exec: failed to create target process\n";
@@ -319,8 +316,8 @@ int main(int argc, char *argv[]) {
 
                 if (cpus_dram_rds < target_llcmiss) {
                     LOG(DEBUG) << fmt::format(
-                        "[{}:{}:{}]warning: target_llcmiss is more than cpus_dram_rds. target_llcmiss %ju, "
-                        "cpus_dram_rds %ju\n",
+                        "[{}:{}:{}]warning: target_llcmiss is more than cpus_dram_rds. target_llcmiss {}, "
+                        "cpus_dram_rds {}\n",
                         i, mon.tgid, mon.tid, target_llcmiss, cpus_dram_rds);
                 }
                 uint64_t llcmiss_wb = 0;
@@ -443,10 +440,9 @@ int main(int argc, char *argv[]) {
                 sleep_time.tv_nsec = sleep_diff % 1000000000;
                 mon.wasted_delay.tv_sec += sleep_time.tv_sec;
                 mon.wasted_delay.tv_nsec += sleep_time.tv_nsec;
-                LOG(DEBUG) << fmt::format(
-                    "[{}:{}:{}][OFF] total: {}| wasted : {}| waittime : {}| squabble : {}\n", i, mon.tgid,
-                    mon.tid, mon.injected_delay.tv_nsec, mon.wasted_delay.tv_nsec, waittime.tv_nsec,
-                    mon.squabble_delay.tv_nsec);
+                LOG(DEBUG) << fmt::format("[{}:{}:{}][OFF] total: {}| wasted : {}| waittime : {}| squabble : {}\n", i,
+                                          mon.tgid, mon.tid, mon.injected_delay.tv_nsec, mon.wasted_delay.tv_nsec,
+                                          waittime.tv_nsec, mon.squabble_delay.tv_nsec);
                 if (monitors.check_continue(i, sleep_time)) {
                     mon.clear_time(&mon.wasted_delay);
                     mon.clear_time(&mon.injected_delay);
@@ -462,10 +458,9 @@ int main(int argc, char *argv[]) {
                 if (mon.wasted_delay.tv_sec >= waittime.tv_sec && remain_time < waittime.tv_nsec) {
                     mon.squabble_delay.tv_nsec += remain_time;
                     if (mon.squabble_delay.tv_nsec < 40000000) {
-                        LOG(DEBUG) << fmt::format(
-                            "[SQ]total: {}| wasted : {}| waittime : {}| squabble : {}\n",
-                            mon.injected_delay.tv_nsec, mon.wasted_delay.tv_nsec, waittime.tv_nsec,
-                            mon.squabble_delay.tv_nsec);
+                        LOG(DEBUG) << fmt::format("[SQ]total: {}| wasted : {}| waittime : {}| squabble : {}\n",
+                                                  mon.injected_delay.tv_nsec, mon.wasted_delay.tv_nsec,
+                                                  waittime.tv_nsec, mon.squabble_delay.tv_nsec);
                         mon.clear_time(&mon.wasted_delay);
                         mon.clear_time(&mon.injected_delay);
                         mon.run();
