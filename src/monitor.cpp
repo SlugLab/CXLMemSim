@@ -114,6 +114,10 @@ void Monitors::disable(const uint32_t target) {
         mon[target].pebs_ctx->mp = nullptr;
         mon[target].pebs_ctx->sample_period = 0;
     }
+    for (int j = 0; j < 2; j++) {
+        mon[target].elem[j].pebs.total = 0;
+        mon[target].elem[j].pebs.llcmiss = 0;
+    }
 }
 bool Monitors::check_all_terminated(const uint32_t processes) {
     bool _terminated = true;

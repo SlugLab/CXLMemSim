@@ -170,16 +170,16 @@ const struct ModelContext model_ctx[] = {{CPU_MDL_BDX,
                                            0x01d3,
                                            /*
                                             * cpu_bandwidth_read_config:
-                                            *   UNC_M_CAS_COUNT_RD * 64
-                                            *   cpu/umask=0x00,event=0x22/
+                                            *   UNC_M_CAS_COUNT.RD * 64
+                                            *   cpu/umask=0xcf,event=0x05/
                                             */
-                                           0x0022,
+                                           0xcf05,
                                            /*
                                             * cpu_bandwidth_write_config:
-                                            *   UNC_M_CAS_COUNT_WR * 64
-                                            *   cpu/umask=0x00,event=0x23/
+                                            *   UNC_M_CAS_COUNT.WR * 64
+                                            *   cpu/umask=0xf0,event=0x05/
                                             */
-                                           0x0023}},
+                                           0x01d3}},
                                          {CPU_MDL_END, {0}}};
 
 int Helper::num_of_cpu() {

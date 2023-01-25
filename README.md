@@ -2,6 +2,10 @@
 
 ## Prerequisite
 ```bash
+$ uname -a
+Linux gpu01 5.19.0-29-generic #30-Ubuntu SMP PREEMPT_DYNAMIC Wed Jan 4 12:14:09 UTC 2023 x86_64 x86_64 x86_64 GNU/Linux
+```
+```bash
 sudo apt install llvm-dev clang libbpf-dev libclang-dev libcxxopts-dev libfmt-dev librange-v3-dev
 ```
 ## User input
