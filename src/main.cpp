@@ -261,12 +261,10 @@ int main(int argc, char *argv[]) {
                 LOG(INFO) << fmt::format("[{}:{}:{}] LLC_WB = {}\n", i, mon.tgid, mon.tid, wb_cnt);
 
                 /* read CPU params */
-                uint64_t cpus_dram_rds = 0;
                 uint64_t read_config, write_config = 0;
                 uint64_t target_l2stall = 0, target_llcmiss = 0, target_llchits = 0;
                 for (int j = 0; j < ncpu; ++j) {
                     pmu.cpus[j].read_cpu_elems(&mon.after->cpus[j]);
-                    cpus_dram_rds += mon.after->cpus[j].all_dram_rds - mon.before->cpus[j].all_dram_rds;
                     read_config += mon.after->cpus[j].cpu_bandwidth_read - mon.before->cpus[j].cpu_bandwidth_read;
                     write_config += mon.after->cpus[j].cpu_bandwidth_write - mon.before->cpus[j].cpu_bandwidth_write;
                 }
@@ -281,12 +279,6 @@ int main(int argc, char *argv[]) {
                 target_llchits =
                     mon.after->cpus[mon.cpu_core].cpu_llcl_hits - mon.before->cpus[mon.cpu_core].cpu_llcl_hits;
 
-                if (cpus_dram_rds < target_llcmiss) {
-                    LOG(DEBUG) << fmt::format(
-                        "[{}:{}:{}]warning: target_llcmiss is more than cpus_dram_rds. target_llcmiss {}, "
-                        "cpus_dram_rds {}\n",
-                        i, mon.tgid, mon.tid, target_llcmiss, cpus_dram_rds);
-                }
                 uint64_t llcmiss_wb = 0;
                 // To estimate the number of the writeback-involving LLC
                 // misses of the CPU core (llcmiss_wb), the total number of
@@ -295,18 +287,12 @@ int main(int argc, char *argv[]) {
                 // the LLC misses of the CPU core (target_llcmiss) to that
                 // of the LLC misses of all the CPU cores and the
                 // prefetchers (cpus_dram_rds).
-                if (wb_cnt <= cpus_dram_rds && target_llcmiss <= cpus_dram_rds && cpus_dram_rds > 0) {
-                    llcmiss_wb = wb_cnt * ((double)target_llcmiss / cpus_dram_rds);
-                } else {
-                    LOG(DEBUG) << fmt::format("[{}:{}:{}]warning: wb_cnt {}, target_llcmiss {}, cpus_dram_rds {}\n", i,
-                                              mon.tgid, mon.tid, wb_cnt, target_llcmiss, cpus_dram_rds);
-                    llcmiss_wb = target_llcmiss;
-                }
+                llcmiss_wb = wb_cnt * ((double)target_llcmiss / read_config);
 
                 uint64_t llcmiss_ro = 0;
                 if (target_llcmiss < llcmiss_wb) {
                     LOG(ERROR) << fmt::format("[{}:{}:{}] cpus_dram_rds {}, llcmiss_wb {}, target_llcmiss {}\n", i,
-                                              mon.tgid, mon.tid, cpus_dram_rds, llcmiss_wb, target_llcmiss);
+                                              mon.tgid, mon.tid, read_config, llcmiss_wb, target_llcmiss);
                     LOG(ERROR) << fmt::format("!!!!llcmiss_ro is {}!!!!!\n", llcmiss_ro);
                     llcmiss_wb = target_llcmiss;
                     llcmiss_ro = 0;
