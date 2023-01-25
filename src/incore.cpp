@@ -14,7 +14,7 @@ void pcm_cpuid(const unsigned leaf, CPUID_INFO *info) {
 int Incore::start() {
     int i, r = -1;
 
-    for (i = 0; i < 6; i++) {
+    for (i = 0; i < 4; i++) {
         r = this->perf[i]->start();
         if (r < 0) {
             LOG(ERROR) << fmt::format("perf_start failed. i:{}\n", i);
@@ -26,7 +26,7 @@ int Incore::start() {
 int Incore::stop() {
     int i, r = -1;
 
-    for (i = 0; i < 7; i++) {
+    for (i = 0; i < 4; i++) {
         r = this->perf[i]->stop();
         if (r < 0) {
             LOG(ERROR) << fmt::format("perf_stop failed. i:{}\n", i);
@@ -38,6 +38,9 @@ int Incore::stop() {
 void Incore::init_all_dram_rds(const pid_t pid, const int cpu) {
     this->perf[0] = init_incore_perf(pid, cpu, perf_config->all_dram_rds_config, perf_config->all_dram_rds_config1);
 }
+void Incore::init_cpu_mem_read(const pid_t pid, const int cpu) {
+    this->perf[0] = init_incore_perf(pid, cpu, perf_config->cpu_bandwidth_read_config, 0);
+}
 void Incore::init_cpu_l2stall(const pid_t pid, const int cpu) {
     this->perf[1] = init_incore_perf(pid, cpu, perf_config->cpu_l2stall_config, 0);
 }
@@ -47,27 +50,24 @@ void Incore::init_cpu_llcl_hits(const pid_t pid, const int cpu) {
 void Incore::init_cpu_llcl_miss(const pid_t pid, const int cpu) {
     this->perf[3] = init_incore_perf(pid, cpu, perf_config->cpu_llcl_miss_config, 0);
 }
-void Incore::init_cpu_mem_read(const pid_t pid, const int cpu) {
-    this->perf[4] = init_incore_perf(pid, cpu, perf_config->cpu_bandwidth_read_config, 0);
-}
 void Incore::init_cpu_mem_write(const pid_t pid, const int cpu) {
     this->perf[5] = init_incore_perf(pid, cpu, perf_config->cpu_bandwidth_write_config, 0);
 }
 void Incore::init_cpu_ebpf(const pid_t pid, const int cpu) {
-    // if (cpu == 0)
-    //     this->perf[6] = init_incore_bpf_perf(pid, cpu);
-    // else 
-        this->perf[6] = nullptr;
+    if (cpu == 0)
+        this->perf[4] = init_incore_bpf_perf(pid, cpu);
+    else 
+        this->perf[4] = nullptr;
 }
 int Incore::read_cpu_elems(struct CPUElem *elem) {
     ssize_t r;
 
-    r = this->perf[0]->read_pmu(&elem->all_dram_rds);
+    r = this->perf[0]->read_pmu(&elem->cpu_bandwidth_read);
     if (r < 0) {
-        LOG(ERROR) << fmt::format("read all_dram_rds failed.\n");
+        LOG(ERROR) << fmt::format("read cpu_bandwidth_read failed.\n");
         return r;
     }
-    LOG(DEBUG) << fmt::format("read all_dram_rds:{}\n", elem->all_dram_rds);
+    LOG(DEBUG) << fmt::format("read cpu_bandwidth_read:{}\n", elem->cpu_bandwidth_read);
 
     r = this->perf[1]->read_pmu(&elem->cpu_l2stall_t);
     if (r < 0) {
@@ -90,32 +90,32 @@ int Incore::read_cpu_elems(struct CPUElem *elem) {
     }
     LOG(DEBUG) << fmt::format("read cpu_llcl_miss:{}\n", elem->cpu_llcl_miss);
 
-    r = this->perf[4]->read_pmu(&elem->cpu_bandwidth_read);
-    if (r < 0) {
-        LOG(ERROR) << fmt::format("read cpu_bandwidth_read failed.\n");
-        return r;
-    }
-    LOG(DEBUG) << fmt::format("read cpu_bandwidth_read:{}\n", elem->cpu_bandwidth_read);
-    r = this->perf[5]->read_pmu(&elem->cpu_bandwidth_write);
-    if (r < 0) {
-        LOG(ERROR) << fmt::format("read cpu_bandwidth_write failed.\n");
-        return r;
-    }
-    LOG(DEBUG) << fmt::format("read cpu_bandwidth_write:{}\n", elem->cpu_bandwidth_write);
-    if (this->perf[6]!= nullptr) {
-        elem->cpu_munmap_address_length = this->perf[6]->read_trace_pipe();
+    // r = this->perf[4]->read_pmu(&elem->cpu_bandwidth_read);
+    // if (r < 0) {
+    //     LOG(ERROR) << fmt::format("read cpu_bandwidth_read failed.\n");
+    //     return r;
+    // }
+    // LOG(DEBUG) << fmt::format("read cpu_bandwidth_read:{}\n", elem->cpu_bandwidth_read);
+    // r = this->perf[5]->read_pmu(&elem->cpu_bandwidth_write);
+    // if (r < 0) {
+    //     LOG(ERROR) << fmt::format("read cpu_bandwidth_write failed.\n");
+    //     return r;
+    // }
+    // LOG(DEBUG) << fmt::format("read cpu_bandwidth_write:{}\n", elem->cpu_bandwidth_write);
+    if (this->perf[4]!= nullptr) {
+        elem->cpu_munmap_address_length = this->perf[4]->read_trace_pipe();
         LOG(DEBUG) << fmt::format("read munmap result with size:{}\n", elem->cpu_munmap_address_length.size());
     }
 }
 Incore::Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config) : perf_config(perf_config) {
     /* reset all pmc values */
-    this->init_all_dram_rds(pid, cpu);
+    // this->init_all_dram_rds(pid, cpu);
+    this->init_cpu_mem_read(pid, cpu);
     this->init_cpu_l2stall(pid, cpu);
     this->init_cpu_llcl_hits(pid, cpu);
     this->init_cpu_llcl_miss(pid, cpu);
-    this->init_cpu_mem_read(pid, cpu);
-    this->init_cpu_mem_write(pid, cpu);
     this->init_cpu_ebpf(pid, cpu);
+    // this->init_cpu_mem_write(pid, cpu);
 }
 bool get_cpu_info(struct CPUInfo *cpu_info) {
     char buffer[1024];

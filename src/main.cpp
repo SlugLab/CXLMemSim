@@ -353,14 +353,12 @@ int main(int argc, char *argv[]) {
                 uint64_t mastall_ro = 0;
                 // If both target_llchits and target_llcmiss are 0, it means that hit in L2.
                 // Stall by LLC misses is 0.
-                if (target_llchits || target_llcmiss) {
-                    mastall_wb =
-                        (double)(target_l2stall / frequency) *
-                        ((double)(weight * llcmiss_wb) / (double)(target_llchits + (weight * target_llcmiss))) * 1000;
-                    mastall_ro =
-                        (double)(target_l2stall / frequency) *
-                        ((double)(weight * llcmiss_ro) / (double)(target_llchits + (weight * target_llcmiss))) * 1000;
-                }
+                mastall_wb = (double)(target_l2stall / frequency) *
+                             ((double)(weight * llcmiss_wb) / (double)(target_llchits + (weight * target_llcmiss))) *
+                             1000;
+                mastall_ro = (double)(target_l2stall / frequency) *
+                             ((double)(weight * llcmiss_ro) / (double)(target_llchits + (weight * target_llcmiss))) *
+                             1000;
                 LOG(DEBUG) << fmt::format(
                     "l2stall={}, mastall_wb={}, mastall_ro={}, target_llchits={}, target_llcmiss={}, weight={}\n",
                     target_l2stall, mastall_wb, mastall_ro, target_llchits, target_llcmiss, weight);
