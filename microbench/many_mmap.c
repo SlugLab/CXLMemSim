@@ -1,3 +1,4 @@
+// https://github.com/scode/alloctest
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
@@ -8,17 +9,6 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-static int read_and_discard_line() {
-    char *line = NULL;
-    size_t linecap = 0;
-    if (getline(&line, &linecap, stdin) == -1) {
-        printf("getline() failed\n");
-        return -1;
-    }
-    free(line);
-    return 0;
-}
 
 int main(int argc, const char *const *argv) {
     bool use_malloc = false;
@@ -42,65 +32,20 @@ int main(int argc, const char *const *argv) {
 
     size_t mbcount;
 
-    if (strcmp(argv[1], "malloc") == 0) {
-        use_malloc = true;
+    if (strcmp(argv[1], "sbrk") == 0) {
         mbcount = atoi(argv[2]);
-    } else {
-        use_mmap = true;
-
-        if (strcmp(argv[1], "mmap-read") == 0) {
-            mmap_read = true;
-        } else {
-            mmap_write = true;
-        }
-        mbcount = atoi(argv[3]);
-        mmap_path = argv[2];
     }
 
-    printf("allocating %d MB\n", mbcount);
+    printf("allocating %ld MB\n", mbcount);
     uint8_t *p;
-    if (use_malloc) {
-        p = (uint8_t *)malloc(mbcount * 1024ULL * 1024ULL);
+    p = (uint8_t *)malloc(mbcount * 1024ULL * 1024ULL);
 
-        if (p == NULL) {
-            fprintf(stderr, "malloc()/mmap() failed: %s", strerror(errno));
-            return EXIT_FAILURE;
-        }
-    } else if (use_mmap) {
-        int fd = open(mmap_path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-
-        if (fd < 0) {
-            fprintf(stderr, "open() failed: %s\n", strerror(errno));
-            return EXIT_FAILURE;
-        }
-
-        if (mmap_write) {
-            if (lseek(fd, mbcount * 1024ULL * 1024ULL, SEEK_CUR) == -1) {
-                fprintf(stderr, "lseek() failed: %s\n", strerror(errno));
-                return EXIT_FAILURE;
-            }
-
-            // Make sure we have mbcount MB of valid file to mmap().
-            if (write(fd, "trailer", sizeof("trailer")) <= 0) {
-                fprintf(stderr, "write failed/short write\n");
-                return EXIT_FAILURE;
-            }
-        }
-
-        p = mmap(NULL, mbcount * 1024ULL * 1024ULL, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-        if (p == MAP_FAILED) {
-            fprintf(stderr, "mmap() failed: %s\n", strerror(errno));
-            return EXIT_FAILURE;
-        }
-    } else {
-        fprintf(stderr, "bork\n");
+    if (p == NULL) {
+        fprintf(stderr, "malloc()/mmap() failed: %s", strerror(errno));
         return EXIT_FAILURE;
     }
 
     printf("allocated - press enter to fill/read");
-    if (read_and_discard_line() == -1) {
-        return EXIT_FAILURE;
-    }
 
     if (mmap_read) {
         printf("reading");
@@ -113,10 +58,6 @@ int main(int argc, const char *const *argv) {
         for (size_t i = 0; i < mbcount * 1024ULL * 1024ULL; i++) {
             p[i] = 'w';
         }
-    }
-
-    if (read_and_discard_line() == -1) {
-        return EXIT_FAILURE;
     }
 
     return EXIT_SUCCESS;
