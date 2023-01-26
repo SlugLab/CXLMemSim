@@ -34,7 +34,7 @@ PEBS::PEBS(pid_t pid, uint64_t sample_period, bool is_page) : pid(pid), sample_p
         .sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_TIME | PERF_SAMPLE_ADDR | PERF_SAMPLE_READ | PERF_SAMPLE_PHYS_ADDR,
         .read_format = PERF_FORMAT_TOTAL_TIME_ENABLED,
         .disabled = 1, // Event is initially disabled
-        .exclude_kernel = 1,
+        .exclude_kernel = 0,
         .precise_ip = 1,
         .config1 = 3,
     }; // excluding events that happen in the kernel-space

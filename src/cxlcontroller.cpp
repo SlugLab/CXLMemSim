@@ -40,14 +40,7 @@ CXLController::CXLController(Policy *p, int capacity, bool is_page, int epoch)
 }
 
 double CXLController::calculate_latency(LatencyPass elem) {
-    double lat = 0.0;
-    for (auto switch_ : this->switches) {
-        lat += switch_->calculate_latency(elem);
-    }
-    for (auto expander_ : this->expanders) {
-        lat += expander_->calculate_latency(elem);
-    }
-    return lat;
+    return CXLSwitch::calculate_latency(elem);
 }
 
 double CXLController::calculate_bandwidth(BandwidthPass elem) {
@@ -96,10 +89,16 @@ int CXLController::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_
     } else {
         this->counter.inc_remote();
         for (auto switch_ : this->switches) {
-            return switch_->insert(timestamp, phys_addr, virt_addr, index_);
+            auto res = switch_->insert(timestamp, phys_addr, virt_addr, index_);
+            if (res != 0) {
+                return res;
+            };
         }
         for (auto expander_ : this->expanders) {
-            return expander_->insert(timestamp, phys_addr, virt_addr, index_);
+            auto res = expander_->insert(timestamp, phys_addr, virt_addr, index_);
+            if (res != 0) {
+                return res;
+            };
         }
         return false;
     }
@@ -124,18 +123,7 @@ std::vector<std::string> CXLController::tokenize(const std::string_view &s) {
     return res;
 }
 std::tuple<int, int> CXLController::get_all_access() {
-    int read, write;
-    for (auto &expander : this->expanders) {
-        auto [r, w] = expander->get_all_access();
-        read += r;
-        write += w;
-    }
-    for (auto &switch_ : this->switches) {
-        auto [r, w] = switch_->get_all_access();
-        read += r;
-        write += w;
-    }
-    return std::make_tuple(read, write);
+    return CXLSwitch::get_all_access();
 }
 std::tuple<double, std::vector<uint64_t>> CXLController::calculate_congestion() {
     return CXLSwitch::calculate_congestion();

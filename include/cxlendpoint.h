@@ -30,7 +30,7 @@ public:
     int last_write = 0;
     uint64_t last_timestamp = 0;
     int id = -1;
-    CXLMemExpander(int read_bw, int write_bw, int read_lat, int write_lat, int id);
+    CXLMemExpander(int read_bw, int write_bw, int read_lat, int write_lat, int id, int capacity);
     std::tuple<int, int> get_all_access() override;
     int insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) override;
     double calculate_latency(LatencyPass elem) override; // traverse the tree to calculate the latency

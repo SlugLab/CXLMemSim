@@ -4,20 +4,28 @@
 
 #include "cxlendpoint.h"
 
-CXLMemExpander::CXLMemExpander(int read_bw, int write_bw, int read_lat, int write_lat, int id) {
+CXLMemExpander::CXLMemExpander(int read_bw, int write_bw, int read_lat, int write_lat, int id, int capacity)
+    : capacity(capacity), id(id) {
     this->bandwidth.read = read_bw;
     this->bandwidth.write = write_bw;
     this->latency.read = read_lat;
     this->latency.write = write_lat;
-    this->id = id;
 }
 double CXLMemExpander::calculate_latency(LatencyPass lat) {
     auto all_access = lat.all_access;
     auto dramlatency = lat.dramlatency;
     auto ma_ro = lat.ma_ro;
     auto ma_wb = lat.ma_wb;
-    auto read_sample = last_read / std::get<0>(all_access);
-    auto write_sample = last_write / std::get<1>(all_access);
+    auto all_read = std::get<0>(all_access);
+    auto all_write = std::get<1>(all_access);
+    double read_sample = 0.;
+    if (all_read != 0) {
+        read_sample = last_read / all_read;
+    }
+    double write_sample = 0.;
+    if (all_write != 0) {
+        double write_sample = last_write / all_write;
+    }
     return ma_ro * read_sample * (latency.read - dramlatency) + ma_wb * write_sample * (latency.write - dramlatency);
 }
 double CXLMemExpander::calculate_bandwidth(BandwidthPass bw) {
@@ -37,8 +45,8 @@ double CXLMemExpander::calculate_bandwidth(BandwidthPass bw) {
     return res;
 }
 void CXLMemExpander::delete_entry(uint64_t addr, uint64_t length) {
-    for (auto it = va_pa_map.begin(); it != va_pa_map.end();) {
-        if (it->second >= addr && it->second <= addr + length) {
+    for (auto it1 = va_pa_map.begin(); it1 != va_pa_map.end();) {
+        if (it1->second >= addr && it1->second <= addr + length) {
             for (auto it = occupation.begin(); it != occupation.end();) {
                 if (it->second == addr) {
                     it = occupation.erase(it);
@@ -46,34 +54,60 @@ void CXLMemExpander::delete_entry(uint64_t addr, uint64_t length) {
                     it++;
                 }
             }
-            it = va_pa_map.erase(it);
+            it1 = va_pa_map.erase(it1);
             this->counter.inc_load();
         }
+    }
+    // kernel mode access
+    for (auto it = occupation.begin(); it != occupation.end();) {
+        if (it->second >= addr && it->second <= addr + length) {
+            if (it->second == addr) {
+                it = occupation.erase(it);
+            } else {
+                it++;
+            }
+        }
+        this->counter.inc_load();
     }
 }
 
 int CXLMemExpander::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
     if (index == this->id) {
-        if (va_pa_map.find(virt_addr) != va_pa_map.end()) {
-            this->va_pa_map.emplace(virt_addr, phys_addr);
-        } else {
-            this->va_pa_map[virt_addr] = phys_addr;
-            LOG(INFO) << fmt::format("virt:{} phys:{} conflict insertion detected", virt_addr, phys_addr);
-        }
         last_timestamp = last_timestamp > timestamp ? last_timestamp : timestamp; // Update the last timestamp
-        // Check if the address is already in the map
-        for (auto it = this->occupation.cbegin(); it != this->occupation.cend(); it++) {
-            if ((*it).second == phys_addr) {
-                this->occupation.emplace(timestamp, phys_addr);
-                this->counter.inc_store();
-                return 1;
+        // Check if the address is already in the map)
+        if (phys_addr != 0) {
+            if (va_pa_map.find(virt_addr) == va_pa_map.end()) {
+                this->va_pa_map.emplace(virt_addr, phys_addr);
             } else {
-                this->occupation.erase(it);
-                this->occupation.emplace(timestamp, phys_addr);
-                this->counter.inc_load();
-                return 2;
+                this->va_pa_map[virt_addr] = phys_addr;
+                LOG(INFO) << fmt::format("virt:{} phys:{} conflict insertion detected", virt_addr, phys_addr);
             }
+            for (auto it = this->occupation.cbegin(); it != this->occupation.cend(); it++) {
+                if ((*it).second == phys_addr) {
+                    this->occupation.erase(it);
+                    this->occupation.emplace(timestamp, phys_addr);
+                    this->counter.inc_load();
+                    return 2;
+                }
+            }
+            this->occupation.emplace(timestamp, phys_addr);
+            this->counter.inc_store();
+            return 1;
+        } else { // kernel mode access
+            for (auto it = this->occupation.cbegin(); it != this->occupation.cend(); it++) {
+                if ((*it).second == virt_addr) {
+                    this->occupation.erase(it);
+                    this->occupation.emplace(timestamp, virt_addr);
+                    this->counter.inc_load();
+                    return 2;
+                }
+            }
+
+            this->occupation.emplace(timestamp, virt_addr);
+            this->counter.inc_store();
+            return 1;
         }
+
     } else {
         return 0;
     }
@@ -146,7 +180,7 @@ int CXLSwitch::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr
             return 2;
         } else {
             return 0;
-        };
+        }
     }
     for (auto &switch_ : this->switches) {
         auto ret = switch_->insert(timestamp, phys_addr, virt_addr, index);
@@ -158,7 +192,7 @@ int CXLSwitch::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr
             return 2;
         } else {
             return 0;
-        };
+        }
     }
 }
 std::tuple<double, std::vector<uint64_t>> CXLSwitch::calculate_congestion() {
@@ -188,7 +222,7 @@ std::tuple<double, std::vector<uint64_t>> CXLSwitch::calculate_congestion() {
     return std::make_tuple(latency, congestion);
 }
 std::tuple<int, int> CXLSwitch::get_all_access() {
-    int read, write;
+    int read = 0, write = 0;
     for (auto &expander : this->expanders) {
         auto [r, w] = expander->get_all_access();
         read += r;

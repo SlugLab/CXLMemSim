@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
         "o,topology", "The newick tree input for the CXL memory expander topology",
         cxxopts::value<std::string>()->default_value("(1,(2,3))"))(
         "s,capacity", "The capacity vector of the CXL memory expander with the firsgt local",
-        cxxopts::value<std::vector<int>>()->default_value("10,20,20,20"))(
+        cxxopts::value<std::vector<int>>()->default_value("0,20,20,20"))(
         "f,frequency", "The frequency for the running thread", cxxopts::value<double>()->default_value("4000"))(
         "l,latency", "The simulated latency by epoch based calculation for injected latency",
         cxxopts::value<std::vector<int>>()->default_value("100,150,100,150,100,150"))(
@@ -92,7 +92,7 @@ int main(int argc, char *argv[]) {
             LOG(DEBUG) << fmt::format(" read_bandwidth:{}\n", bandwidth[(idx - 1) * 2]);
             LOG(DEBUG) << fmt::format(" write_bandwidth:{}\n", bandwidth[(idx - 1) * 2 + 1]);
             auto *ep = new CXLMemExpander(latency[(idx - 1) * 2], latency[(idx - 1) * 2 + 1], bandwidth[(idx - 1) * 2],
-                                          bandwidth[(idx - 1) * 2 + 1], (idx - 1));
+                                          bandwidth[(idx - 1) * 2 + 1], (idx - 1), capacity[idx]);
             controller->insert_end_point(ep);
         }
     }
@@ -271,13 +271,13 @@ int main(int argc, char *argv[]) {
                             controller->delete_entry(i.first, i.second);
                         }
                     }
-                    read_config = mon.after->cpus[j].cpu_bandwidth_read - mon.before->cpus[j].cpu_bandwidth_read;
+                    read_config += mon.after->cpus[j].cpu_bandwidth_read - mon.before->cpus[j].cpu_bandwidth_read;
                 }
                 /* read PEBS sample */
                 if (mon.pebs_ctx->read(controller, &mon.after->pebs) < 0) {
                     LOG(ERROR) << fmt::format("[{}:{}:{}] Warning: Failed PEBS read\n", i, mon.tgid, mon.tid);
                 }
-                target_llcmiss = mon.after->pebs.llcmiss - mon.before->pebs.llcmiss;
+                target_llcmiss = mon.after->pebs.total - mon.before->pebs.total;
 
                 target_l2stall =
                     mon.after->cpus[mon.cpu_core].cpu_l2stall_t - mon.before->cpus[mon.cpu_core].cpu_l2stall_t;
