@@ -91,8 +91,8 @@ int main(int argc, char *argv[]) {
             LOG(DEBUG) << fmt::format(" write_latency:{}\n", latency[(idx - 1) * 2 + 1]);
             LOG(DEBUG) << fmt::format(" read_bandwidth:{}\n", bandwidth[(idx - 1) * 2]);
             LOG(DEBUG) << fmt::format(" write_bandwidth:{}\n", bandwidth[(idx - 1) * 2 + 1]);
-            auto *ep = new CXLMemExpander(latency[(idx - 1) * 2], latency[(idx - 1) * 2 + 1], bandwidth[(idx - 1) * 2],
-                                          bandwidth[(idx - 1) * 2 + 1], (idx - 1), capacity[idx]);
+            auto *ep = new CXLMemExpander(bandwidth[(idx - 1) * 2], bandwidth[(idx - 1) * 2 + 1],
+                                          latency[(idx - 1) * 2], latency[(idx - 1) * 2 + 1], (idx - 1), capacity[idx]);
             controller->insert_end_point(ep);
         }
     }
@@ -266,7 +266,7 @@ int main(int argc, char *argv[]) {
                 for (int j = 0; j < ncpu; ++j) {
                     pmu.cpus[j].read_cpu_elems(&mon.after->cpus[j]);
                     if (pmu.cpus[j].perf[4] != nullptr) {
-                        for (auto &i : mon.after->cpus[j].cpu_munmap_address_length) {
+                        for (auto &i : mon.after->cpus[j].cpu_munmap_address_length) { // delete by ebpf
                             LOG(DEBUG) << fmt::format("munmap address:{}, length:{}\n", i.first, i.second);
                             controller->delete_entry(i.first, i.second);
                         }
@@ -279,10 +279,14 @@ int main(int argc, char *argv[]) {
                 }
                 target_llcmiss = mon.after->pebs.total - mon.before->pebs.total;
 
-                target_l2stall =
-                    mon.after->cpus[mon.cpu_core].cpu_l2stall_t - mon.before->cpus[mon.cpu_core].cpu_l2stall_t;
-                target_llchits =
-                    mon.after->cpus[mon.cpu_core].cpu_llcl_hits - mon.before->cpus[mon.cpu_core].cpu_llcl_hits;
+                // target_l2stall =
+                //     mon.after->cpus[mon.cpu_core].cpu_l2stall_t - mon.before->cpus[mon.cpu_core].cpu_l2stall_t;
+                // target_llchits =
+                //     mon.after->cpus[mon.cpu_core].cpu_llcl_hits - mon.before->cpus[mon.cpu_core].cpu_llcl_hits;
+                for (auto const &[idx, value] : pmu.cpus | ranges::views::enumerate) {
+                    target_l2stall += mon.after->cpus[idx].cpu_l2stall_t - mon.before->cpus[idx].cpu_l2stall_t;
+                    target_llchits += mon.after->cpus[idx].cpu_llcl_hits - mon.before->cpus[idx].cpu_llcl_hits;
+                }
 
                 uint64_t llcmiss_wb = 0;
                 // To estimate the number of the writeback-involving LLC

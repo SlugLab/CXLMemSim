@@ -297,10 +297,11 @@ static perf_event_attr load_and_attach(const char *event, struct bpf_insn *prog,
         snprintf(buf, sizeof(buf), "echo '%c:%s %s' >> /sys/kernel/debug/tracing/kprobe_events", is_kprobe ? 'p' : 'r',
                  event, event);
         err = system(buf);
-        //        if (err < 0) {
-        //            LOG(ERROR) << fmt::format("failed to create kprobe '{}' error '{}'\n", event, strerror(errno));
-        //            throw;
-        //        }
+        LOG(INFO) << fmt::format("echo '{}:{} {}' >> /sys/kernel/debug/tracing/kprobe_events", is_kprobe ? 'p' : 'r',
+                                 event, event);
+        if (err < 0) {
+            LOG(ERROR) << fmt::format("failed to create kprobe '{}' error '{}'\n", event, strerror(errno));
+        }
 
         strcpy(buf, DEBUGFS);
         strcat(buf, "events/kprobes/");
@@ -549,6 +550,7 @@ PerfInfo *init_incore_bpf_perf(const pid_t pid, const int cpu) {
                 memcmp(shname_prog, "perf_event", 10) == 0 || memcmp(shname_prog, "socket", 6) == 0 ||
                 memcmp(shname_prog, "cgroup/", 7) == 0)
                 attr = load_and_attach(shname_prog, insns, data_prog->d_size, pid, cpu);
+            return new PerfInfo(event_fd, -1, cpu, pid, 0, attr);
         }
     }
 
@@ -566,9 +568,10 @@ PerfInfo *init_incore_bpf_perf(const pid_t pid, const int cpu) {
             memcmp(shname, "perf_event", 10) == 0 || memcmp(shname, "socket", 6) == 0 ||
             memcmp(shname, "cgroup/", 7) == 0)
             attr = load_and_attach(shname, (struct bpf_insn *)data->d_buf, data->d_size, pid, cpu);
+        return new PerfInfo(event_fd, -1, cpu, pid, 0, attr);
     }
 
-    return new PerfInfo(event_fd, -1, cpu, pid, 0, attr);
+    return nullptr;
 }
 
 void write_trace_to_map(ThreadSafeMap *map) {

@@ -20,11 +20,11 @@ double CXLMemExpander::calculate_latency(LatencyPass lat) {
     auto all_write = std::get<1>(all_access);
     double read_sample = 0.;
     if (all_read != 0) {
-        read_sample = last_read / all_read;
+        read_sample = ((double)last_read / all_read);
     }
     double write_sample = 0.;
     if (all_write != 0) {
-        double write_sample = last_write / all_write;
+        write_sample = ((double)last_write / all_write);
     }
     return ma_ro * read_sample * (latency.read - dramlatency) + ma_wb * write_sample * (latency.write - dramlatency);
 }
@@ -33,14 +33,23 @@ double CXLMemExpander::calculate_bandwidth(BandwidthPass bw) {
     auto all_access = bw.all_access;
     auto read_config = bw.read_config;
     auto write_config = bw.write_config;
-    auto read_sample = last_read / std::get<0>(all_access);
-    auto write_sample = last_write / std::get<1>(all_access);
+
     double res = 0.0;
-    if (read_sample * 64 * read_config / 1024 / 1024 * 50 > bandwidth.read) {
-        res += read_sample * 64 * read_config / 1024 / 1024 * 50 / bandwidth.read - 0.02;
+    auto all_read = std::get<0>(all_access);
+    auto all_write = std::get<1>(all_access);
+    double read_sample = 0.;
+    if (all_read != 0) {
+        read_sample = ((double)last_read / all_read);
     }
-    if (write_sample * 64 * write_config / 1024 / 1024 * 50 > bandwidth.write) {
-        res += write_sample * 64 * write_config / 1024 / 1024 * 50 / bandwidth.write - 0.02;
+    double write_sample = 0.;
+    if (all_write != 0) {
+        write_sample = ((double)last_write / all_write);
+    }
+    if ((((double)read_sample * 64 * read_config) / 1024 / 1024 * 50) > ((double)bandwidth.read)) {
+        res += read_sample * 64 * read_config / 1024 / 1024 * 50 / bandwidth.read - this->epoch * 0.001;
+    }
+    if ((((double)write_sample * 64 * write_config) / 1024 / 1024 * 50) > bandwidth.write) {
+        res += (((double)write_sample * 64 * write_config) / 1024 / 1024 * 50 / bandwidth.write) - this->epoch * 0.001;
     }
     return res;
 }
@@ -80,7 +89,7 @@ int CXLMemExpander::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt
                 this->va_pa_map.emplace(virt_addr, phys_addr);
             } else {
                 this->va_pa_map[virt_addr] = phys_addr;
-                LOG(INFO) << fmt::format("virt:{} phys:{} conflict insertion detected", virt_addr, phys_addr);
+                LOG(INFO) << fmt::format("virt:{} phys:{} conflict insertion detected\n", virt_addr, phys_addr);
             }
             for (auto it = this->occupation.cbegin(); it != this->occupation.cend(); it++) {
                 if ((*it).second == phys_addr) {
@@ -119,6 +128,7 @@ std::tuple<int, int> CXLMemExpander::get_all_access() {
     last_counter = CXLMemExpanderEvent(counter);
     return std::make_tuple(this->last_read, this->last_write);
 }
+void CXLMemExpander::set_epoch(int epoch) { this->epoch = epoch; }
 std::string CXLSwitch::output() {
     std::string res = fmt::format("CXLSwitch {} ", this->id);
     if (!this->switches.empty()) {
@@ -207,15 +217,18 @@ std::tuple<double, std::vector<uint64_t>> CXLSwitch::calculate_congestion() {
         for (auto &it : expander->occupation) {
             // every epoch
             if (it.first > this->last_timestamp - epoch * 1e3) {
-                congestion.push_back(it.second);
+                congestion.push_back(it.first);
             }
         }
     }
     sort(congestion.begin(), congestion.end());
     for (auto it = congestion.begin(); it != congestion.end(); ++it) {
-        if (*(it + 1) - *it < 20) {
+        if (*(it + 1) - *it < 2000) { // if less than 20ns
             latency += this->congestion_latency;
             this->counter.inc_conflict();
+            if (it + 1 == congestion.end()) {
+                break;
+            }
             congestion.erase(it);
         }
     }

@@ -8,6 +8,7 @@
 #include "helper.h"
 
 class CXLEndPoint {
+    virtual void set_epoch(int epoch) = 0;
     virtual std::string output() = 0;
     virtual void delete_entry(uint64_t addr, uint64_t length) = 0;
     virtual double calculate_latency(LatencyPass elem) = 0; // traverse the tree to calculate the latency
@@ -28,10 +29,12 @@ public:
     CXLMemExpanderEvent last_counter{};
     int last_read = 0;
     int last_write = 0;
+    int epoch = 0;
     uint64_t last_timestamp = 0;
     int id = -1;
     CXLMemExpander(int read_bw, int write_bw, int read_lat, int write_lat, int id, int capacity);
     std::tuple<int, int> get_all_access() override;
+    void set_epoch(int epoch) override;
     int insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) override;
     double calculate_latency(LatencyPass elem) override; // traverse the tree to calculate the latency
     double calculate_bandwidth(BandwidthPass elem) override;
@@ -55,7 +58,7 @@ public:
     void delete_entry(uint64_t addr, uint64_t length) override;
     std::string output() override;
     virtual std::tuple<double, std::vector<uint64_t>> calculate_congestion();
-    virtual void set_epoch(int epoch);
+    void set_epoch(int epoch) override;
 };
 
 #endif // CXL_MEM_SIMULATOR_CXLENDPOINT_H

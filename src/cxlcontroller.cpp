@@ -37,22 +37,14 @@ CXLController::CXLController(Policy *p, int capacity, bool is_page, int epoch)
     for (auto switch_ : this->switches) {
         switch_->set_epoch(epoch);
     }
+    for (auto expander : this->expanders) {
+        expander->set_epoch(epoch);
+    }
 }
 
-double CXLController::calculate_latency(LatencyPass elem) {
-    return CXLSwitch::calculate_latency(elem);
-}
+double CXLController::calculate_latency(LatencyPass elem) { return CXLSwitch::calculate_latency(elem) * 1000; }
 
-double CXLController::calculate_bandwidth(BandwidthPass elem) {
-    double bw = 0.0;
-    for (auto switch_ : this->switches) {
-        bw += switch_->calculate_bandwidth(elem);
-    }
-    for (auto expander_ : this->expanders) {
-        bw += expander_->calculate_bandwidth(elem);
-    }
-    return bw;
-}
+double CXLController::calculate_bandwidth(BandwidthPass elem) { return CXLSwitch::calculate_bandwidth(elem) * 1000; }
 
 std::string CXLController::output() {
     std::string res;
@@ -122,9 +114,7 @@ std::vector<std::string> CXLController::tokenize(const std::string_view &s) {
     }
     return res;
 }
-std::tuple<int, int> CXLController::get_all_access() {
-    return CXLSwitch::get_all_access();
-}
+std::tuple<int, int> CXLController::get_all_access() { return CXLSwitch::get_all_access(); }
 std::tuple<double, std::vector<uint64_t>> CXLController::calculate_congestion() {
     return CXLSwitch::calculate_congestion();
 }

@@ -152,15 +152,15 @@ int Monitors::terminate(const uint32_t tgid, const uint32_t tid, const int32_t t
             clock_gettime(CLOCK_MONOTONIC, &mon[i].end_exec_ts);
         }
         /* display results */
-        LOG(INFO) << fmt::format("========== Process {}[tgid={}, tid={}] statistics summary ==========\n", target,
+        std::cout << fmt::format("========== Process {}[tgid={}, tid={}] statistics summary ==========\n", target,
                                  mon[target].tgid, mon[target].tid);
         double emulated_time =
             (double)(mon[target].end_exec_ts.tv_sec - mon[target].start_exec_ts.tv_sec) +
             (double)(mon[target].end_exec_ts.tv_nsec - mon[target].start_exec_ts.tv_nsec) / 1000000000;
-        LOG(INFO) << fmt::format("emulated time ={}\n", emulated_time);
-        LOG(INFO) << fmt::format("total delay   ={}\n", mon[target].total_delay);
+        std::cout << fmt::format("emulated time ={}\n", emulated_time);
+        std::cout << fmt::format("total delay   ={}\n", mon[target].total_delay);
 
-        LOG(INFO) << fmt::format("PEBS sample total {}\n", mon[target].before->pebs.total);
+        std::cout << fmt::format("PEBS sample total {}\n", mon[target].before->pebs.total);
 
         /* init */
         disable(target);
