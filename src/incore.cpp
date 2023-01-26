@@ -56,7 +56,7 @@ void Incore::init_cpu_mem_write(const pid_t pid, const int cpu) {
 void Incore::init_cpu_ebpf(const pid_t pid, const int cpu) {
     if (cpu == 0)
         this->perf[4] = init_incore_bpf_perf(pid, cpu);
-    else 
+    else
         this->perf[4] = nullptr;
 }
 int Incore::read_cpu_elems(struct CPUElem *elem) {
@@ -102,9 +102,9 @@ int Incore::read_cpu_elems(struct CPUElem *elem) {
     //     return r;
     // }
     // LOG(DEBUG) << fmt::format("read cpu_bandwidth_write:{}\n", elem->cpu_bandwidth_write);
-    if (this->perf[4]!= nullptr) {
+    if (this->perf[4] != nullptr) {
         elem->cpu_munmap_address_length = this->perf[4]->read_trace_pipe();
-        LOG(DEBUG) << fmt::format("read munmap result with size:{}\n", elem->cpu_munmap_address_length.size());
+        LOG(DEBUG) << "read munmap result with size:" << elem->cpu_munmap_address_length.size() << "\n";
     }
 }
 Incore::Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config) : perf_config(perf_config) {

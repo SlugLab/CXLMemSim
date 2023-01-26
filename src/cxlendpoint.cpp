@@ -29,26 +29,27 @@ double CXLMemExpander::calculate_bandwidth(BandwidthPass bw) {
     auto write_sample = last_write / std::get<1>(all_access);
     double res = 0.0;
     if (read_sample * 64 * read_config / 1024 / 1024 * 50 > bandwidth.read) {
-        res+=read_sample * 64 * read_config / 1024 / 1024 * 50 /bandwidth.read-0.02;
+        res += read_sample * 64 * read_config / 1024 / 1024 * 50 / bandwidth.read - 0.02;
     }
     if (write_sample * 64 * write_config / 1024 / 1024 * 50 > bandwidth.write) {
-        res+=write_sample * 64 * write_config / 1024 / 1024 * 50 /bandwidth.write-0.02;
+        res += write_sample * 64 * write_config / 1024 / 1024 * 50 / bandwidth.write - 0.02;
     }
     return res;
 }
-void CXLMemExpander::delete_entry(uint64_t addr) {
-    if (occupation.find(addr) != occupation.end()) {
-        occupation.erase(addr);
-        this->counter.inc_load();
+void CXLMemExpander::delete_entry(uint64_t addr, uint64_t length) {
+    for (auto it = va_pa_map.begin(); it != va_pa_map.end();) {
+        if (it->second >= addr && it->second <= addr + length) {
+            for (auto it = occupation.begin(); it != occupation.end();) {
+                if (it->second == addr) {
+                    it = occupation.erase(it);
+                } else {
+                    it++;
+                }
+            }
+            it = va_pa_map.erase(it);
+            this->counter.inc_load();
+        }
     }
-}
-uint64_t CXLMemExpander::va_to_pa(uint64_t addr) {
-    if (va_pa_map.find(addr) != va_pa_map.end()) {
-        auto phys = va_pa_map[addr];
-        va_pa_map.erase(addr);
-        return phys;
-    }
-    return -1;
 }
 
 int CXLMemExpander::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
@@ -105,12 +106,12 @@ std::string CXLSwitch::output() {
     }
     return res;
 }
-void CXLSwitch::delete_entry(uint64_t addr) {
+void CXLSwitch::delete_entry(uint64_t addr, uint64_t length) {
     for (auto &expander : this->expanders) {
-        expander->delete_entry(addr);
+        expander->delete_entry(addr, length);
     }
     for (auto &switch_ : this->switches) {
-        switch_->delete_entry(addr);
+        switch_->delete_entry(addr, length);
     }
 }
 CXLSwitch::CXLSwitch(int id) : id(id) {}
@@ -170,8 +171,8 @@ std::tuple<double, std::vector<uint64_t>> CXLSwitch::calculate_congestion() {
     }
     for (auto &expander : this->expanders) {
         for (auto &it : expander->occupation) {
-            // 20ms every epoch
-            if (it.first > this->last_timestamp - 20000) {
+            // every epoch
+            if (it.first > this->last_timestamp - epoch * 1e3) {
                 congestion.push_back(it.second);
             }
         }
@@ -200,3 +201,4 @@ std::tuple<int, int> CXLSwitch::get_all_access() {
     }
     return std::make_tuple(read, write);
 }
+void CXLSwitch::set_epoch(int epoch) { this->epoch = epoch; }

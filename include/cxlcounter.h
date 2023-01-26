@@ -7,6 +7,9 @@
 
 #include <cstdint>
 #include <vector>
+#include <string>
+#include <map>
+#include <tuple>
 
 /** TODO: Whether to using the pebs to record the state. add back invalidation */
 class CXLSwitchEvent {

@@ -3,7 +3,7 @@
 int main() {
     int *p;
 #pragma omp parallel for
-    for (int i = 0; i < 1 * 1024 * 1024; i++) {
+    for (int i = 0; i < 128 * 1024; i++) {
         int inc = 1024 * sizeof(char);
         p = (int *)calloc(1, inc);
         if (!p)

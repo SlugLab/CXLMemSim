@@ -10,14 +10,10 @@
 #define SEC(NAME) __attribute__((section(NAME), used))
 
 /* helper functions called from eBPF programs written in C */
-static int (*bpf_probe_read)(void *dst, int size, void *unsafe_ptr) =
-    (void *) BPF_FUNC_probe_read;
-static unsigned long long (*bpf_ktime_get_ns)(void) =
-    (void *) BPF_FUNC_ktime_get_ns;
-static int (*bpf_trace_printk)(const char *fmt, int fmt_size, ...) =
-    (void *) BPF_FUNC_trace_printk;
-static unsigned long long (*bpf_get_current_pid_tgid)(void) =
-    (void *) BPF_FUNC_get_current_pid_tgid;
+static int (*bpf_probe_read)(void *dst, int size, void *unsafe_ptr) = (void *)BPF_FUNC_probe_read;
+static unsigned long long (*bpf_ktime_get_ns)(void) = (void *)BPF_FUNC_ktime_get_ns;
+static int (*bpf_trace_printk)(const char *fmt, int fmt_size, ...) = (void *)BPF_FUNC_trace_printk;
+static unsigned long long (*bpf_get_current_pid_tgid)(void) = (void *)BPF_FUNC_get_current_pid_tgid;
 /* a helper structure used by eBPF C program
  * to describe map attributes to elf_bpf loader
  */

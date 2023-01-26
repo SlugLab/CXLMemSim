@@ -6,13 +6,13 @@
 #include "helper.h"
 #include "perf.h"
 #include <sys/types.h>
+class CXLController;
 union CPUID_INFO {
     int array[4];
     struct {
         unsigned int eax, ebx, ecx, edx;
     } reg;
 };
-
 class Incore {
 public:
     PerfInfo *perf[5];

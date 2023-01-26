@@ -38,6 +38,19 @@ struct EmuCXLBandwidth {
     double write;
 };
 
+struct BandwidthPass {
+    std::tuple<int, int> all_access;
+    uint64_t read_config;
+    uint64_t write_config;
+};
+
+struct LatencyPass {
+    std::tuple<int, int> all_access;
+    double dramlatency;
+    double ma_ro;
+    double ma_wb;
+};
+
 struct CBOElem {
     uint64_t llc_wb;
 };
@@ -69,19 +82,6 @@ struct Elem {
     struct CBOElem *cbos;
     struct CPUElem *cpus;
     struct PEBSElem pebs;
-};
-
-struct BandwidthPass {
-    std::tuple<int, int> all_access;
-    uint64_t read_config;
-    uint64_t write_config;
-};
-
-struct LatencyPass {
-    std::tuple<int, int> all_access;
-    double dramlatency;
-    double ma_ro;
-    double ma_wb;
 };
 
 class PMUInfo {

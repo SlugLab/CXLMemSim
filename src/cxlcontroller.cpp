@@ -32,8 +32,12 @@ void CXLController::construct_topo(std::string_view newick_tree) {
     }
 }
 
-CXLController::CXLController(Policy *p, int capacity, bool is_page)
-    : CXLSwitch(0), capacity(capacity), policy(p), is_page(is_page) {}
+CXLController::CXLController(Policy *p, int capacity, bool is_page, int epoch)
+    : CXLSwitch(0), capacity(capacity), policy(p), is_page(is_page) {
+    for (auto switch_ : this->switches) {
+        switch_->set_epoch(epoch);
+    }
+}
 
 double CXLController::calculate_latency(LatencyPass elem) {
     double lat = 0.0;
@@ -80,14 +84,7 @@ std::string CXLController::output() {
     return res;
 }
 
-void CXLController::delete_entry(uint64_t addr) {
-    for (auto switch_ : this->switches) {
-        switch_->delete_entry(addr);
-    }
-    for (auto expander_ : this->expanders) {
-        expander_->delete_entry(addr);
-    }
-}
+void CXLController::delete_entry(uint64_t addr, uint64_t length) { CXLSwitch::delete_entry(addr, length); }
 
 int CXLController::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
     auto index_ = policy->compute_once(this);
@@ -143,3 +140,4 @@ std::tuple<int, int> CXLController::get_all_access() {
 std::tuple<double, std::vector<uint64_t>> CXLController::calculate_congestion() {
     return CXLSwitch::calculate_congestion();
 }
+void CXLController::set_epoch(int epoch) { CXLSwitch::set_epoch(epoch); }

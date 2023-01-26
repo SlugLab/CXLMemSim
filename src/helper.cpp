@@ -177,9 +177,9 @@ const struct ModelContext model_ctx[] = {{CPU_MDL_BDX,
                                            /*
                                             * cpu_bandwidth_write_config:
                                             *   UNC_M_CAS_COUNT.WR * 64
-                                            *   cpu/umask=0x0f,event=0x05/
+                                            *   cpu/umask=0xf0,event=0x05/
                                             */
-                                           0x0f05}},
+                                           0xf005}},
                                          {CPU_MDL_END, {0}}};
 
 int Helper::num_of_cpu() {

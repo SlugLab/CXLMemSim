@@ -368,7 +368,7 @@ PerfInfo::PerfInfo(int group_fd, int cpu, pid_t pid, unsigned long flags, struct
 PerfInfo::PerfInfo(int fd, int group_fd, int cpu, pid_t pid, unsigned long flags, struct perf_event_attr attr)
     : fd(fd), group_fd(group_fd), cpu(cpu), pid(pid), flags(flags), attr(attr) {
     this->map = new ThreadSafeMap();
-    this->j= std::jthread{[&] { write_trace_to_map(map); }};
+    this->j = std::jthread{[&] { write_trace_to_map(map); }};
 }
 PerfInfo::~PerfInfo() {
     this->j.join();
@@ -409,11 +409,9 @@ std::map<uint64_t, uint64_t> PerfInfo::read_trace_pipe() {
     auto traces = map->get();
     std::map<uint64_t, uint64_t> addr_map;
     for (auto r : traces) {
-        // mode map
         std::cout << r.first << " " << std::get<0>(r.second) << " " << std::get<1>(r.second) << std::endl;
-        for (int i = 0; i < std::get<0>(r.second); i += 64) {
-            addr_map[r.first + i] = std::get<1>(r.second);
-        }
+        // address, length, time -> address, length no lazyaccess
+        addr_map[r.first] = std::get<0>(r.second);
     }
     map->reset();
     return addr_map;

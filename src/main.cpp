@@ -28,7 +28,7 @@ int main(int argc, char *argv[]) {
     options.add_options()("t,target", "The script file to execute",
                           cxxopts::value<std::string>()->default_value("./microbench/many_calloc"))(
         "h,help", "The value for epoch value", cxxopts::value<bool>()->default_value("false"))(
-        "i,interval", "The value for epoch value", cxxopts::value<int>()->default_value("20"))(
+        "i,interval", "The value for epoch value", cxxopts::value<int>()->default_value("5"))(
         "c,cpuset", "The CPUSET for CPU to set affinity on",
         cxxopts::value<std::vector<int>>()->default_value("0,1,2,3,4,5,6,7,8,9,10,11,12,13,14"))(
         "d,dramlatency", "The current platform's dram latency", cxxopts::value<double>()->default_value("85"))(
@@ -79,12 +79,11 @@ int main(int argc, char *argv[]) {
     auto cur_processes = 0;
     auto ncpu = helper.cpu;
     auto ncbo = helper.cbo;
-    auto nmem = capacity.size();
     LOG(DEBUG) << fmt::format("tnum:{}, intrval:{}, weight:{}\n", tnum, interval, weight);
     for (auto const &[idx, value] : capacity | ranges::views::enumerate) {
         if (idx == 0) {
             LOG(DEBUG) << fmt::format("local_memory_region capacity:{}\n", value);
-            controller = new CXLController(policy, capacity[0], mode);
+            controller = new CXLController(policy, capacity[0], mode, interval);
         } else {
             LOG(DEBUG) << fmt::format("memory_region:{}\n", (idx - 1) + 1);
             LOG(DEBUG) << fmt::format(" capacity:{}\n", capacity[(idx - 1) + 1]);
@@ -219,7 +218,6 @@ int main(int argc, char *argv[]) {
         /* wait for pre-defined interval */
         clock_gettime(CLOCK_MONOTONIC, &sleep_start_ts);
 
-        auto mon = monitors.mon[0];
         /** Here was a definition for the multi process and thread to enable multiple monitor */
 
         struct timespec req = waittime;
@@ -230,10 +228,12 @@ int main(int argc, char *argv[]) {
                 break;
             } else { // ret < 0
                 if (errno == EINTR) {
-                    // The pause has been interrupted by a signal that was delivered to the thread.
                     LOG(ERROR) << fmt::format("nanosleep: remain time {}.{}(sec)\n", (long)rem.tv_sec,
                                               (long)rem.tv_nsec);
+                    // if the milisecs was set below 5, will trigger stop before the target process stop.
+                    // The pause has been interrupted by a signal that was delivered to the thread.
                     req = rem; // call nanosleep() again with the remain time.
+                    break;
                 } else {
                     // fatal error
                     LOG(ERROR) << "Failed to wait nanotime";
@@ -251,7 +251,7 @@ int main(int argc, char *argv[]) {
                 clock_gettime(CLOCK_MONOTONIC, &start_ts);
                 LOG(DEBUG) << fmt::format("[{}:{}:{}] start_ts: {}.{}\n", i, mon.tgid, mon.tid, start_ts.tv_sec,
                                           start_ts.tv_nsec);
-
+                mon.stop();
                 /* read CBo values */
                 uint64_t wb_cnt = 0;
                 for (int j = 0; j < ncbo; j++) {
@@ -261,12 +261,17 @@ int main(int argc, char *argv[]) {
                 LOG(INFO) << fmt::format("[{}:{}:{}] LLC_WB = {}\n", i, mon.tgid, mon.tid, wb_cnt);
 
                 /* read CPU params */
-                uint64_t read_config, write_config = 0;
+                uint64_t read_config = 0;
                 uint64_t target_l2stall = 0, target_llcmiss = 0, target_llchits = 0;
                 for (int j = 0; j < ncpu; ++j) {
                     pmu.cpus[j].read_cpu_elems(&mon.after->cpus[j]);
-                    read_config += mon.after->cpus[j].cpu_bandwidth_read - mon.before->cpus[j].cpu_bandwidth_read;
-                    write_config += mon.after->cpus[j].cpu_bandwidth_write - mon.before->cpus[j].cpu_bandwidth_write;
+                    if (pmu.cpus[j].perf[4] != nullptr) {
+                        for (auto &i : mon.after->cpus[j].cpu_munmap_address_length) {
+                            LOG(DEBUG) << fmt::format("munmap address:{}, length:{}\n", i.first, i.second);
+                            controller->delete_entry(i.first, i.second);
+                        }
+                    }
+                    read_config = mon.after->cpus[j].cpu_bandwidth_read - mon.before->cpus[j].cpu_bandwidth_read;
                 }
                 /* read PEBS sample */
                 if (mon.pebs_ctx->read(controller, &mon.after->pebs) < 0) {
@@ -293,7 +298,6 @@ int main(int argc, char *argv[]) {
                 if (target_llcmiss < llcmiss_wb) {
                     LOG(ERROR) << fmt::format("[{}:{}:{}] cpus_dram_rds {}, llcmiss_wb {}, target_llcmiss {}\n", i,
                                               mon.tgid, mon.tid, read_config, llcmiss_wb, target_llcmiss);
-                    LOG(ERROR) << fmt::format("!!!!llcmiss_ro is {}!!!!!\n", llcmiss_ro);
                     llcmiss_wb = target_llcmiss;
                     llcmiss_ro = 0;
                 } else {
@@ -321,10 +325,6 @@ int main(int argc, char *argv[]) {
 
                 uint64_t emul_delay = 0;
 
-                bool total_is_zero = (mon.after->pebs.total - mon.before->pebs.total) ? false : true;
-                double sample = 0;
-                double sample_prop = 0;
-                double sample_total = (double)(mon.after->pebs.total - mon.before->pebs.total);
                 LOG(DEBUG) << fmt::format("[{}:{}:{}] pebs: total={}, \n", i, mon.tgid, mon.tid, mon.after->pebs.total);
 
                 /** TODO: calculate latency construct the passing value and use interleaving policy and counter to get
@@ -339,7 +339,7 @@ int main(int argc, char *argv[]) {
                 BandwidthPass bw_pass = {
                     .all_access = all_access,
                     .read_config = read_config,
-                    .write_config = write_config,
+                    .write_config = read_config,
                 };
                 emul_delay += controller->calculate_latency(lat_pass);
                 emul_delay += controller->calculate_bandwidth(bw_pass);
