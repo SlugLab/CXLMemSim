@@ -1,3 +1,5 @@
 add_executable(many_calloc ./many_calloc.c)
-add_executable(many_mmap ./many_mmap.c)
+add_executable(many_mmap_read ./many_mmap_read.c)
+add_executable(many_mmap_write ./many_mmap_write.c)
+add_executable(many_malloc ./many_malloc.c)
 add_executable(many_sbrk ./many_sbrk.c)
