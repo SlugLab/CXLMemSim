@@ -26,7 +26,9 @@ double CXLMemExpander::calculate_latency(LatencyPass lat) {
     if (all_write != 0) {
         write_sample = ((double)last_write / all_write);
     }
-    return ma_ro * read_sample * (latency.read - dramlatency) + ma_wb * write_sample * (latency.write - dramlatency);
+    this->last_latency =
+        ma_ro * read_sample * (latency.read - dramlatency) + ma_wb * write_sample * (latency.write - dramlatency);
+    return this->last_latency;
 }
 double CXLMemExpander::calculate_bandwidth(BandwidthPass bw) {
     // Iterate the map within the last 20ms
@@ -45,11 +47,17 @@ double CXLMemExpander::calculate_bandwidth(BandwidthPass bw) {
     if (all_write != 0) {
         write_sample = ((double)last_write / all_write);
     }
-    if ((((double)read_sample * 64 * read_config) / 1024 / 1024 * 50) > ((double)bandwidth.read)) {
-        res += read_sample * 64 * read_config / 1024 / 1024 * 50 / bandwidth.read - this->epoch * 0.001;
+    if ((((double)read_sample * 64 * read_config) / 1024 / 1024 / (this->epoch + this->last_latency) * 1000) >
+        ((double)bandwidth.read)) {
+        res +=
+            read_sample * 64 * read_config / 1024 / 1024 / (this->epoch + this->last_latency) * 1000 / bandwidth.read -
+            this->epoch * 0.001;
     }
-    if ((((double)write_sample * 64 * write_config) / 1024 / 1024 * 50) > bandwidth.write) {
-        res += (((double)write_sample * 64 * write_config) / 1024 / 1024 * 50 / bandwidth.write) - this->epoch * 0.001;
+    if ((((double)write_sample * 64 * write_config) / 1024 / 1024 / (this->epoch + this->last_latency) * 1000) >
+        bandwidth.write) {
+        res += (((double)write_sample * 64 * write_config) / 1024 / 1024 / (this->epoch + this->last_latency) * 1000 /
+                bandwidth.write) -
+               this->epoch * 0.001;
     }
     return res;
 }
