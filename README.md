@@ -1,5 +1,5 @@
 # CXL.mem Simulator
-The epoch design of this project is mostly refering to [mes](https://github.com/takahiro-hirofuchi/mesmeric-emulator), the novelty is use pebs to construct the topology and calculate the hierachy latency based on this.
+The epoch design of this project is mostly refering to [mes](https://github.com/takahiro-hirofuchi/mesmeric-emulator), the novelty is use pebs to construct the topology and calculate the hierachy latency based on this. See the [talk](https://docs.google.com/file/d/1bZi2rbB-u5xMw_YET726gb2s9QuxMZJE/edit?usp=docslist_api&filetype=mspresentation)
 
 ## Prerequisite
 ```bash
