@@ -29,6 +29,7 @@ public:
     CXLMemExpanderEvent last_counter{};
     int last_read = 0;
     int last_write = 0;
+    double last_latency = 0.;
     int epoch = 0;
     uint64_t last_timestamp = 0;
     int id = -1;

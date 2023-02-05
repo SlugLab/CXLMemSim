@@ -17,7 +17,6 @@ add_executable(CXL-MEM-Simulator ${SOURCE_FILES})
 include_directories(CXL-MEM-Simulator include)
 target_link_libraries(CXL-MEM-Simulator cxxopts::cxxopts fmt::fmt range-v3::range-v3 elf bpf)
 
-
 function(bpf prefix)
     add_custom_target(${prefix}_bpf ALL
             COMMAND ${CLANG_INCLUDE_DIRS}/../bin/clang -S -nostdinc -I${LINUX_SOURCE}/arch/x86/include -I${LINUX_SOURCE}/arch/x86/include/uapi -I${LINUX_SOURCE}/arch/x86/include/generated -I${LINUX_SOURCE}/arch/x86/include/generated/uapi -I${LINUX_SOURCE}/include -I${LINUX_SOURCE}/include/uapi -I${LINUX_SOURCE}/include/generated/uapi -I${LINUX_SOURCE}/tools/testing/selftests/bpf -include ${LINUX_SOURCE}/include/linux/kconfig.h -Werror -D__KERNEL__ -D__ASM_SYSREG_H -D__BPF_TRACING__ -D__TARGET_ARCH_x86 -Wno-unused-value -Wno-pointer-sign -Wno-compare-distinct-pointer-types -Wno-gnu-variable-sized-type-not-at-end -Wno-tautological-compare -Wno-unknown-warning-option -Wno-address-of-packed-member -O2 -g -emit-llvm -c ${CMAKE_SOURCE_DIR}/src/${prefix}.c -o ${CMAKE_BINARY_DIR}/${prefix}.ll
@@ -29,3 +28,4 @@ endfunction()
 bpf(collectmmap)
 
 add_subdirectory(microbench)
+add_subdirectory(allocator)

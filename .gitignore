@@ -4,3 +4,4 @@ build
 cmake-*
 .vscode
 release
+benchmarks*
