@@ -5,3 +5,7 @@ cmake-*
 .vscode
 release
 benchmarks*
+Makefile
+*.o
+py_smdk_pkg
+lib
