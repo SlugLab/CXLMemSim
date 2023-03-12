@@ -1,17 +1,3 @@
-if (SANITIZE OR NOT (
-	((OS_LINUX OR OS_FREEBSD) AND (ARCH_AMD64 OR ARCH_ARM OR ARCH_PPC64LE OR ARCH_RISCV64)) OR
-    (OS_DARWIN AND (CMAKE_BUILD_TYPE_UC STREQUAL "RELWITHDEBINFO" OR CMAKE_BUILD_TYPE_UC STREQUAL "DEBUG"))
-))
-    if (ENABLE_JEMALLOC)
-        message (${RECONFIGURE_MESSAGE_LEVEL}
-                 "jemalloc is disabled implicitly: it doesn't work with sanitizers and can only be used with x86_64, aarch64, or ppc64le Linux or FreeBSD builds and RelWithDebInfo macOS builds.")
-    endif ()
-    set (ENABLE_JEMALLOC OFF)
-else ()
-    option (ENABLE_JEMALLOC "Enable jemalloc allocator" ${ENABLE_LIBRARIES})
-endif ()
-
-
 # ThreadPool select job randomly, and there can be some threads that had been
 # performed some memory heavy task before and will be inactive for some time,
 # but until it will became active again, the memory will not be freed since by
@@ -42,19 +28,12 @@ add_library(_jemalloc ${SOURCE_FILES})
 # (for example if you were trying to build jemalloc inside contrib/jemalloc you
 # will have some files that may be out of date)
 target_include_directories(_jemalloc PUBLIC include)
-target_include_directories(_jemalloc PRIVATE "${LIBRARY_DIR}/include")
+target_include_directories(_jemalloc PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/include")
 
-set (JEMALLOC_INCLUDE_PREFIX)
-# OS_
-set (JEMALLOC_INCLUDE_PREFIX "include_linux")
-
-# ARCH_
-set(JEMALLOC_INCLUDE_PREFIX "${JEMALLOC_INCLUDE_PREFIX}_x86_64")
-
+configure_file(include/jemalloc/internal/jemalloc_preamble.h.in
+    "${CMAKE_CURRENT_BINARY_DIR}/include/jemalloc/internal/jemalloc_preamble.h")
 configure_file(jemalloc_internal_defs.h.in
-    ${JEMALLOC_INCLUDE_PREFIX}/jemalloc/internal/jemalloc_internal_defs.h)
-target_include_directories(_jemalloc SYSTEM PRIVATE
-    "${CMAKE_CURRENT_BINARY_DIR}/${JEMALLOC_INCLUDE_PREFIX}/jemalloc/internal")
+    "${CMAKE_CURRENT_BINARY_DIR}/include/jemalloc/internal/jemalloc_internal_defs.h")
 
 target_compile_definitions(_jemalloc PRIVATE -DJEMALLOC_NO_PRIVATE_NAMESPACE)
 
