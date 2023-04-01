@@ -28,4 +28,3 @@ endfunction()
 bpf(collectmmap)
 
 add_subdirectory(microbench)
-add_subdirectory(allocator)
