@@ -126,9 +126,10 @@ int main(int argc, char *argv[]) {
     /* Allocate an array of pointers.
      * We will make them point to certain locations inside the cmd_buf. */
     char *args[32] = {nullptr};
+    args[0] = filename;
     /* loop the strtok_r() call while there are tokens and free space in the array */
     size_t current_arg_idx;
-    for (current_arg_idx = 0; current_arg_idx < 32; ++current_arg_idx) {
+    for (current_arg_idx = 1; current_arg_idx < 32; ++current_arg_idx) {
         /* Note that the first argument to strtok_r() is nullptr.
          * That means resume from a point saved in the strtok_state. */
         char *current_arg = strtok_r(nullptr, " ", &strtok_state);
