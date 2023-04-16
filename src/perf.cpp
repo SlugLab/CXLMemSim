@@ -149,7 +149,6 @@ static int load_elf_maps_section(struct bpf_map_data *maps, int maps_shndx, Elf 
     int i, nr_maps;
     GElf_Sym *sym;
     Elf_Scn *scn;
-    int copy_sz;
 
     if (maps_shndx < 0)
         return -EINVAL;
@@ -161,7 +160,7 @@ static int load_elf_maps_section(struct bpf_map_data *maps, int maps_shndx, Elf 
     if (scn)
         data_maps = elf_getdata(scn, NULL);
     if (!scn || !data_maps) {
-        printf("Failed to get Elf_Data from maps section {}\n", maps_shndx);
+        LOG(ERROR) << fmt::format("Failed to get Elf_Data from maps section {}\n", maps_shndx);
         return -EINVAL;
     }
 
@@ -207,7 +206,7 @@ static int load_elf_maps_section(struct bpf_map_data *maps, int maps_shndx, Elf 
         map_name = elf_strptr(elf, strtabidx, sym[i].st_name);
         maps[i].name = strdup(map_name);
         if (!maps[i].name) {
-            printf("strdup({}): {}({})\n", map_name, strerror(errno), errno);
+            LOG(ERROR) << fmt::format("strdup({}): {}({})\n", map_name, strerror(errno), errno);
             free(sym);
             return -errno;
         }
@@ -293,12 +292,20 @@ static perf_event_attr load_and_attach(const char *event, struct bpf_insn *prog,
             LOG(ERROR) << fmt::format("event name cannot be empty\n");
             throw;
         }
-
-        snprintf(buf, sizeof(buf), "echo '%c:%s %s' >> /sys/kernel/debug/tracing/kprobe_events", is_kprobe ? 'p' : 'r',
-                 event, event);
+        // support both kretprobe and kprobe
+        std::string event_str(event);
+        if (is_kprobe) {
+            LOG(INFO) << fmt::format("echo '{}:{} {}' >> /sys/kernel/debug/tracing/kprobe_events\n", 'p',
+                                     event_str + "_kprobe", event);
+            snprintf(buf, sizeof(buf), "echo '%c:%s %s' >> /sys/kernel/debug/tracing/kprobe_events", 'p',
+                     (event_str + "_kprobe").c_str(), event);
+        } else {
+            LOG(INFO) << fmt::format("echo '{}:{} {}' >> /sys/kernel/debug/tracing/kprobe_events\n", 'r',
+                                     event_str + "_kretprobe", event);
+            snprintf(buf, sizeof(buf), "echo '%c:%s %s' >> /sys/kernel/debug/tracing/kprobe_events", 'r',
+                     (event_str + "_kretprobe").c_str(), event);
+        }
         err = system(buf);
-        LOG(INFO) << fmt::format("echo '{}:{} {}' >> /sys/kernel/debug/tracing/kprobe_events", is_kprobe ? 'p' : 'r',
-                                 event, event);
         if (err < 0) {
             LOG(ERROR) << fmt::format("failed to create kprobe '{}' error '{}'\n", event, strerror(errno));
         }
@@ -419,7 +426,7 @@ std::map<uint64_t, uint64_t> PerfInfo::read_trace_pipe() {
 }
 
 PerfInfo *init_incore_perf(const pid_t pid, const int cpu, uint64_t conf, uint64_t conf1) {
-    int r, n_pid, n_cpu, group_fd, flags;
+    int n_pid, n_cpu, group_fd, flags;
     struct perf_event_attr attr {
         .type = PERF_TYPE_RAW, .size = sizeof(attr), .config = conf, .disabled = 1, .inherit = 1, .config1 = conf1,
         .clockid = 0
@@ -439,7 +446,7 @@ PerfInfo *init_incore_perf(const pid_t pid, const int cpu, uint64_t conf, uint64
 }
 
 PerfInfo *init_incore_bpf_perf(const pid_t pid, const int cpu) {
-    int fd, i, ret, maps_shndx = -1, strtabidx = -1;
+    int fd, i, maps_shndx = -1, strtabidx = -1;
     struct perf_event_attr attr {};
     Elf *elf;
     GElf_Ehdr ehdr;
@@ -470,7 +477,9 @@ PerfInfo *init_incore_bpf_perf(const pid_t pid, const int cpu) {
 
     /* clear all kprobes */
     i = system("echo \"\" > /sys/kernel/debug/tracing/kprobe_events");
-
+    if (i < 0) {
+        LOG(ERROR) << fmt::format("other people is working on this, skip {}\n", strerror(errno));
+    }
     /* scan over all elf sections to get license and map info */
     for (i = 1; i < ehdr.e_shnum; i++) {
 
@@ -500,8 +509,6 @@ PerfInfo *init_incore_bpf_perf(const pid_t pid, const int cpu) {
         }
     }
 
-    ret = 1;
-
     if (!symbols) {
         LOG(ERROR) << fmt::format("missing SHT_SYMTAB section\n");
         throw;
@@ -511,7 +518,6 @@ PerfInfo *init_incore_bpf_perf(const pid_t pid, const int cpu) {
         nr_maps = load_elf_maps_section(map_data, maps_shndx, elf, symbols, strtabidx);
         if (nr_maps < 0) {
             LOG(ERROR) << fmt::format("Error: Failed loading ELF maps (errno:{}):{}\n", nr_maps, strerror(-nr_maps));
-            ret = 1;
             throw;
         }
         if (load_maps(map_data, nr_maps))
