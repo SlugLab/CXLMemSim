@@ -9,7 +9,7 @@ $ sudo apt install llvm-dev clang libbpf-dev libclang-dev libcxxopts-dev libfmt-
 ```
 ## User input
 ```bash
-./CXL-MEM-Simulator -t ./microbench/many_calloc -i 5 -c 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14
+LOGV=1 ./CXL-MEM-Simulator -t ./microbench/many_calloc -i 5 -c 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14
 ```
 1. -t Target: The path to the executable
 2. -i Interval: The epoch of the simulator, the parameter is in milisecond
@@ -29,5 +29,17 @@ $ sudo apt install llvm-dev clang libbpf-dev libclang-dev libcxxopts-dev libfmt-
                  \ 
                   3
 ```
+9. env LOGV stands for logs level that you can see.
 ## Limitation
 The pebs requires no larger than 5 `perf_open_event` attached to certain PID, so I limit the bpf program to munmap(kprobe) and sbrk(kprobe/kretprobe), you can configure them. For multiple process application, I need to first SIGSTOP the process and `send/recv` back the PID information. For client and server application, I need to SIGSTOP/SIGCONT on both client and server simultaneously, which is not implemented yet.
+
+## Cite
+```bash
+@article{yangyarch23,
+  title={CXLMemSim: A pure software simulated CXL.mem for performance characterization},
+  author={Yiwei Yang, Pooneh Safayenikoo, Jiacheng Ma, Tanvir Ahmed Khan, Andrew Quinn},
+  journal={arXiv preprint arXiv:2303.06153},
+  booktitle={The fifth Young Architect Workshop (YArch'23)},
+  year={2023}
+}
+```
