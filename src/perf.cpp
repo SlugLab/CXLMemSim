@@ -431,13 +431,8 @@ PerfInfo *init_incore_perf(const pid_t pid, const int cpu, uint64_t conf, uint64
         .type = PERF_TYPE_RAW, .size = sizeof(attr), .config = conf, .disabled = 1, .inherit = 1, .config1 = conf1,
         .clockid = 0
     };
-    if ((0 <= cpu) && (cpu < Helper::num_of_cpu())) {
-        n_pid = -1;
-        n_cpu = cpu;
-    } else {
-        n_pid = pid;
-        n_cpu = -1;
-    }
+    n_pid = pid;
+    n_cpu = -1;
 
     group_fd = -1;
     flags = 0x08;
