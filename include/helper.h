@@ -2,12 +2,13 @@
 // Created by victoryang00 on 1/12/23.
 //
 
-#ifndef CXL_MEM_SIMULATOR_HELPER_H
-#define CXL_MEM_SIMULATOR_HELPER_H
+#ifndef CXLMEMSIM_HELPER_H
+#define CXLMEMSIM_HELPER_H
 
 #include "incore.h"
 #include "logging.h"
 #include "uncore.h"
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -16,7 +17,7 @@
 #include <fnmatch.h>
 #include <linux/perf_event.h>
 #include <map>
-#include <signal.h>
+#include <optional>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -27,6 +28,16 @@ enum { CPU_MDL_BDX = 63, CPU_MDL_SKX = 85, CPU_MDL_SPR = 143, CPU_MDL_ADL = 151,
 class Incore;
 class Uncore;
 class Helper;
+
+struct PerfConfig {
+    std::string path_format_cha_type{};
+    std::array<std::tuple<std::string, uint64_t, uint64_t>, 4> cha{};
+    std::array<std::tuple<std::string, uint64_t, uint64_t>, 4> cpu{};
+};
+struct ModelContext {
+    uint32_t model{};
+    struct PerfConfig perf_conf;
+};
 
 struct EmuCXLLatency {
     double read;
@@ -47,22 +58,16 @@ struct BandwidthPass {
 struct LatencyPass {
     std::tuple<int, int> all_access;
     double dramlatency;
-    double ma_ro;
-    double ma_wb;
+    uint64_t readonly;
+    uint64_t writeback;
 };
 
-struct CBOElem {
-    uint64_t llc_wb;
+struct CHAElem {
+    std::array<uint64_t, 4> cha;
 };
 
 struct CPUElem {
-    uint64_t all_dram_rds;
-    uint64_t cpu_l2stall_t;
-    uint64_t cpu_llcl_hits;
-    uint64_t cpu_llcl_miss;
-    uint64_t cpu_bandwidth_read;
-    uint64_t cpu_bandwidth_write;
-    std::map<uint64_t, uint64_t> cpu_munmap_address_length;
+    std::array<uint64_t, 4> cpu;
 };
 
 struct PEBSElem {
@@ -79,54 +84,39 @@ struct CPUInfo {
 
 struct Elem {
     struct CPUInfo cpuinfo;
-    struct CBOElem *cbos;
-    struct CPUElem *cpus;
+    std::vector<CHAElem> chas;
+    std::vector<CPUElem> cpus;
     struct PEBSElem pebs;
 };
 
 class PMUInfo {
 public:
-    std::vector<Uncore> cbos;
+    std::vector<Uncore> chas;
     std::vector<Incore> cpus;
     Helper *helper;
     PMUInfo(pid_t pid, Helper *h, struct PerfConfig *perf_config);
     ~PMUInfo();
     int start_all_pmcs();
     int stop_all_pmcs();
-    int freeze_counters_cbo_all();
-    int unfreeze_counters_cbo_all();
-};
-
-struct PerfConfig {
-    const char *path_format_cbo_type;
-    uint64_t cbo_config;
-    uint64_t all_dram_rds_config;
-    uint64_t all_dram_rds_config1;
-    uint64_t cpu_l2stall_config;
-    uint64_t cpu_llcl_hits_config;
-    uint64_t cpu_llcl_miss_config;
-    uint64_t cpu_bandwidth_read_config;
-    uint64_t cpu_bandwidth_write_config;
-};
-
-struct ModelContext {
-    uint32_t model;
-    struct PerfConfig perf_conf;
+    int freeze_counters_cha_all();
+    int unfreeze_counters_cha_all();
 };
 
 class Helper {
 public:
-    int cpu;
-    int cbo;
-    double cpu_freq;
-    PerfConfig perf_conf;
+    PerfConfig perf_conf{};
     Helper();
-    static int num_of_cpu();
-    static int num_of_cbo();
+    int cpu;
+    int cha;
+    std::vector<int> used_cpu;
+    std::vector<int> used_cha;
+    int num_of_cpu();
+    int num_of_cha();
     static void detach_children();
     static void noop_handler(int signum);
-    double cpu_frequency() const;
-    PerfConfig detect_model(uint32_t);
+    double cpu_frequency();
+    PerfConfig detect_model(uint32_t model, const std::vector<std::string> &perf_name,
+                            const std::vector<uint64_t> &perf_conf1, const std::vector<uint64_t> &perf_conf2);
 };
 
-#endif // CXL_MEM_SIMULATOR_HELPER_H
+#endif // CXLMEMSIM_HELPER_H

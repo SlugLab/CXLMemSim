@@ -2,12 +2,11 @@
 // Created by victoryang00 on 1/13/23.
 //
 
-#ifndef CXL_MEM_SIMULATOR_PEBS_H
-#define CXL_MEM_SIMULATOR_PEBS_H
+#ifndef CXLMEMSIM_PEBS_H
+#define CXLMEMSIM_PEBS_H
 
 #include "cxlcontroller.h"
 #include "helper.h"
-#include "logging.h"
 #include <asm/unistd.h>
 #include <cerrno>
 #include <csignal>
@@ -33,14 +32,13 @@ public:
     uint64_t sample_period;
     uint32_t seq{};
     size_t rdlen{};
-    size_t mplen;
+    size_t mplen{};
     struct perf_event_mmap_page *mp;
-    bool is_page;
-    PEBS(pid_t, uint64_t, bool);
+    PEBS(pid_t, uint64_t);
     ~PEBS();
     int read(CXLController *, struct PEBSElem *);
     int start();
     int stop();
 };
 
-#endif // CXL_MEM_SIMULATOR_PEBS_H
+#endif // CXLMEMSIM_PEBS_H

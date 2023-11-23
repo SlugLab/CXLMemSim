@@ -3,15 +3,14 @@
 //
 
 #include "monitor.h"
-Monitors::Monitors(int tnum, cpu_set_t *use_cpuset, int nmem, Helper h) {
-    mon = std::vector<Monitor>(tnum, Monitor(nmem, h));
-    /* init mon */
+Monitors::Monitors(int tnum, cpu_set_t *use_cpuset) : print_flag(true) {
+    mon = std::vector<Monitor>(tnum, Monitor());
+    /** Init mon */
     for (int i = 0; i < tnum; i++) {
         disable(i);
-        int cpucnt = 0;
-        int cpuid = 0;
-        for (cpuid = 0; cpuid < h.cpu; cpuid++) {
-            if (CPU_ISSET(cpuid, use_cpuset)) {
+        int cpucnt = 0, cpuid;
+        for (cpuid = 0; cpuid < helper.num_of_cpu(); cpuid++) {
+            if (!CPU_ISSET(cpuid, use_cpuset)) {
                 if (i == cpucnt) {
                     mon[i].cpu_core = cpuid;
                     break;
@@ -35,8 +34,15 @@ void Monitors::run_all(const int processes) {
         }
     }
 }
+Monitor Monitors::get_mon(int tgid, int tid) {
+    for (auto &i : mon) {
+        if (i.tgid == tgid && i.tid == tid) {
+            return i;
+        }
+    }
+}
 int Monitors::enable(const uint32_t tgid, const uint32_t tid, bool is_process, uint64_t pebs_sample_period,
-                     const int32_t tnum, bool is_page) {
+                     const int32_t tnum) {
     int target = -1;
 
     for (int i = 0; i < tnum; i++) {
@@ -77,22 +83,22 @@ int Monitors::enable(const uint32_t tgid, const uint32_t tid, bool is_process, u
     disable(target);
     mon[target].status = MONITOR_ON;
     mon[target].tgid = tgid;
-    mon[target].tid = tid;
+    mon[target].tid = tid; // We can setup the process here
     mon[target].is_process = is_process;
 
     if (pebs_sample_period) {
         /* pebs start */
-        mon[target].pebs_ctx = new PEBS(tgid, pebs_sample_period, is_page);
+        mon[target].pebs_ctx = new PEBS(tgid, pebs_sample_period);
         LOG(DEBUG) << fmt::format("{}Process [tgid={}, tid={}]: enable to pebs.\n", target, mon[target].tgid,
-                                  mon[target].tid);
+                                  mon[target].tid); // multiple tid multiple pid
     }
 
-    LOG(INFO) << fmt::format("========== Process {}[tgid={}, tid={}] monitoring start ==========\n", target,
-                             mon[target].tgid, mon[target].tid);
-    return 0;
+    LOG(INFO) << fmt::format("pid {}[tgid={}, tid={}] monitoring start\n", target, mon[target].tgid, mon[target].tid);
+
+    return target;
 }
 void Monitors::disable(const uint32_t target) {
-    mon[target].is_process = false;
+    mon[target].is_process = false; // Here to add the multi process.
     mon[target].status = MONITOR_DISABLE;
     mon[target].tgid = 0;
     mon[target].tid = 0;
@@ -114,9 +120,9 @@ void Monitors::disable(const uint32_t target) {
         mon[target].pebs_ctx->mp = nullptr;
         mon[target].pebs_ctx->sample_period = 0;
     }
-    for (int j = 0; j < 2; j++) {
-        mon[target].elem[j].pebs.total = 0;
-        mon[target].elem[j].pebs.llcmiss = 0;
+    for (auto &j : mon[target].elem) {
+        j.pebs.total = 0;
+        j.pebs.llcmiss = 0;
     }
 }
 bool Monitors::check_all_terminated(const uint32_t processes) {
@@ -181,8 +187,8 @@ bool Monitors::check_continue(const uint32_t target, const struct timespec w) {
     return false;
 }
 
-void Monitor::stop() {
-    int ret = -1;
+void Monitor::stop() { // thread create and proecess create get the pmu
+    int ret;
 
     if (this->is_process) {
         // In case of process, use SIGSTOP.
@@ -211,6 +217,7 @@ void Monitor::stop() {
         LOG(DEBUG) << fmt::format("Process [{}:{}] is stopped.\n", this->tgid, this->tid);
     }
 }
+
 void Monitor::run() {
     LOG(DEBUG) << fmt::format("Send SIGCONT to tid={}(tgid={})\n", this->tid, this->tgid);
     if (syscall(SYS_tgkill, this->tgid, this->tid, SIGCONT) == -1) {
@@ -229,24 +236,19 @@ void Monitor::run() {
         LOG(DEBUG) << fmt::format("Process [{}:{}] is running.\n", this->tgid, this->tid);
     }
 }
+
 void Monitor::clear_time(struct timespec *time) {
     time->tv_sec = 0;
     time->tv_nsec = 0;
 }
-Monitor::Monitor(const int nmem, Helper h)
+
+Monitor::Monitor() // which one to hook
     : tgid(0), tid(0), cpu_core(0), status(0), injected_delay({0}), wasted_delay({0}), squabble_delay({0}),
       before(nullptr), after(nullptr), total_delay(0), start_exec_ts({0}), end_exec_ts({0}), is_process(false),
       pebs_ctx(nullptr) {
+
     for (auto &j : this->elem) {
-        j.cpus = (struct CPUElem *)calloc(sizeof(struct CPUElem), h.cpu);
-        if (j.cpus == nullptr) {
-            LOG(ERROR) << "calloc";
-            throw;
-        }
-        j.cbos = (struct CBOElem *)calloc(sizeof(struct CBOElem), h.cbo);
-        if (j.cbos == nullptr) {
-            LOG(ERROR) << "calloc";
-            throw;
-        }
+        j.cpus = std::vector<CPUElem>(helper.used_cpu.size());
+        j.chas = std::vector<CHAElem>(helper.used_cha.size());
     }
 }

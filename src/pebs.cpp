@@ -24,17 +24,17 @@ struct perf_sample {
 long perf_event_open(struct perf_event_attr *event_attr, pid_t pid, int cpu, int group_fd, unsigned long flags) {
     return syscall(__NR_perf_event_open, event_attr, pid, cpu, group_fd, flags);
 }
-PEBS::PEBS(pid_t pid, uint64_t sample_period, bool is_page) : pid(pid), sample_period(sample_period), is_page(is_page) {
+PEBS::PEBS(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_period) {
     // Configure perf_event_attr struct
     struct perf_event_attr pe = {
         .type = PERF_TYPE_RAW,
         .size = sizeof(struct perf_event_attr),
         .config = 0x20d1, // mem_load_retired.l3_miss
-        .sample_period = 1,
+        .sample_period = sample_period,
         .sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_TIME | PERF_SAMPLE_ADDR | PERF_SAMPLE_READ | PERF_SAMPLE_PHYS_ADDR,
         .read_format = PERF_FORMAT_TOTAL_TIME_ENABLED,
         .disabled = 1, // Event is initially disabled
-        .exclude_kernel = 0,
+        .exclude_kernel = 1,
         .precise_ip = 1,
         .config1 = 3,
     }; // excluding events that happen in the kernel-space
@@ -50,7 +50,7 @@ PEBS::PEBS(pid_t pid, uint64_t sample_period, bool is_page) : pid(pid), sample_p
     }
 
     this->mplen = MMAP_SIZE;
-    this->mp = (perf_event_mmap_page *)mmap(NULL, MMAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd, 0);
+    this->mp = (perf_event_mmap_page *)mmap(nullptr, MMAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd, 0);
 
     if (this->mp == MAP_FAILED) {
         perror("mmap");
@@ -68,14 +68,13 @@ int PEBS::read(CXLController *controller, struct PEBSElem *elem) {
         return -1;
 
     int r = 0;
-    int i;
     struct perf_event_header *header;
     struct perf_sample *data;
     uint64_t last_head;
     char *dp = ((char *)mp) + PAGE_SIZE;
 
     do {
-        this->seq = mp->lock;
+        this->seq = mp->lock; // explicit copy
         barrier();
         last_head = mp->data_head;
         while ((uint64_t)this->rdlen < last_head) {
@@ -99,7 +98,7 @@ int PEBS::read(CXLController *controller, struct PEBSElem *elem) {
                                               data->value, data->timestamp);
                     controller->insert(data->timestamp, data->phys_addr, data->addr, 0);
                     elem->total++;
-                    elem->llcmiss = data->value;
+                    elem->llcmiss = data->value; // this is the number of llc miss
                 }
                 break;
             case PERF_RECORD_THROTTLE:
@@ -122,7 +121,7 @@ int PEBS::read(CXLController *controller, struct PEBSElem *elem) {
         mp->data_tail = last_head;
         barrier();
     } while (mp->lock != this->seq);
-
+    
     return r;
 }
 int PEBS::start() {

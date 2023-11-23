@@ -1,38 +1,34 @@
 // Created by victoryang00 on 1/14/23.
 //
 
-#ifndef CXL_MEM_SIMULATOR_INCORE_H
-#define CXL_MEM_SIMULATOR_INCORE_H
+#ifndef CXLMEMSIM_INCORE_H
+#define CXLMEMSIM_INCORE_H
 #include "helper.h"
 #include "perf.h"
-#include <sys/types.h>
-class CXLController;
+#include <array>
+#include <cstdint>
+
+class CXLController; // TODO: need to be shm gotten
 union CPUID_INFO {
     int array[4];
     struct {
         unsigned int eax, ebx, ecx, edx;
     } reg;
 };
+/** This is a per cha metrics*/
 class Incore {
 public:
-    PerfInfo *perf[5];
+    std::array<PerfInfo *, 4> perf{nullptr}; // should only be 4 counters
     struct PerfConfig *perf_config;
-    Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config);
+    Incore(pid_t pid, int cpu, struct PerfConfig *perf_config);
     ~Incore() = default;
     int start();
     int stop();
-    void init_all_dram_rds(const pid_t pid, const int cpu);
-    void init_cpu_l2stall(const pid_t pid, const int cpu);
-    void init_cpu_llcl_hits(const pid_t pid, const int cpu);
-    void init_cpu_llcl_miss(const pid_t pid, const int cpu);
-    void init_cpu_mem_read(const pid_t pid, const int cpu);
-    void init_cpu_mem_write(const pid_t pid, const int cpu);
-    void init_cpu_ebpf(const pid_t pid, const int cpu);
 
-    int read_cpu_elems(struct CPUElem *cpu_elem);
+    ssize_t read_cpu_elems(struct CPUElem *cpu_elem);
 };
 
 void pcm_cpuid(unsigned leaf, CPUID_INFO *info);
 bool get_cpu_info(struct CPUInfo *);
 
-#endif // CXL_MEM_SIMULATOR_INCORE_H
+#endif // CXLMEMSIM_INCORE_H

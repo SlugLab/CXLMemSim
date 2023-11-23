@@ -3,14 +3,13 @@
 //
 
 #include "uncore.h"
+extern Helper helper;
 Uncore::Uncore(const uint32_t unc_idx, PerfConfig *perf_config) {
-    int ret, fd;
-    ssize_t r;
     unsigned long value;
+    int r;
     char path[64], buf[32];
-
     memset(path, 0, sizeof(path));
-    snprintf(path, sizeof(path) - 1, perf_config->path_format_cbo_type, unc_idx);
+    snprintf(path, sizeof(path) - 1, perf_config->path_format_cha_type.c_str(), unc_idx);
 
     fd = open(path, O_RDONLY);
     if (fd < 0) {
@@ -21,7 +20,7 @@ Uncore::Uncore(const uint32_t unc_idx, PerfConfig *perf_config) {
     memset(buf, 0, sizeof(buf));
     r = read(fd, buf, sizeof(buf) - 1);
     if (r < 0) {
-        LOG(ERROR) << fmt::format("read {} failed", path);
+        LOG(ERROR) << fmt::format("read {} failed", fd);
         close(fd);
         throw std::runtime_error("read");
     }
@@ -29,32 +28,26 @@ Uncore::Uncore(const uint32_t unc_idx, PerfConfig *perf_config) {
 
     value = strtoul(buf, nullptr, 10);
     if (value == ULONG_MAX) {
-        LOG(ERROR) << fmt::format("strtoul {} failed", path);
+        LOG(ERROR) << fmt::format("strtoul {} failed", fd);
         throw std::runtime_error("strtoul");
     }
 
-    int cpu = (int)unc_idx;
-    pid_t pid = -1; /* when using uncore, pid must be -1. */
-    int group_fd = -1;
-    auto attr = perf_event_attr{
-        .type = (uint32_t)value,
-        .size = sizeof(struct perf_event_attr),
-        .config = perf_config->cbo_config,
-        .disabled = 1,
-        .inherit = 1,
-        .enable_on_exec = 1,
-    };
-
-    /* when using uncore, don't set exclude_xxx flags. */
-    this->perf = new PerfInfo(group_fd, cpu, pid, 0, attr);
+    for (auto const &[k, v] : this->perf | enumerate) {
+        v = init_uncore_perf(-1, (int)unc_idx, std::get<1>(perf_config->cha[k]), std::get<2>(perf_config->cha[k]),
+                             value);
+    }
 }
 
-int Uncore::read_cbo_elems(struct CBOElem *elem) {
-    int r = this->perf->read_pmu(&elem->llc_wb);
-    if (r < 0) {
-        LOG(ERROR) << fmt::format("perf_read_pmu failed.\n");
+int Uncore::read_cha_elems(struct CHAElem *elem) {
+    ssize_t r;
+    for (auto const &[idx, value] : this->perf | enumerate) {
+        r = value->read_pmu(&elem->cha[idx]);
+        if (r < 0) {
+            LOG(ERROR) << fmt::format("read cha_elems[{}] failed.\n", std::get<0>(helper.perf_conf.cha[idx]));
+            return r;
+        }
+        LOG(DEBUG) << fmt::format("read cha_elems[{}]:{}\n", std::get<0>(helper.perf_conf.cha[idx]), elem->cha[idx]);
     }
 
-    LOG(DEBUG) << fmt::format("llc_wb:{}\n", elem->llc_wb);
-    return r;
+    return 0;
 }

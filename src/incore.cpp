@@ -4,7 +4,7 @@
 
 #include "incore.h"
 #include "helper.h"
-
+extern Helper helper;
 void pcm_cpuid(const unsigned leaf, CPUID_INFO *info) {
     __asm__ __volatile__("cpuid"
                          : "=a"(info->reg.eax), "=b"(info->reg.ebx), "=c"(info->reg.ecx), "=d"(info->reg.edx)
@@ -14,7 +14,7 @@ void pcm_cpuid(const unsigned leaf, CPUID_INFO *info) {
 int Incore::start() {
     int i, r = -1;
 
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < this->perf.size(); i++) {
         r = this->perf[i]->start();
         if (r < 0) {
             LOG(ERROR) << fmt::format("perf_start failed. i:{}\n", i);
@@ -26,7 +26,7 @@ int Incore::start() {
 int Incore::stop() {
     int i, r = -1;
 
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < this->perf.size(); i++) {
         r = this->perf[i]->stop();
         if (r < 0) {
             LOG(ERROR) << fmt::format("perf_stop failed. i:{}\n", i);
@@ -35,95 +35,35 @@ int Incore::stop() {
     }
     return r;
 }
-void Incore::init_all_dram_rds(const pid_t pid, const int cpu) {
-    this->perf[0] = init_incore_perf(pid, cpu, perf_config->all_dram_rds_config, perf_config->all_dram_rds_config1);
-}
-void Incore::init_cpu_mem_read(const pid_t pid, const int cpu) {
-    this->perf[0] = init_incore_perf(pid, cpu, perf_config->cpu_bandwidth_read_config, 0);
-}
-void Incore::init_cpu_l2stall(const pid_t pid, const int cpu) {
-    this->perf[1] = init_incore_perf(pid, cpu, perf_config->cpu_l2stall_config, 0);
-}
-void Incore::init_cpu_llcl_hits(const pid_t pid, const int cpu) {
-    this->perf[2] = init_incore_perf(pid, cpu, perf_config->cpu_llcl_hits_config, 0);
-}
-void Incore::init_cpu_llcl_miss(const pid_t pid, const int cpu) {
-    this->perf[3] = init_incore_perf(pid, cpu, perf_config->cpu_llcl_miss_config, 0);
-}
-void Incore::init_cpu_mem_write(const pid_t pid, const int cpu) {
-    this->perf[5] = init_incore_perf(pid, cpu, perf_config->cpu_bandwidth_write_config, 0);
-}
-void Incore::init_cpu_ebpf(const pid_t pid, const int cpu) {
-    if (cpu == 0)
-        this->perf[4] = init_incore_bpf_perf(pid, cpu);
-    else
-        this->perf[4] = nullptr;
-}
-int Incore::read_cpu_elems(struct CPUElem *elem) {
+
+ssize_t Incore::read_cpu_elems(struct CPUElem *elem) {
     ssize_t r;
-
-    r = this->perf[0]->read_pmu(&elem->cpu_bandwidth_read);
-    if (r < 0) {
-        LOG(ERROR) << fmt::format("read cpu_bandwidth_read failed.\n");
-        return r;
+    for (auto const &[idx, value] : this->perf | enumerate) {
+        r = value->read_pmu(&elem->cpu[idx]);
+        if (r < 0) {
+            LOG(ERROR) << fmt::format("read cpu_elems[{}] failed.\n", std::get<0>(helper.perf_conf.cha[idx]));
+            return r;
+        }
+        LOG(DEBUG) << fmt::format("read cpu_elems[{}]:{}\n", std::get<0>(helper.perf_conf.cpu[idx]), elem->cpu[idx]);
     }
-    LOG(DEBUG) << fmt::format("read cpu_bandwidth_read:{}\n", elem->cpu_bandwidth_read);
 
-    r = this->perf[1]->read_pmu(&elem->cpu_l2stall_t);
-    if (r < 0) {
-        LOG(ERROR) << fmt::format("read cpu_l2stall_t failled.\n");
-        return r;
-    }
-    LOG(DEBUG) << fmt::format("read cpu_l2stall_t:{}\n", elem->cpu_l2stall_t);
-
-    r = this->perf[2]->read_pmu(&elem->cpu_llcl_hits);
-    if (r < 0) {
-        LOG(ERROR) << fmt::format("read cpu_llcl_hits failed.\n");
-        return r;
-    }
-    LOG(DEBUG) << fmt::format("read cpu_llcl_hits:{}\n", elem->cpu_llcl_hits);
-
-    r = this->perf[3]->read_pmu(&elem->cpu_llcl_miss);
-    if (r < 0) {
-        LOG(ERROR) << fmt::format("read cpu_llcl_miss failed.\n");
-        return r;
-    }
-    LOG(DEBUG) << fmt::format("read cpu_llcl_miss:{}\n", elem->cpu_llcl_miss);
-
-    // r = this->perf[4]->read_pmu(&elem->cpu_bandwidth_read);
-    // if (r < 0) {
-    //     LOG(ERROR) << fmt::format("read cpu_bandwidth_read failed.\n");
-    //     return r;
-    // }
-    // LOG(DEBUG) << fmt::format("read cpu_bandwidth_read:{}\n", elem->cpu_bandwidth_read);
-    // r = this->perf[5]->read_pmu(&elem->cpu_bandwidth_write);
-    // if (r < 0) {
-    //     LOG(ERROR) << fmt::format("read cpu_bandwidth_write failed.\n");
-    //     return r;
-    // }
-    // LOG(DEBUG) << fmt::format("read cpu_bandwidth_write:{}\n", elem->cpu_bandwidth_write);
-    if (this->perf[4] != nullptr) {
-        elem->cpu_munmap_address_length = this->perf[4]->read_trace_pipe();
-        LOG(DEBUG) << "read munmap result with size:" << elem->cpu_munmap_address_length.size() << "\n";
-    }
+    return 0;
 }
+
 Incore::Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config) : perf_config(perf_config) {
     /* reset all pmc values */
-    // this->init_all_dram_rds(pid, cpu);
-    this->init_cpu_mem_read(pid, cpu);
-    this->init_cpu_l2stall(pid, cpu);
-    this->init_cpu_llcl_hits(pid, cpu);
-    this->init_cpu_llcl_miss(pid, cpu);
-    this->init_cpu_ebpf(pid, cpu);
-    // this->init_cpu_mem_write(pid, cpu);
+    for (int i = 0; i < perf_config->cpu.size(); i++) {
+        this->perf[i] = init_incore_perf(pid, cpu, std::get<1>(perf_config->cpu[i]), std::get<2>(perf_config->cpu[i]));
+    }
 }
+
 bool get_cpu_info(struct CPUInfo *cpu_info) {
     char buffer[1024];
     union {
         char cbuf[16];
         int ibuf[16 / sizeof(int)];
-    } buf;
-    CPUID_INFO cpuinfo;
+    } buf{};
+    CPUID_INFO cpuinfo{};
 
     pcm_cpuid(0, &cpuinfo);
 
@@ -133,7 +73,7 @@ bool get_cpu_info(struct CPUInfo *cpu_info) {
     buf.ibuf[1] = cpuinfo.array[3];
     buf.ibuf[2] = cpuinfo.array[2];
 
-    if (strncmp(buf.cbuf, "GenuineIntel", 4 * 3) != 0) {
+    if (strncmp(buf.cbuf, "GenuineIntel", 12) != 0) {
         LOG(ERROR) << fmt::format("We only Support Intel CPU\n");
         return false;
     }

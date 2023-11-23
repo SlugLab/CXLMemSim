@@ -136,9 +136,9 @@ void my_free(void *p) {
         if (ptr->succ != 0)
             ptr->succ->prev = pred;
         // end added
-        printf("BKR freeing block %#x merging with predecessor new size is %d.\n", p, pred->size);
+        printf("BKR freeing block %#p merging with predecessor new size is %d.\n", p, pred->size);
     } else {
-        printf("BKR freeing block %#x.\n", p);
+        printf("BKR freeing block %#p.\n", p);
         arr[i++] = ptr;
         ptr->isfree = 1;
         pred = ptr;
@@ -153,7 +153,7 @@ void my_free(void *p) {
             succ->succ->prev = pred;
         // end added
         arr[i++] = ptr;
-        printf("BKR freeing block %#x merging with successor new size is %d.\n", p, pred->size);
+        printf("BKR freeing block %#p merging with successor new size is %d.\n", p, pred->size);
     }
 }
 
@@ -161,7 +161,7 @@ int main(int argc, const char *const *argv) {
 
     size_t mbcount = 100;
 
-    printf("allocating %d MB\n", mbcount);
+    printf("allocating %ld MB\n", mbcount);
     uint8_t *p;
     p = (uint8_t *)my_malloc(mbcount * 1024ULL * 1024ULL);
 

@@ -3,11 +3,17 @@
 //
 
 #include "logging.h"
+#include <cstddef>
+#include <iostream>
 
 void LogWriter::operator<(const LogStream &stream) {
     std::ostringstream msg;
-    msg << stream.sstream_->rdbuf();
-    output_log(msg);
+    if (log_level_ == TRACE)
+        file_ << stream.sstream_->rdbuf();
+    else {
+        msg << stream.sstream_->rdbuf();
+        output_log(msg);
+    }
 }
 
 void LogWriter::output_log(const std::ostringstream &msg) {

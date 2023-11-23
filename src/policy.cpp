@@ -4,11 +4,26 @@
 
 #include "policy.h"
 #include <numeric>
-Policy::Policy() {}
-InterleavePolicy::InterleavePolicy() {}
+// TODO:
+AllocationPolicy::AllocationPolicy() = default;
+InterleavePolicy::InterleavePolicy() = default;
 // If the number is -1 for local, else it is the index of the remote server
 int InterleavePolicy::compute_once(CXLController *controller) {
-    auto per_size = controller->is_page ? 4096 : 64;
+    int per_size;
+    switch (controller->page_type_) {
+    case CACHELINE:
+        per_size = 64;
+        break;
+    case PAGE:
+        per_size = 4096;
+        break;
+    case HUGEPAGE_2M:
+        per_size = 2 * 1024 * 1024;
+        break;
+    case HUGEPAGE_1G:
+        per_size = 1024 * 1024 * 1024;
+        break;
+    };
     if (controller->occupation.size() * per_size / 1024 / 1024 < controller->capacity * 0.9) {
         return -1;
     } else {

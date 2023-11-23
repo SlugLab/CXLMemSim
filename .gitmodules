@@ -1,0 +1,15 @@
+[submodule "workloads/memcached-ycsb"]
+	path = workloads/memcached-ycsb
+	url = https://github.com/SlugLab/YCSB/
+[submodule "workloads/memcached"]
+	path = workloads/memcached
+	url = https://github.com/memcached/memcached
+[submodule "workloads/gapbs"]
+	path = workloads/gapbs
+	url = https://github.com/victoryang00/gapbs
+[submodule "script/perfmon"]
+	path = script/perfmon
+	url = https://github.com/intel/perfmon
+[submodule "workloads/vectordb"]
+	path = workloads/vectordb
+	url = https://github.com/jina-ai/vectordb
