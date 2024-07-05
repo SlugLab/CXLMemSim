@@ -9,7 +9,7 @@ $ echo 0 | sudo tee /sys/devices/system/node/node1/cpu*/online >/dev/null 2>&1
 ```
 ## User input
 ```bash
-LOGV=1 ./CXL-MEM-Simulator -t ./microbench/ld -i 5 -c 0,2 -d 85 -b 10,10 -l 100,100 -c 100,100 -w 85.5,86.5,87.5,85.5,86.5,87.5,88. -o "(1,(2,3))"
+LOGV=1 ./CXL-MEM-Simulator -t ./microbench/ld -i 5 -c 0,2 -d 85 -c 100,100 -w 85.5,86.5,87.5,85.5,86.5,87.5,88. -o "(1,(2,3))"
 ```
 1. -t Target: The path to the executable
 2. -i Interval: The epoch of the simulator, the parameter is in milisecond
