@@ -1,6 +1,13 @@
-//
-// Created by victoryang00 on 1/12/23.
-//
+/*
+ * CXLMemSim counter
+ *
+ *  By: Andrew Quinn
+ *      Yiwei Yang
+ *
+ *  Copyright 2025 Regents of the University of California
+ *  UC Santa Cruz Sluglab.
+ */
+
 
 #ifndef CXLMEMSIM_CXLCOUNTER_H
 #define CXLMEMSIM_CXLCOUNTER_H

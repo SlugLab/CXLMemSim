@@ -1,0 +1,500 @@
+{
+    "10": {
+        "attr": {
+            "btf_id": 1,
+            "btf_key_type_id": 8,
+            "btf_value_type_id": 28,
+            "btf_vmlinux_value_type_id": 0,
+            "flags": 0,
+            "ifindex": 0,
+            "kernel_bpf_map_id": 0,
+            "key_size": 4,
+            "map_extra": 0,
+            "map_type": 1,
+            "max_entries": 102400,
+            "value_size": 48
+        },
+        "name": "thread_map",
+        "type": "bpf_map_handler"
+    },
+    "105": {
+        "attr": {
+            "_module_name": "/lib/x86_64-linux-gnu/libc.so.6",
+            "data_type": "uprobe_perf_event_data",
+            "offset": 1031024,
+            "pid": -1,
+            "ref_ctr_off": 0,
+            "type": 7
+        },
+        "enabled": true,
+        "type": "bpf_perf_event_handler"
+    },
+    "106": {
+        "attr": {
+            "prog_fd": 27,
+            "target_fd": 105
+        },
+        "type": "bpf_link_handler"
+    },
+    "11": {
+        "attr": {
+            "btf_id": 2,
+            "btf_key_type_id": 0,
+            "btf_value_type_id": 0,
+            "btf_vmlinux_value_type_id": 0,
+            "flags": 128,
+            "ifindex": 0,
+            "kernel_bpf_map_id": 0,
+            "key_size": 4,
+            "map_extra": 0,
+            "map_type": 2,
+            "max_entries": 1,
+            "value_size": 41
+        },
+        "name": ".rodata.str1.1",
+        "type": "bpf_map_handler"
+    },
+    "111": {
+        "attr": {
+            "_module_name": "/lib/x86_64-linux-gnu/libc.so.6",
+            "data_type": "uprobe_perf_event_data",
+            "offset": 295072,
+            "pid": -1,
+            "ref_ctr_off": 0,
+            "type": 6
+        },
+        "enabled": true,
+        "type": "bpf_perf_event_handler"
+    },
+    "112": {
+        "attr": {
+            "prog_fd": 28,
+            "target_fd": 111
+        },
+        "type": "bpf_link_handler"
+    },
+    "114": {
+        "attr": {
+            "data_type": "tracepoint_perf_event_data",
+            "pid": -1,
+            "tracepoint_id": 308,
+            "type": 2
+        },
+        "enabled": true,
+        "type": "bpf_perf_event_handler"
+    },
+    "115": {
+        "attr": {
+            "prog_fd": 29,
+            "target_fd": 114
+        },
+        "type": "bpf_link_handler"
+    },
+    "12": {
+        "attr": {
+            "cnt": 51,
+            "insns": "bf16000000000000850000000e000000630af4ff00000000850000000e0000007b0ae8ff00000000b7010000700000000f16000000000000bfa100000000000007010000f8ffffffb702000008000000bf630000000000008500000070000000b7070000000000007b7ae0ff000000007b7ad8ff000000007b7ad0ff000000007b7ac8ff000000007b7ac0ff00000000bfa200000000000007020000f4ffffff18110000060000000000000000000000850000000100000055000e0000000000bfa600000000000007060000f4ffffffbfa300000000000007030000c0ffffff18110000060000000000000000000000bf62000000000000b704000000000000850000000200000018110000060000000000000000000000bf62000000000000850000000100000015000b000000000079a1f8ff000000007b1ab0ff000000007b7ab8ff00000000bfa200000000000007020000e8ffffffbfa300000000000007030000b0ffffff18110000070000000000000000000000b7040000000000008500000002000000b7000000000000009500000000000000",
+            "type": 1823468912
+        },
+        "name": "malloc_entry",
+        "type": "bpf_prog_handler"
+    },
+    "13": {
+        "attr": {
+            "cnt": 63,
+            "insns": "79175000000000007b7af8ff00000000850000000e000000630af4ff00000000850000000e0000007b0ae8ff00000000bfa200000000000007020000e8ffffff181100000700000000000000000000008500000001000000bf060000000000005506170000000000b701000000000000731ae0ff0000000018010000643a2025000000006c6c750a7b1ad8ff000000001801000020706964000000005f7467697b1ad0ff00000000180100006f756e640000000020666f727b1ac8ff0000000018010000666f206e000000006f7420667b1ac0ff0000000018010000616c6c6f000000006320696e7b1ab8ff0000000079a3e8ff00000000bfa100000000000007010000b8ffffffb702000029000000850000000600000005001900000000001507180000000000bfa200000000000007020000f4ffffff1811000006000000000000000000000085000000010000001500120000000000796100000000000079020000000000000f120000000000007b2000000000000079021000000000000f120000000000007b20100000000000790118000000000007010000010000007b101800000000007b76080000000000bfa200000000000007020000f8ffffff18110000070000000000000000000000bf63000000000000b7040000000000008500000002000000b7000000000000009500000000000000",
+            "type": 1823468912
+        },
+        "name": "malloc_return",
+        "type": "bpf_prog_handler"
+    },
+    "14": {
+        "attr": {
+            "cnt": 42,
+            "insns": "bf16000000000000850000000e000000630af4ff00000000b7010000700000000f16000000000000bfa100000000000007010000f8ffffffb702000008000000bf63000000000000850000007000000079a1f8ff0000000015011c0000000000bfa200000000000007020000f8ffffff181100000700000000000000000000008500000001000000bf060000000000001506150000000000bfa200000000000007020000f4ffffff18110000060000000000000000000000850000000100000015000a0000000000796100000000000079020800000000000f120000000000007b2008000000000079021000000000001f120000000000007b20100000000000790120000000000007010000010000007b10200000000000bfa200000000000007020000f8ffffff181100000700000000000000000000008500000003000000b7000000000000009500000000000000",
+            "type": 1823468912
+        },
+        "name": "free_entry",
+        "type": "bpf_prog_handler"
+    },
+    "15": {
+        "attr": {
+            "cnt": 58,
+            "insns": "bf16000000000000850000000e000000630af4ff00000000b701000001000000631af0ff00000000bfa200000000000007020000f4ffffff18110000080000000000000000000000850000000100000055002d0000000000bfa700000000000007070000f4ffffffbfa300000000000007030000f0ffffffb70800000000000018110000080000000000000000000000bf72000000000000b7040000000000008500000002000000b7010000700000000f16000000000000bfa100000000000007010000f8ffffffb702000008000000bf63000000000000850000000400000018110000090000000000000000000000bf720000000000008500000001000000550010000000000079a1f8ff000000007b1ad8ff000000007b8ae8ff000000007b8ae0ff000000007b8ad0ff000000007b8ac8ff000000007b8ac0ff00000000bfa200000000000007020000f4ffffffbfa300000000000007030000c0ffffff18110000090000000000000000000000b7040000000000008500000002000000050002000000000079a1f8ff000000007b10180000000000bfa200000000000007020000f4ffffff181100000800000000000000000000008500000003000000b7000000000000009500000000000000",
+            "type": 1823468912
+        },
+        "name": "brk_entry",
+        "type": "bpf_prog_handler"
+    },
+    "16": {
+        "attr": {
+            "cnt": 48,
+            "insns": "7917500000000000850000000e000000630afcff00000000b701000001000000631af8ff00000000bfa200000000000007020000fcffffff1811000008000000000000000000000085000000010000005500230000000000bfa600000000000007060000fcffffffbfa300000000000007030000f8ffffff18110000080000000000000000000000bf62000000000000b704000000000000850000000200000018110000090000000000000000000000bf620000000000008500000001000000150010000000000079021800000000003d72040000000000bf710000000000001f21000000000000b70300002000000005000400000000003d270800000000001f72000000000000b703000028000000bf21000000000000bf020000000000000f3200000000000079230000000000000f310000000000007b120000000000007b70180000000000bfa200000000000007020000fcffffff181100000800000000000000000000008500000003000000b7000000000000009500000000000000",
+            "type": 1823468912
+        },
+        "name": "brk_return",
+        "type": "bpf_prog_handler"
+    },
+    "17": {
+        "attr": {
+            "cnt": 62,
+            "insns": "bf16000000000000850000000e000000bf070000000000007707000020000000637afcff00000000b701000070000000bf630000000000000f13000000000000bfa100000000000007010000f0ffffffb7020000080000008500000004000000b701000068000000bf630000000000000f13000000000000bfa100000000000007010000e8ffffffb7020000080000008500000004000000b7010000600000000f16000000000000bfa100000000000007010000e0ffffffb702000008000000bf630000000000008500000004000000637ab0ff000000008500000005000000b7010000010000007b1ac0ff000000007b0ab8ff00000000b7070000000000007b7ac8ff000000007b7ad0ff000000007b7ad8ff00000000bfa600000000000007060000fcffffffbfa300000000000007030000b0ffffff18110000090000000000000000000000bf62000000000000b704000000000000850000000200000018110000060000000000000000000000bf6200000000000085000000030000007b7aa8ff000000007b7aa0ff000000007b7a98ff000000007b7a90ff000000007b7a88ff00000000bfa30000000000000703000088ffffff18110000060000000000000000000000bf62000000000000b7040000000000008500000002000000b7000000000000009500000000000000",
+            "type": 1823468912
+        },
+        "name": "execve_entry",
+        "type": "bpf_prog_handler"
+    },
+    "18": {
+        "attr": {
+            "cnt": 29,
+            "insns": "7916500000000000850000000e0000007700000020000000630afcff000000006706000020000000770600002000000055060a0000000000bfa200000000000007020000fcffffff181100000900000000000000000000008500000001000000bf0600000000000015060d000000000085000000050000007b0608000000000005000a0000000000bfa600000000000007060000fcffffff18110000090000000000000000000000bf62000000000000850000000300000018110000060000000000000000000000bf620000000000008500000003000000b7000000000000009500000000000000",
+            "type": 1823468912
+        },
+        "name": "execve_return",
+        "type": "bpf_prog_handler"
+    },
+    "23": {
+        "attr": {
+            "cnt": 43,
+            "insns": "bf17000000000000850000000e000000bf06000000000000b7010000700000000f170000000000007706000020000000636afcff00000000bfa100000000000007010000f0ffffffb702000008000000bf73000000000000850000000400000079a1f0ff0000000015011b0000000000b7010000000000007b1ac0ff000000007b1ae8ff000000007b1ae0ff000000007b1ad8ff000000007b1ad0ff000000007b1ac8ff00000000636ac0ff0000000085000000050000007b0ac8ff00000000bfa200000000000007020000fcffffff1811000009000000000000000000000085000000010000001500030000000000790110000000000007010000010000007b10100000000000bfa200000000000007020000f0ffffffbfa300000000000007030000c0ffffff181100000a0000000000000000000000b7040000000000008500000002000000b7000000000000009500000000000000",
+            "type": 1823468912
+        },
+        "name": "pthread_create_",
+        "type": "bpf_prog_handler"
+    },
+    "24": {
+        "attr": {
+            "cnt": 2,
+            "insns": "b7000000000000009500000000000000",
+            "type": 1823468912
+        },
+        "name": "pthread_create_",
+        "type": "bpf_prog_handler"
+    },
+    "25": {
+        "attr": {
+            "cnt": 26,
+            "insns": "850000000e000000630afcff000000007700000020000000630af8ff00000000bfa200000000000007020000fcffffff181100000a0000000000000000000000850000000100000015000e0000000000bfa200000000000007020000f8ffffff1811000009000000000000000000000085000000010000001500030000000000790110000000000007010000ffffffff7b10100000000000bfa200000000000007020000fcffffff181100000a00000000000000000000008500000003000000b7000000000000009500000000000000",
+            "type": 1823468912
+        },
+        "name": "pthread_exit_pr",
+        "type": "bpf_prog_handler"
+    },
+    "26": {
+        "attr": {
+            "cnt": 3,
+            "insns": "850000000e000000b7000000000000009500000000000000",
+            "type": 1823468912
+        },
+        "name": "fork_probe",
+        "type": "bpf_prog_handler"
+    },
+    "27": {
+        "attr": {
+            "cnt": 26,
+            "insns": "7916500000000000636afcff00000000850000000e0000006706000020000000770600002000000015061200000000007700000020000000630ac8ff000000008500000005000000b7010000010000007b1ad8ff000000007b0ad0ff00000000b7010000000000007b1ae0ff000000007b1ae8ff000000007b1af0ff00000000bfa200000000000007020000fcffffffbfa300000000000007030000c8ffffff18110000090000000000000000000000b7040000000000008500000002000000b7000000000000009500000000000000",
+            "type": 1823468912
+        },
+        "name": "fork_ret",
+        "type": "bpf_prog_handler"
+    },
+    "28": {
+        "attr": {
+            "cnt": 10,
+            "insns": "850000000e0000007700000020000000630afcff00000000bfa200000000000007020000fcffffff181100000900000000000000000000008500000003000000b7000000000000009500000000000000",
+            "type": 1823468912
+        },
+        "name": "exit_probe",
+        "type": "bpf_prog_handler"
+    },
+    "29": {
+        "attr": {
+            "cnt": 22,
+            "insns": "850000000e000000630afcff00000000bfa600000000000007060000fcffffff18110000060000000000000000000000bf62000000000000850000000300000018110000090000000000000000000000bf62000000000000850000000300000018110000080000000000000000000000bf62000000000000850000000300000018110000090000000000000000000000bf620000000000008500000003000000b7000000000000009500000000000000",
+            "type": -421258540
+        },
+        "name": "process_exit",
+        "type": "bpf_prog_handler"
+    },
+    "34": {
+        "attr": {
+            "_module_name": "/lib/x86_64-linux-gnu/libc.so.6",
+            "data_type": "uprobe_perf_event_data",
+            "offset": 732320,
+            "pid": -1,
+            "ref_ctr_off": 0,
+            "type": 6
+        },
+        "enabled": true,
+        "type": "bpf_perf_event_handler"
+    },
+    "35": {
+        "attr": {
+            "prog_fd": 12,
+            "target_fd": 34
+        },
+        "type": "bpf_link_handler"
+    },
+    "41": {
+        "attr": {
+            "_module_name": "/lib/x86_64-linux-gnu/libc.so.6",
+            "data_type": "uprobe_perf_event_data",
+            "offset": 732320,
+            "pid": -1,
+            "ref_ctr_off": 0,
+            "type": 7
+        },
+        "enabled": true,
+        "type": "bpf_perf_event_handler"
+    },
+    "42": {
+        "attr": {
+            "prog_fd": 13,
+            "target_fd": 41
+        },
+        "type": "bpf_link_handler"
+    },
+    "47": {
+        "attr": {
+            "_module_name": "/lib/x86_64-linux-gnu/libc.so.6",
+            "data_type": "uprobe_perf_event_data",
+            "offset": 734128,
+            "pid": -1,
+            "ref_ctr_off": 0,
+            "type": 6
+        },
+        "enabled": true,
+        "type": "bpf_perf_event_handler"
+    },
+    "48": {
+        "attr": {
+            "prog_fd": 14,
+            "target_fd": 47
+        },
+        "type": "bpf_link_handler"
+    },
+    "53": {
+        "attr": {
+            "_module_name": "/lib/x86_64-linux-gnu/libc.so.6",
+            "data_type": "uprobe_perf_event_data",
+            "offset": 1209872,
+            "pid": -1,
+            "ref_ctr_off": 0,
+            "type": 6
+        },
+        "enabled": true,
+        "type": "bpf_perf_event_handler"
+    },
+    "54": {
+        "attr": {
+            "prog_fd": 15,
+            "target_fd": 53
+        },
+        "type": "bpf_link_handler"
+    },
+    "6": {
+        "attr": {
+            "btf_id": 1,
+            "btf_key_type_id": 8,
+            "btf_value_type_id": 12,
+            "btf_vmlinux_value_type_id": 0,
+            "flags": 0,
+            "ifindex": 0,
+            "kernel_bpf_map_id": 0,
+            "key_size": 4,
+            "map_extra": 0,
+            "map_type": 1,
+            "max_entries": 10240,
+            "value_size": 40
+        },
+        "name": "stats_map",
+        "type": "bpf_map_handler"
+    },
+    "60": {
+        "attr": {
+            "_module_name": "/lib/x86_64-linux-gnu/libc.so.6",
+            "data_type": "uprobe_perf_event_data",
+            "offset": 1209872,
+            "pid": -1,
+            "ref_ctr_off": 0,
+            "type": 7
+        },
+        "enabled": true,
+        "type": "bpf_perf_event_handler"
+    },
+    "61": {
+        "attr": {
+            "prog_fd": 16,
+            "target_fd": 60
+        },
+        "type": "bpf_link_handler"
+    },
+    "66": {
+        "attr": {
+            "_module_name": "/lib/x86_64-linux-gnu/libc.so.6",
+            "data_type": "uprobe_perf_event_data",
+            "offset": 1006944,
+            "pid": -1,
+            "ref_ctr_off": 0,
+            "type": 6
+        },
+        "enabled": true,
+        "type": "bpf_perf_event_handler"
+    },
+    "67": {
+        "attr": {
+            "prog_fd": 17,
+            "target_fd": 66
+        },
+        "type": "bpf_link_handler"
+    },
+    "7": {
+        "attr": {
+            "btf_id": 1,
+            "btf_key_type_id": 13,
+            "btf_value_type_id": 22,
+            "btf_vmlinux_value_type_id": 0,
+            "flags": 0,
+            "ifindex": 0,
+            "kernel_bpf_map_id": 0,
+            "key_size": 8,
+            "map_extra": 0,
+            "map_type": 1,
+            "max_entries": 100000,
+            "value_size": 16
+        },
+        "name": "allocs_ringbuf",
+        "type": "bpf_map_handler"
+    },
+    "73": {
+        "attr": {
+            "_module_name": "/lib/x86_64-linux-gnu/libc.so.6",
+            "data_type": "uprobe_perf_event_data",
+            "offset": 1006944,
+            "pid": -1,
+            "ref_ctr_off": 0,
+            "type": 7
+        },
+        "enabled": true,
+        "type": "bpf_perf_event_handler"
+    },
+    "74": {
+        "attr": {
+            "prog_fd": 18,
+            "target_fd": 73
+        },
+        "type": "bpf_link_handler"
+    },
+    "79": {
+        "attr": {
+            "_module_name": "/lib/x86_64-linux-gnu/libc.so.6",
+            "data_type": "uprobe_perf_event_data",
+            "offset": 663440,
+            "pid": -1,
+            "ref_ctr_off": 0,
+            "type": 6
+        },
+        "enabled": true,
+        "type": "bpf_perf_event_handler"
+    },
+    "8": {
+        "attr": {
+            "btf_id": 1,
+            "btf_key_type_id": 8,
+            "btf_value_type_id": 8,
+            "btf_vmlinux_value_type_id": 0,
+            "flags": 0,
+            "ifindex": 0,
+            "kernel_bpf_map_id": 0,
+            "key_size": 4,
+            "map_extra": 0,
+            "map_type": 1,
+            "max_entries": 10240,
+            "value_size": 4
+        },
+        "name": "locks",
+        "type": "bpf_map_handler"
+    },
+    "80": {
+        "attr": {
+            "prog_fd": 23,
+            "target_fd": 79
+        },
+        "type": "bpf_link_handler"
+    },
+    "86": {
+        "attr": {
+            "_module_name": "/lib/x86_64-linux-gnu/libc.so.6",
+            "data_type": "uprobe_perf_event_data",
+            "offset": 663440,
+            "pid": -1,
+            "ref_ctr_off": 0,
+            "type": 7
+        },
+        "enabled": true,
+        "type": "bpf_perf_event_handler"
+    },
+    "87": {
+        "attr": {
+            "prog_fd": 24,
+            "target_fd": 86
+        },
+        "type": "bpf_link_handler"
+    },
+    "9": {
+        "attr": {
+            "btf_id": 1,
+            "btf_key_type_id": 8,
+            "btf_value_type_id": 28,
+            "btf_vmlinux_value_type_id": 0,
+            "flags": 0,
+            "ifindex": 0,
+            "kernel_bpf_map_id": 0,
+            "key_size": 4,
+            "map_extra": 0,
+            "map_type": 1,
+            "max_entries": 10240,
+            "value_size": 48
+        },
+        "name": "process_map",
+        "type": "bpf_map_handler"
+    },
+    "92": {
+        "attr": {
+            "_module_name": "/lib/x86_64-linux-gnu/libc.so.6",
+            "data_type": "uprobe_perf_event_data",
+            "offset": 667888,
+            "pid": -1,
+            "ref_ctr_off": 0,
+            "type": 6
+        },
+        "enabled": true,
+        "type": "bpf_perf_event_handler"
+    },
+    "93": {
+        "attr": {
+            "prog_fd": 25,
+            "target_fd": 92
+        },
+        "type": "bpf_link_handler"
+    },
+    "98": {
+        "attr": {
+            "_module_name": "/lib/x86_64-linux-gnu/libc.so.6",
+            "data_type": "uprobe_perf_event_data",
+            "offset": 1031024,
+            "pid": -1,
+            "ref_ctr_off": 0,
+            "type": 6
+        },
+        "enabled": true,
+        "type": "bpf_perf_event_handler"
+    },
+    "99": {
+        "attr": {
+            "prog_fd": 26,
+            "target_fd": 98
+        },
+        "type": "bpf_link_handler"
+    }
+}

@@ -1,62 +1,41 @@
-//
-// Created by victoryang00 on 1/13/23.
-//
+/*
+ * CXLMemSim endpoint
+ *
+ *  By: Andrew Quinn
+ *      Yiwei Yang
+ *
+ *  Copyright 2025 Regents of the University of California
+ *  UC Santa Cruz Sluglab.
+ */
 
 #ifndef CXLMEMSIM_CXLENDPOINT_H
 #define CXLMEMSIM_CXLENDPOINT_H
+
 #include "cxlcounter.h"
 #include "helper.h"
+#include <list>
+#include <map>
+#include <string>
+#include <tuple>
+#include <unordered_map>
+#include <vector>
 
-class LRUCache {
-    std::list<uint64_t> lru_list;
-    std::unordered_map<uint64_t, std::list<uint64_t>::iterator> lru_map;
-    std::unordered_map<uint64_t, uint64_t> wb_map;
-    size_t capacity;
-
-public:
-    LRUCache(size_t cap) : capacity(cap) {}
-
-    void insert(uint64_t key, uint64_t value) {
-        // Check if the item is already in the cache
-        if (lru_map.find(key) != lru_map.end()) {
-            // Move the element to the front of the list
-            lru_list.erase(lru_map[key]);
-            lru_list.push_front(key);
-            lru_map[key] = lru_list.begin();
-            wb_map[key] = value;
-        } else {
-            // If the cache is full, remove the least recently used item
-            if (lru_list.size() == capacity) {
-                uint64_t old_key = lru_list.back();
-                lru_list.pop_back();
-                lru_map.erase(old_key);
-                wb_map.erase(old_key);
-            }
-            // Insert the new item
-            lru_list.push_front(key);
-            lru_map[key] = lru_list.begin();
-            wb_map[key] = value;
-        }
-    }
-
-    uint64_t get(uint64_t key) {
-        if (lru_map.find(key) == lru_map.end()) {
-            throw std::runtime_error("Key not found");
-        }
-        // Move the accessed item to the front of the list
-        lru_list.erase(lru_map[key]);
-        lru_list.push_front(key);
-        lru_map[key] = lru_list.begin();
-        return wb_map[key];
-    }
-};
+// Forward declarations
+class CXLController;
+struct lbr;
+struct cntr;
 
 class CXLEndPoint {
+public:
+    virtual ~CXLEndPoint() = default;
+
+private:
     virtual void set_epoch(int epoch) = 0;
     virtual std::string output() = 0;
     virtual void delete_entry(uint64_t addr, uint64_t length) = 0;
     virtual double calculate_latency(LatencyPass elem) = 0; // traverse the tree to calculate the latency
     virtual double calculate_bandwidth(BandwidthPass elem) = 0;
+    virtual int insert(uint64_t timestamp, uint64_t tid, struct lbr *lbrs, struct cntr *counters) = 0;
     virtual int insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr,
                        int index) = 0; // 0 not this endpoint, 1 store, 2 load, 3 prefetch
     virtual std::tuple<int, int> get_all_access() = 0;
@@ -72,7 +51,7 @@ public:
     CXLMemExpanderEvent counter{};
     CXLMemExpanderEvent last_counter{};
 
-    LRUCache lru_cache;
+    // LRUCache lru_cache;
     // tlb map and paging map -> invalidate
     int last_read = 0;
     int last_write = 0;
@@ -83,6 +62,7 @@ public:
     CXLMemExpander(int read_bw, int write_bw, int read_lat, int write_lat, int id, int capacity);
     std::tuple<int, int> get_all_access() override;
     void set_epoch(int epoch) override;
+    int insert(uint64_t timestamp, uint64_t tid, struct lbr *lbrs, struct cntr *counters) override;
     int insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) override;
     double calculate_latency(LatencyPass elem) override; // traverse the tree to calculate the latency
     double calculate_bandwidth(BandwidthPass elem) override;
@@ -105,6 +85,7 @@ public:
     std::tuple<int, int> get_all_access() override;
     double calculate_latency(LatencyPass elem) override; // traverse the tree to calculate the latency
     double calculate_bandwidth(BandwidthPass elem) override;
+    int insert(uint64_t timestamp, uint64_t tid, struct lbr *lbrs, struct cntr *counters) override;
     int insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) override;
     void delete_entry(uint64_t addr, uint64_t length) override;
     std::string output() override;

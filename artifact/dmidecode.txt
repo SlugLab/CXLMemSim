@@ -1,0 +1,792 @@
+# dmidecode 3.4
+Getting SMBIOS data from sysfs.
+SMBIOS 3.5.0 present.
+Table at 0x6F06E000.
+
+Handle 0x0000, DMI type 0, 26 bytes
+BIOS Information
+	Vendor: American Megatrends International, LLC.
+	Version: 1.1
+	Release Date: 02/15/2023
+	Address: 0xF0000
+	Runtime Size: 64 kB
+	ROM Size: 32 MB
+	Characteristics:
+		PCI is supported
+		BIOS is upgradeable
+		BIOS shadowing is allowed
+		Boot from CD is supported
+		Selectable boot is supported
+		BIOS ROM is socketed
+		EDD is supported
+		Japanese floppy for NEC 9800 1.2 MB is supported (int 13h)
+		Japanese floppy for Toshiba 1.2 MB is supported (int 13h)
+		5.25"/360 kB floppy services are supported (int 13h)
+		5.25"/1.2 MB floppy services are supported (int 13h)
+		3.5"/720 kB floppy services are supported (int 13h)
+		3.5"/2.88 MB floppy services are supported (int 13h)
+		Print screen service is supported (int 5h)
+		Serial services are supported (int 14h)
+		Printer services are supported (int 17h)
+		CGA/mono video services are supported (int 10h)
+		ACPI is supported
+		USB legacy is supported
+		BIOS boot specification is supported
+		Targeted content distribution is supported
+		UEFI is supported
+	BIOS Revision: 5.29
+
+Handle 0x0001, DMI type 1, 27 bytes
+System Information
+	Manufacturer: Supermicro
+	Product Name: SYS-531A-I
+	Version: 0123456789
+	Serial Number: S885572X3408596
+	UUID: 16c9ca00-ac14-11ed-8000-3cecefdec4ae
+	Wake-up Type: Power Switch
+	SKU Number: Default string
+	Family: Family
+
+Handle 0x0002, DMI type 2, 15 bytes
+Base Board Information
+	Manufacturer: Supermicro
+	Product Name: X13SRA-TF
+	Version: 1.01
+	Serial Number: WM232S006894
+	Asset Tag: Base Board Asset Tag
+	Features:
+		Board is a hosting board
+		Board is replaceable
+	Location In Chassis: Part Component
+	Chassis Handle: 0x0003
+	Type: Motherboard
+	Contained Object Handles: 0
+
+Handle 0x0003, DMI type 3, 22 bytes
+Chassis Information
+	Manufacturer: Supermicro
+	Type: Other
+	Lock: Not Present
+	Version: 0123456789
+	Serial Number: C73510L42A30241
+	Asset Tag: Chassis Asset Tag
+	Boot-up State: Safe
+	Power Supply State: Safe
+	Thermal State: Safe
+	Security Status: None
+	OEM Information: 0x00000000
+	Height: Unspecified
+	Number Of Power Cords: 1
+	Contained Elements: 0
+	SKU Number: Default string
+
+Handle 0x0004, DMI type 8, 9 bytes
+Port Connector Information
+	Internal Reference Designator: VGA COM1
+	Internal Connector Type: None
+	External Reference Designator: COM1
+	External Connector Type: DB-9 male
+	Port Type: Serial Port 16550A Compatible
+
+Handle 0x0005, DMI type 8, 9 bytes
+Port Connector Information
+	Internal Reference Designator: VGA COM1
+	Internal Connector Type: None
+	External Reference Designator: VGA
+	External Connector Type: DB-15 female
+	Port Type: Video Port
+
+Handle 0x0006, DMI type 8, 9 bytes
+Port Connector Information
+	Internal Reference Designator: JUSBLAN1
+	Internal Connector Type: None
+	External Reference Designator: LAN1
+	External Connector Type: RJ-45
+	Port Type: Network Port
+
+Handle 0x0007, DMI type 8, 9 bytes
+Port Connector Information
+	Internal Reference Designator: JUSBLAN1
+	Internal Connector Type: None
+	External Reference Designator: USB6/7(3.2) USB3.2 GEN2
+	External Connector Type: Access Bus (USB)
+	Port Type: USB
+
+Handle 0x0008, DMI type 8, 9 bytes
+Port Connector Information
+	Internal Reference Designator: JUSBLAN2
+	Internal Connector Type: None
+	External Reference Designator: LAN2
+	External Connector Type: RJ-45
+	Port Type: Network Port
+
+Handle 0x0009, DMI type 8, 9 bytes
+Port Connector Information
+	Internal Reference Designator: JUSBLAN2
+	Internal Connector Type: None
+	External Reference Designator: USB 4/5(3.2) USB3.2 GEN2
+	External Connector Type: Access Bus (USB)
+	Port Type: USB
+
+Handle 0x000A, DMI type 8, 9 bytes
+Port Connector Information
+	Internal Reference Designator: JUSBC1
+	Internal Connector Type: None
+	External Reference Designator: USB8(3.2) USB3.2 GEN2x2
+	External Connector Type: Access Bus (USB)
+	Port Type: USB
+
+Handle 0x000B, DMI type 8, 9 bytes
+Port Connector Information
+	Internal Reference Designator: JAUDIO1
+	Internal Connector Type: None
+	External Reference Designator: HD AUDIO
+	External Connector Type: Other
+	Port Type: Audio Port
+
+Handle 0x000C, DMI type 8, 9 bytes
+Port Connector Information
+	Internal Reference Designator: J5A1
+	Internal Connector Type: None
+	External Reference Designator: LAN
+	External Connector Type: RJ-45
+	Port Type: Network Port
+
+Handle 0x000D, DMI type 9, 17 bytes
+System Slot Information
+	Designation: PCH SLOT1 PCI-E 4.0 X4
+	Type: x4 PCI Express 4 x4
+	Current Usage: Available
+	Length: Short
+	ID: 1
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:ff:00.0
+
+Handle 0x000E, DMI type 9, 17 bytes
+System Slot Information
+	Designation: CPU SLOT2 PCI-E 5.0 X16
+	Type: x16 PCI Express 5 x16
+	Current Usage: Available
+	Length: Long
+	ID: 2
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:ff:00.0
+
+Handle 0x000F, DMI type 9, 17 bytes
+System Slot Information
+	Designation: CPU SLOT4 PCI-E 5.0 X16
+	Type: x16 PCI Express 5 x16
+	Current Usage: Available
+	Length: Long
+	ID: 4
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:ff:00.0
+
+Handle 0x0010, DMI type 9, 17 bytes
+System Slot Information
+	Designation: CPU SLOT6 PCI-E 5.0 X16
+	Type: x16 PCI Express 5 x16
+	Current Usage: Available
+	Length: Long
+	ID: 6
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:ff:00.0
+
+Handle 0x0011, DMI type 9, 17 bytes
+System Slot Information
+	Designation: M.2 C01
+	Type: x4 PCI Express 5 x4
+	Current Usage: Available
+	Length: Short
+	ID: 7
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:ff:00.0
+
+Handle 0x0012, DMI type 9, 17 bytes
+System Slot Information
+	Designation: M.2 C02
+	Type: x4 PCI Express 5 x4
+	Current Usage: Available
+	Length: Short
+	ID: 8
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:ff:00.0
+
+Handle 0x0013, DMI type 11, 5 bytes
+OEM Strings
+	String 1: Intel FishHawk Falls                                 
+	String 2: Supermicro motherboard-X13 Series                 
+
+Handle 0x0014, DMI type 32, 20 bytes
+System Boot Information
+	Status: No errors detected
+
+Handle 0x0015, DMI type 39, 22 bytes
+System Power Supply
+	Power Unit Group: 1
+	Location: PSU1
+	Name: PWS-1K26P-PQ
+	Manufacturer: SUPERMICRO
+	Serial Number: P1K26AM26BD2710
+	Asset Tag: N/A
+	Model Part Number: PWS-1K26P-PQ
+	Revision: 1.1
+	Max Power Capacity: 1200 W
+	Status: Present, OK
+	Type: Switching
+	Input Voltage Range Switching: Auto-switch
+	Plugged: Yes
+	Hot Replaceable: No
+
+Handle 0x0016, DMI type 39, 22 bytes
+System Power Supply
+	Power Unit Group: 2
+	Location: PSU2
+	Name: To Be Filled By O.E.M.
+	Manufacturer: To Be Filled By O.E.M.
+	Serial Number: To Be Filled By O.E.M.
+	Asset Tag: To Be Filled By O.E.M.
+	Model Part Number: To Be Filled By O.E.M.
+	Revision: To Be Filled By O.E.M.
+	Max Power Capacity: Unknown
+	Status: Not Present
+	Type: Unknown
+	Input Voltage Range Switching: Unknown
+	Plugged: Yes
+	Hot Replaceable: No
+
+Handle 0x0017, DMI type 41, 11 bytes
+Onboard Device
+	Reference Designation:  ASPEED Video AST2600
+	Type: Video
+	Status: Enabled
+	Type Instance: 1
+	Bus Address: 0000:04:00.0
+
+Handle 0x0018, DMI type 41, 11 bytes
+Onboard Device
+	Reference Designation:  Intel Ethernet i210
+	Type: Ethernet
+	Status: Enabled
+	Type Instance: 1
+	Bus Address: 0000:02:00.0
+
+Handle 0x0019, DMI type 41, 11 bytes
+Onboard Device
+	Reference Designation:  Aquantia Ethernet AQC113
+	Type: Ethernet
+	Status: Enabled
+	Type Instance: 2
+	Bus Address: 0000:05:00.0
+
+Handle 0x001A, DMI type 44, 9 bytes
+Unknown Type
+	Header and Data:
+		2C 09 1A 00 FF FF 01 01 00
+
+Handle 0x001B, DMI type 38, 18 bytes
+IPMI Device Information
+	Interface Type: KCS (Keyboard Control Style)
+	Specification Version: 2.0
+	I2C Slave Address: 0x10
+	NV Storage Device: Not Present
+	Base Address: 0x0000000000000CA2 (I/O)
+	Register Spacing: Successive Byte Boundaries
+
+Handle 0x001D, DMI type 15, 73 bytes
+System Event Log
+	Area Length: 65535 bytes
+	Header Start Offset: 0x0000
+	Header Length: 16 bytes
+	Data Start Offset: 0x0010
+	Access Method: Memory-mapped physical 32-bit address
+	Access Address: 0xFF10F000
+	Status: Valid, Not Full
+	Change Token: 0x0000001A
+	Header Format: Type 1
+	Supported Log Type Descriptors: 25
+	Descriptor 1: Single-bit ECC memory error
+	Data Format 1: Multiple-event handle
+	Descriptor 2: Multi-bit ECC memory error
+	Data Format 2: Multiple-event handle
+	Descriptor 3: Parity memory error
+	Data Format 3: None
+	Descriptor 4: Bus timeout
+	Data Format 4: None
+	Descriptor 5: I/O channel block
+	Data Format 5: None
+	Descriptor 6: Software NMI
+	Data Format 6: None
+	Descriptor 7: POST memory resize
+	Data Format 7: None
+	Descriptor 8: POST error
+	Data Format 8: POST results bitmap
+	Descriptor 9: PCI parity error
+	Data Format 9: Multiple-event handle
+	Descriptor 10: PCI system error
+	Data Format 10: Multiple-event handle
+	Descriptor 11: CPU failure
+	Data Format 11: Multiple-event handle
+	Descriptor 12: EISA failsafe timer timeout
+	Data Format 12: None
+	Descriptor 13: Correctable memory log disabled
+	Data Format 13: None
+	Descriptor 14: Logging disabled
+	Data Format 14: None
+	Descriptor 15: System limit exceeded
+	Data Format 15: None
+	Descriptor 16: Asynchronous hardware timer expired
+	Data Format 16: None
+	Descriptor 17: System configuration information
+	Data Format 17: None
+	Descriptor 18: Hard disk information
+	Data Format 18: None
+	Descriptor 19: System reconfigured
+	Data Format 19: None
+	Descriptor 20: Uncorrectable CPU-complex error
+	Data Format 20: None
+	Descriptor 21: Log area reset/cleared
+	Data Format 21: None
+	Descriptor 22: System boot
+	Data Format 22: None
+	Descriptor 23: End of log
+	Data Format 23: None
+	Descriptor 24: OEM-specific
+	Data Format 24: OEM-specific
+	Descriptor 25: OEM-specific
+	Data Format 25: OEM-specific
+
+Handle 0x001E, DMI type 7, 27 bytes
+Cache Information
+	Socket Designation: L1-Cache
+	Configuration: Enabled, Not Socketed, Level 1
+	Operational Mode: Write Back
+	Location: Internal
+	Installed Size: 480 kB
+	Maximum Size: 480 kB
+	Supported SRAM Types:
+		Synchronous
+	Installed SRAM Type: Synchronous
+	Speed: Unknown
+	Error Correction Type: Single-bit ECC
+	System Type: Unified
+	Associativity: 12-way Set-associative
+
+Handle 0x001F, DMI type 7, 27 bytes
+Cache Information
+	Socket Designation: L2-Cache
+	Configuration: Enabled, Not Socketed, Level 2
+	Operational Mode: Varies With Memory Address
+	Location: Internal
+	Installed Size: 12 MB
+	Maximum Size: 12 MB
+	Supported SRAM Types:
+		Synchronous
+	Installed SRAM Type: Synchronous
+	Speed: Unknown
+	Error Correction Type: Single-bit ECC
+	System Type: Unified
+	Associativity: 16-way Set-associative
+
+Handle 0x0020, DMI type 7, 27 bytes
+Cache Information
+	Socket Designation: L3-Cache
+	Configuration: Enabled, Not Socketed, Level 3
+	Operational Mode: Varies With Memory Address
+	Location: Internal
+	Installed Size: 15 MB
+	Maximum Size: 15 MB
+	Supported SRAM Types:
+		Synchronous
+	Installed SRAM Type: Synchronous
+	Speed: Unknown
+	Error Correction Type: Single-bit ECC
+	System Type: Unified
+	Associativity: Other
+
+Handle 0x0021, DMI type 4, 50 bytes
+Processor Information
+	Socket Designation: CPU0
+	Type: Central Processor
+	Family: Xeon
+	Manufacturer: Intel(R) Corporation
+	ID: F8 06 08 00 FF FB EB BF
+	Signature: Type 0, Family 6, Model 143, Stepping 8
+	Flags:
+		FPU (Floating-point unit on-chip)
+		VME (Virtual mode extension)
+		DE (Debugging extension)
+		PSE (Page size extension)
+		TSC (Time stamp counter)
+		MSR (Model specific registers)
+		PAE (Physical address extension)
+		MCE (Machine check exception)
+		CX8 (CMPXCHG8 instruction supported)
+		APIC (On-chip APIC hardware supported)
+		SEP (Fast system call)
+		MTRR (Memory type range registers)
+		PGE (Page global enable)
+		MCA (Machine check architecture)
+		CMOV (Conditional move instruction supported)
+		PAT (Page attribute table)
+		PSE-36 (36-bit page size extension)
+		CLFSH (CLFLUSH instruction supported)
+		DS (Debug store)
+		ACPI (ACPI supported)
+		MMX (MMX technology supported)
+		FXSR (FXSAVE and FXSTOR instructions supported)
+		SSE (Streaming SIMD extensions)
+		SSE2 (Streaming SIMD extensions 2)
+		SS (Self-snoop)
+		HTT (Multi-threading)
+		TM (Thermal monitor supported)
+		PBE (Pending break enabled)
+	Version: Intel(R) Xeon(R) w3-2423
+	Voltage: 1.6 V
+	External Clock: 100 MHz
+	Max Speed: 4000 MHz
+	Current Speed: 2100 MHz
+	Status: Populated, Enabled
+	Upgrade: Socket LGA4677
+	L1 Cache Handle: 0x001E
+	L2 Cache Handle: 0x001F
+	L3 Cache Handle: 0x0020
+	Serial Number: Not Specified
+	Asset Tag: UNKNOWN
+	Part Number: Not Specified
+	Core Count: 6
+	Core Enabled: 6
+	Thread Count: 12
+	Characteristics:
+		64-bit capable
+		Multi-Core
+		Hardware Thread
+		Execute Protection
+		Enhanced Virtualization
+		Power/Performance Control
+
+Handle 0x0024, DMI type 16, 23 bytes
+Physical Memory Array
+	Location: System Board Or Motherboard
+	Use: System Memory
+	Error Correction Type: Single-bit ECC
+	Maximum Capacity: 4 TB
+	Error Information Handle: Not Provided
+	Number Of Devices: 16
+
+Handle 0x0025, DMI type 17, 92 bytes
+Memory Device
+	Array Handle: 0x0024
+	Error Information Handle: Not Provided
+	Total Width: Unknown
+	Data Width: Unknown
+	Size: No Module Installed
+	Form Factor: DIMM
+	Set: None
+	Locator: DIMMA1
+	Bank Locator: P0_Node0_Channel0_Dimm0
+	Type: Unknown
+	Type Detail: Unknown Registered (Buffered)
+
+Handle 0x0026, DMI type 17, 92 bytes
+Memory Device
+	Array Handle: 0x0024
+	Error Information Handle: Not Provided
+	Total Width: Unknown
+	Data Width: Unknown
+	Size: No Module Installed
+	Form Factor: DIMM
+	Set: None
+	Locator: DIMMA2
+	Bank Locator: P0_Node0_Channel0_Dimm1
+	Type: Unknown
+	Type Detail: Unknown
+
+Handle 0x0027, DMI type 17, 92 bytes
+Memory Device
+	Array Handle: 0x0024
+	Error Information Handle: Not Provided
+	Total Width: Unknown
+	Data Width: Unknown
+	Size: No Module Installed
+	Form Factor: DIMM
+	Set: None
+	Locator: DIMMB1
+	Bank Locator: P0_Node0_Channel1_Dimm0
+	Type: Unknown
+	Type Detail: Unknown
+
+Handle 0x0028, DMI type 17, 92 bytes
+Memory Device
+	Array Handle: 0x0024
+	Error Information Handle: Not Provided
+	Total Width: Unknown
+	Data Width: Unknown
+	Size: No Module Installed
+	Form Factor: DIMM
+	Set: None
+	Locator: DIMMB2
+	Bank Locator: P0_Node0_Channel1_Dimm1
+	Type: Unknown
+	Type Detail: Unknown
+
+Handle 0x002D, DMI type 17, 92 bytes
+Memory Device
+	Array Handle: 0x0024
+	Error Information Handle: Not Provided
+	Total Width: 80 bits
+	Data Width: 64 bits
+	Size: 16 GB
+	Form Factor: DIMM
+	Set: None
+	Locator: DIMME1
+	Bank Locator: P0_Node1_Channel0_Dimm0
+	Type: DDR5
+	Type Detail: Synchronous Registered (Buffered)
+	Speed: 4800 MT/s
+	Manufacturer: SK Hynix
+	Serial Number: 80AD01230297160B19
+	Asset Tag: DIMME1_AssetTag (date:23/02)
+	Part Number: HMCG78MEBRA115N     
+	Rank: 1
+	Configured Memory Speed: 4400 MT/s
+	Minimum Voltage: 1.1 V
+	Maximum Voltage: 1.1 V
+	Configured Voltage: 1.1 V
+	Memory Technology: DRAM
+	Memory Operating Mode Capability: Volatile memory
+	Firmware Version: 0000 
+	Module Manufacturer ID: Bank 1, Hex 0xAD
+	Module Product ID: 0xAD00
+	Memory Subsystem Controller Manufacturer ID: Unknown
+	Memory Subsystem Controller Product ID: Unknown
+	Non-Volatile Size: None
+	Volatile Size: 16 GB
+	Cache Size: None
+	Logical Size: None
+
+Handle 0x002E, DMI type 17, 92 bytes
+Memory Device
+	Array Handle: 0x0024
+	Error Information Handle: Not Provided
+	Total Width: Unknown
+	Data Width: Unknown
+	Size: No Module Installed
+	Form Factor: DIMM
+	Set: None
+	Locator: DIMME2
+	Bank Locator: P0_Node1_Channel0_Dimm1
+	Type: Unknown
+	Type Detail: Unknown
+
+Handle 0x002F, DMI type 17, 92 bytes
+Memory Device
+	Array Handle: 0x0024
+	Error Information Handle: Not Provided
+	Total Width: Unknown
+	Data Width: Unknown
+	Size: No Module Installed
+	Form Factor: DIMM
+	Set: None
+	Locator: DIMMF1
+	Bank Locator: P0_Node1_Channel1_Dimm0
+	Type: Unknown
+	Type Detail: Unknown
+
+Handle 0x0030, DMI type 17, 92 bytes
+Memory Device
+	Array Handle: 0x0024
+	Error Information Handle: Not Provided
+	Total Width: Unknown
+	Data Width: Unknown
+	Size: No Module Installed
+	Form Factor: DIMM
+	Set: None
+	Locator: DIMMF2
+	Bank Locator: P0_Node1_Channel1_Dimm1
+	Type: Unknown
+	Type Detail: Unknown
+
+Handle 0x0035, DMI type 19, 31 bytes
+Memory Array Mapped Address
+	Starting Address: 0x00000000000
+	Ending Address: 0x0007FFFFFFF
+	Range Size: 2 GB
+	Physical Array Handle: 0x0024
+	Partition Width: 1
+
+Handle 0x0036, DMI type 20, 35 bytes
+Memory Device Mapped Address
+	Starting Address: 0x00000000000
+	Ending Address: 0x0007FFFFFFF
+	Range Size: 2 GB
+	Physical Device Handle: 0x002D
+	Memory Array Mapped Address Handle: 0x0035
+	Partition Row Position: 1
+
+Handle 0x0037, DMI type 19, 31 bytes
+Memory Array Mapped Address
+	Starting Address: 0x00100000000
+	Ending Address: 0x0047FFFFFFF
+	Range Size: 14 GB
+	Physical Array Handle: 0x0024
+	Partition Width: 1
+
+Handle 0x0038, DMI type 20, 35 bytes
+Memory Device Mapped Address
+	Starting Address: 0x00100000000
+	Ending Address: 0x0047FFFFFFF
+	Range Size: 14 GB
+	Physical Device Handle: 0x002D
+	Memory Array Mapped Address Handle: 0x0037
+	Partition Row Position: 1
+
+Handle 0x0039, DMI type 19, 31 bytes
+Memory Array Mapped Address
+	Starting Address: 0x00480000000
+	Ending Address: 0x0087FFFFFFF
+	Range Size: 16 GB
+	Physical Array Handle: 0x0024
+	Partition Width: 0
+
+Handle 0x003A, DMI type 131, 64 bytes
+OEM-specific Type
+	Header and Data:
+		83 40 3A 00 35 00 00 00 00 00 00 00 00 00 00 00
+		F8 00 8A 7A 00 00 00 00 21 20 00 00 0A 00 10 00
+		1A 06 05 00 00 00 00 00 FE 00 FF FF 00 00 00 00
+		00 00 00 00 22 00 00 00 76 50 72 6F 00 00 00 00
+
+Handle 0x0044, DMI type 40, 27 bytes
+Additional Information 1
+	Referenced Handle: 0x000d
+	Referenced Offset: 0x00
+	String: Not Specified
+	Value: Unexpected size
+
+Handle 0x0045, DMI type 40, 27 bytes
+Additional Information 1
+	Referenced Handle: 0x000e
+	Referenced Offset: 0x00
+	String: Not Specified
+	Value: Unexpected size
+
+Handle 0x0046, DMI type 40, 27 bytes
+Additional Information 1
+	Referenced Handle: 0x000f
+	Referenced Offset: 0x00
+	String: Not Specified
+	Value: Unexpected size
+
+Handle 0x0047, DMI type 40, 27 bytes
+Additional Information 1
+	Referenced Handle: 0x0010
+	Referenced Offset: 0x00
+	String: Not Specified
+	Value: Unexpected size
+
+Handle 0x0048, DMI type 40, 27 bytes
+Additional Information 1
+	Referenced Handle: 0x0011
+	Referenced Offset: 0x00
+	String: Not Specified
+	Value: Unexpected size
+
+Handle 0x0049, DMI type 40, 27 bytes
+Additional Information 1
+	Referenced Handle: 0x0012
+	Referenced Offset: 0x00
+	String: Not Specified
+	Value: Unexpected size
+
+Handle 0x004A, DMI type 40, 27 bytes
+Additional Information 1
+	Referenced Handle: 0x0017
+	Referenced Offset: 0x00
+	String: Not Specified
+	Value: Unexpected size
+
+Handle 0x004B, DMI type 40, 27 bytes
+Additional Information 1
+	Referenced Handle: 0x0018
+	Referenced Offset: 0x00
+	String: Not Specified
+	Value: Unexpected size
+
+Handle 0x004C, DMI type 40, 27 bytes
+Additional Information 1
+	Referenced Handle: 0x0019
+	Referenced Offset: 0x00
+	String: Not Specified
+	Value: Unexpected size
+
+Handle 0x004D, DMI type 199, 5 bytes
+OEM-specific Type
+	Header and Data:
+		C7 05 4D 00 01
+	Strings:
+		                                                                                                                                                                                                                                                         
+
+Handle 0x004E, DMI type 42, 122 bytes
+Management Controller Host Interface
+	Host Interface Type: Network
+	Device Type: USB
+	idVendor: 0x0b1f
+	idProduct: 0x03ee
+	Protocol ID: 04 (Redfish over IP)
+		Service UUID: c95cab2a-6de0-45f4-8b3b-726c3794b26b
+		Host IP Assignment Type: AutoConf
+		Host IP Address Format: IPv4
+		IPv4 Address: 169.254.3.1
+		IPv4 Mask: 255.255.255.0
+		Redfish Service IP Discovery Type: AutoConf
+		Redfish Service IP Address Format: IPv4
+		IPv4 Redfish Service Address: 169.254.3.254
+		IPv4 Redfish Service Mask: 255.255.255.0
+		Redfish Service Port: 443
+		Redfish Service Vlan: 0
+		Redfish Service Hostname: 169.254.3.254
+
+Handle 0x004F, DMI type 14, 8 bytes
+Group Associations
+	Name: $MEI
+	Items: 1
+		0x0000 (OEM-specific)
+
+Handle 0x0050, DMI type 219, 106 bytes
+OEM-specific Type
+	Header and Data:
+		DB 6A 50 00 01 04 01 55 02 00 90 06 00 10 82 20
+		00 00 00 00 40 00 00 63 1F 00 00 C9 03 40 84 02
+		00 00 00 80 00 00 00 00 00 00 00 00 00 00 00 00
+		00 00 00 00 00 00 00 00 03 00 00 00 80 00 00 00
+		00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+		00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+		00 00 00 00 00 00 00 00 00 00
+	Strings:
+		MEI1
+		MEI2
+		MEI3
+		MEI4
+
+Handle 0x0051, DMI type 127, 4 bytes
+End Of Table
+

@@ -1,8 +1,17 @@
-//
-// Created by victoryang00 on 1/12/23.
-//
+/*
+ * CXLMemSim uncore
+ *
+ *  By: Andrew Quinn
+ *      Yiwei Yang
+ *
+ *  Copyright 2025 Regents of the University of California
+ *  UC Santa Cruz Sluglab.
+ */
 
 #include "uncore.h"
+#include <climits>
+#include <unistd.h>
+#include <fcntl.h>
 extern Helper helper;
 Uncore::Uncore(const uint32_t unc_idx, PerfConfig *perf_config) {
     unsigned long value;
@@ -13,14 +22,14 @@ Uncore::Uncore(const uint32_t unc_idx, PerfConfig *perf_config) {
 
     fd = open(path, O_RDONLY);
     if (fd < 0) {
-        LOG(ERROR) << fmt::format("open {} failed", path);
+        SPDLOG_ERROR("open {} failed", path);
         throw std::runtime_error("open");
     }
 
     memset(buf, 0, sizeof(buf));
     r = read(fd, buf, sizeof(buf) - 1);
     if (r < 0) {
-        LOG(ERROR) << fmt::format("read {} failed", fd);
+        SPDLOG_ERROR("read {} failed", fd);
         close(fd);
         throw std::runtime_error("read");
     }
@@ -28,11 +37,11 @@ Uncore::Uncore(const uint32_t unc_idx, PerfConfig *perf_config) {
 
     value = strtoul(buf, nullptr, 10);
     if (value == ULONG_MAX) {
-        LOG(ERROR) << fmt::format("strtoul {} failed", fd);
+        SPDLOG_ERROR("strtoul {} failed", fd);
         throw std::runtime_error("strtoul");
     }
 
-    for (auto const &[k, v] : this->perf | enumerate) {
+    for (auto const &[k, v] : this->perf | std::views::enumerate) {
         v = init_uncore_perf(-1, (int)unc_idx, std::get<1>(perf_config->cha[k]), std::get<2>(perf_config->cha[k]),
                              value);
     }
@@ -40,13 +49,13 @@ Uncore::Uncore(const uint32_t unc_idx, PerfConfig *perf_config) {
 
 int Uncore::read_cha_elems(struct CHAElem *elem) {
     ssize_t r;
-    for (auto const &[idx, value] : this->perf | enumerate) {
+    for (auto const &[idx, value] : this->perf | std::views::enumerate) {
         r = value->read_pmu(&elem->cha[idx]);
         if (r < 0) {
-            LOG(ERROR) << fmt::format("read cha_elems[{}] failed.\n", std::get<0>(helper.perf_conf.cha[idx]));
+            SPDLOG_ERROR("read cha_elems[{}] failed.\n", std::get<0>(helper.perf_conf.cha[idx]));
             return r;
         }
-        LOG(DEBUG) << fmt::format("read cha_elems[{}]:{}\n", std::get<0>(helper.perf_conf.cha[idx]), elem->cha[idx]);
+        SPDLOG_DEBUG("read cha_elems[{}]:{}\n", std::get<0>(helper.perf_conf.cha[idx]), elem->cha[idx]);
     }
 
     return 0;

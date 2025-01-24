@@ -1,6 +1,13 @@
-//
-// Created by victoryang00 on 1/11/23.
-//
+/*
+ * CXLMemSim monitor
+ *
+ *  By: Andrew Quinn
+ *      Yiwei Yang
+ *
+ *  Copyright 2025 Regents of the University of California
+ *  UC Santa Cruz Sluglab.
+ */
+
 
 #ifndef CXLMEMSIM_MONITOR_H
 #define CXLMEMSIM_MONITOR_H
@@ -8,12 +15,8 @@
 #include "cxlcontroller.h"
 #include "helper.h"
 #include "pebs.h"
-#include <cerrno>
-#include <csignal>
-#include <cstring>
-#include <ctime>
+#include "bpftimeruntime.h"
 #include <sched.h>
-#include <unistd.h>
 #include <vector>
 
 enum MONITOR_STATUS {
@@ -43,7 +46,7 @@ public:
     void disable(uint32_t target);
     int terminate(uint32_t, uint32_t, int32_t);
     bool check_all_terminated(uint32_t);
-    bool check_continue(uint32_t, struct timespec);
+    bool check_continue(uint32_t, struct timespec) const;
 };
 
 class Monitor {
@@ -60,8 +63,9 @@ public:
     double total_delay;
     struct timespec start_exec_ts, end_exec_ts;
     bool is_process;
-    struct PEBS *pebs_ctx;
-
+    PEBS *pebs_ctx;
+    LBR *lbr_ctx;
+    BpfTimeRuntime *bpftime_ctx;
     explicit Monitor();
 
     void stop();
@@ -69,65 +73,75 @@ public:
     static void clear_time(struct timespec *);
 };
 
-template <> struct fmt::formatter<Monitors> {
-    fmt::formatter<int> f;
 
-    constexpr auto parse(auto &ctx) { return f.parse(ctx); }
+template <>
+struct std::formatter<Monitors> {
+    // Parse function to handle any format specifiers (if needed)
+    constexpr auto parse(std::format_parse_context& ctx) -> decltype(ctx.begin()) {
+        // If you have specific format specifiers, parse them here
+        // For simplicity, we'll ignore them and return the end iterator
+        return ctx.end();
+    }
 
-    auto format(Monitors const &p, auto &ctx) const {
-        auto out = fmt::format_to(ctx.out(), "");
+    // Format function to output the Monitors data
+    template <typename FormatContext>
+    auto format(const Monitors& p, FormatContext& ctx) const -> decltype(ctx.out()) {
+        std::string result;
+
         if (p.print_flag) {
-            for (auto const &[mon_id, mon] : p.mon | enumerate) {
-                for (auto core_idx = 0; core_idx < helper.used_cha.size(); core_idx++) {
-                    for (auto cha_idx = 0; cha_idx < helper.perf_conf.cha.size(); cha_idx++) {
-                        out = fmt::format_to(out, "mon{}_{}_{}_{},", mon_id, std::get<0>(helper.perf_conf.cha[cha_idx]),
-                                             helper.used_cha[core_idx], core_idx);
+            for (const auto& [mon_id, mon] : p.mon | std::views::enumerate) {
+                for (size_t core_idx = 0; core_idx < helper.used_cha.size(); ++core_idx) {
+                    for (size_t cha_idx = 0; cha_idx < helper.perf_conf.cha.size(); ++cha_idx) {
+                        result += std::format("mon{}_{}_{}_{},", mon_id,
+                                              std::get<0>(helper.perf_conf.cha[cha_idx]),
+                                              helper.used_cha[core_idx], core_idx);
                     }
                 }
 
-                for (auto core_idx = 0; core_idx < helper.used_cpu.size(); core_idx++) {
-                    for (auto cpu_idx = 0; cpu_idx < helper.perf_conf.cpu.size(); cpu_idx++) {
-                        if (cpu_idx == helper.perf_conf.cpu.size() - 1 && core_idx == helper.used_cpu.size() - 1) {
-                            out = fmt::format_to(out, "mon{}_{}_{}_{}", mon_id,
-                                                 std::get<0>(helper.perf_conf.cpu[cpu_idx]), helper.used_cpu[core_idx],
-                                                 core_idx);
+                for (size_t core_idx = 0; core_idx < helper.used_cpu.size(); ++core_idx) {
+                    for (size_t cpu_idx = 0; cpu_idx < helper.perf_conf.cpu.size(); ++cpu_idx) {
+                        bool is_last_cpu = (cpu_idx == helper.perf_conf.cpu.size() - 1);
+                        bool is_last_core = (core_idx == helper.used_cpu.size() - 1);
+                        if (is_last_cpu && is_last_core) {
+                            result += std::format("mon{}_{}_{}_{}", mon_id,
+                                                  std::get<0>(helper.perf_conf.cpu[cpu_idx]),
+                                                  helper.used_cpu[core_idx], core_idx);
                         } else {
-                            out = fmt::format_to(out, "mon{}_{}_{}_{},", mon_id,
-                                                 std::get<0>(helper.perf_conf.cpu[cpu_idx]), helper.used_cpu[core_idx],
-                                                 core_idx);
+                            result += std::format("mon{}_{}_{}_{},", mon_id,
+                                                  std::get<0>(helper.perf_conf.cpu[cpu_idx]),
+                                                  helper.used_cpu[core_idx], core_idx);
                         }
                     }
                 }
             }
-        } else {
-
-            for (auto const &[mon_id, mon] : p.mon | enumerate) {
-                for (auto core_idx = 0; core_idx < helper.used_cha.size(); core_idx++) {
-                    for (auto cha_idx = 0; cha_idx < helper.perf_conf.cha.size(); cha_idx++) {
-                        out = fmt::format_to(out, "{},",
-                                             mon.after->chas[core_idx].cha[cha_idx] -
-                                                 mon.before->chas[core_idx].cha[cha_idx]);
+        } else {  // Visitor mode
+            for (const auto& [mon_id, mon] : p.mon | std::views::enumerate) {
+                for (size_t core_idx = 0; core_idx < helper.used_cha.size(); ++core_idx) {
+                    for (size_t cha_idx = 0; cha_idx < helper.perf_conf.cha.size(); ++cha_idx) {
+                        int cha_diff = mon.after->chas[core_idx].cha[cha_idx] -
+                                       mon.before->chas[core_idx].cha[cha_idx];
+                        result += std::format("{},", cha_diff);
                     }
                 }
-                for (auto core_idx = 0; core_idx < helper.used_cpu.size(); core_idx++) {
-                    for (auto cpu_idx = 0; cpu_idx < helper.perf_conf.cpu.size(); cpu_idx++) {
-                        if (cpu_idx == helper.perf_conf.cpu.size() - 1 && core_idx == helper.used_cpu.size() - 1) {
-                            out = fmt::format_to(out, "{}",
-                                                 mon.after->cpus[core_idx].cpu[cpu_idx] -
-                                                     mon.before->cpus[core_idx].cpu[cpu_idx]);
+
+                for (size_t core_idx = 0; core_idx < helper.used_cpu.size(); ++core_idx) {
+                    for (size_t cpu_idx = 0; cpu_idx < helper.perf_conf.cpu.size(); ++cpu_idx) {
+                        bool is_last_cpu = (cpu_idx == helper.perf_conf.cpu.size() - 1);
+                        bool is_last_core = (core_idx == helper.used_cpu.size() - 1);
+                        int cpu_diff = mon.after->cpus[core_idx].cpu[cpu_idx] -
+                                       mon.before->cpus[core_idx].cpu[cpu_idx];
+                        if (is_last_cpu && is_last_core) {
+                            result += std::format("{}", cpu_diff);
                         } else {
-                            out = fmt::format_to(out, "{},",
-                                                 mon.after->cpus[core_idx].cpu[cpu_idx] -
-                                                     mon.before->cpus[core_idx].cpu[cpu_idx]);
+                            result += std::format("{},", cpu_diff);
                         }
                     }
                 }
-            } // visitor mode write to the file
+            }
         }
-        //        *out++ = '\n';
-        ctx.advance_to(out);
-        return out;
-    };
-};
 
+        // Write the accumulated result to the output iterator
+        return std::copy(result.begin(), result.end(), ctx.out());
+    }
+};
 #endif // CXLMEMSIM_MONITOR_H

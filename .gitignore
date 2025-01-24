@@ -8,7 +8,6 @@ benchmarks*
 Makefile
 *.o
 py_smdk_pkg
-lib
 CMakePresets.json
 .cmake
 CMakeUserPresets.json

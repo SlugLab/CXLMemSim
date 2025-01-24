@@ -1,7 +1,16 @@
-//
-// Created by victoryang00 on 1/12/23.
-//
+/*
+ * CXLMemSim helper
+ *
+ *  By: Andrew Quinn
+ *      Yiwei Yang
+ *
+ *  Copyright 2025 Regents of the University of California
+ *  UC Santa Cruz Sluglab.
+ */
+
 #include "helper.h"
+#include <fstream>
+#include <signal.h>
 #include <string>
 #include <vector>
 
@@ -21,12 +30,20 @@ struct ModelContext model_ctx[] = {{CPU_MDL_BDX,
                                     {
                                         "/sys/bus/event_source/devices/uncore_cbo_%u/type",
                                     }},
+                                   {CPU_MDL_LNL,
+                                    {
+                                        "/sys/bus/event_source/devices/uncore_cbox_%u/type",
+                                    }},
                                    {CPU_MDL_END, {""}}};
+
+long perf_event_open(struct perf_event_attr *event_attr, pid_t pid, int cpu, int group_fd, unsigned long flags) {
+    return syscall(__NR_perf_event_open, event_attr, pid, cpu, group_fd, flags);
+}
 
 int Helper::num_of_cpu() {
     int ncpu = sysconf(_SC_NPROCESSORS_ONLN);
     if (ncpu < 0) {
-        LOG(ERROR) << "sysconf";
+        SPDLOG_ERROR("sysconf");
     }
     return ncpu;
 }
@@ -34,8 +51,7 @@ int Helper::num_of_cpu() {
 int Helper::num_of_cha() {
     int ncha = 0;
     for (; ncha < cpu; ++ncha) {
-        std::string path = fmt::format("/sys/bus/event_source/devices/uncore_cha_{}/type", ncha);
-        //         LOG(DEBUG) << path;
+        std::string path = std::format("/sys/bus/event_source/devices/uncore_cha_{}/type", ncha);
         if (!std::filesystem::exists(path)) {
             break;
         }
@@ -50,19 +66,19 @@ double Helper::cpu_frequency() {
     std::ifstream fp("/proc/cpuinfo");
 
     for (std::string line; c != this->num_of_cpu() - 1; std::getline(fp, line)) {
-        // LOG(DEBUG) << fmt::format("line: {}\n", line);
+        SPDLOG_DEBUG("line: {}\n", line);
         i = std::sscanf(line.c_str(), "cpu MHz : %lf", &cpu_mhz);
         max_cpu_mhz = i == 1 ? std::max(max_cpu_mhz, cpu_mhz) : max_cpu_mhz;
         std::sscanf(line.c_str(), "processor : %d", &c);
     }
-    LOG(DEBUG) << fmt::format("cpu MHz: {}\n", cpu_mhz);
+    SPDLOG_DEBUG("cpu MHz: {}\n", cpu_mhz);
 
     return cpu_mhz;
 }
 PerfConfig Helper::detect_model(uint32_t model, const std::vector<std::string> &perf_name,
                                 const std::vector<uint64_t> &perf_conf1, const std::vector<uint64_t> &perf_conf2) {
     int i = 0;
-    LOG(INFO) << fmt::format("Detecting model...{}\n", model);
+    SPDLOG_INFO("Detecting model...{}\n", model);
     while (model_ctx[i].model != CPU_MDL_END) {
         if (model_ctx[i].model == model) {
             this->perf_conf = model_ctx[i].perf_conf;
@@ -76,22 +92,22 @@ PerfConfig Helper::detect_model(uint32_t model, const std::vector<std::string> &
         }
         i++;
     }
-    LOG(ERROR) << "Failed to execute. This CPU model is not supported. Refer to perfmon or pcm to add support\n";
+    SPDLOG_ERROR("Failed to execute. This CPU model is not supported. Refer to perfmon or pcm to add support\n");
     throw;
 }
 Helper::Helper() {
     cpu = num_of_cpu();
     cha = num_of_cha();
 }
-void Helper::noop_handler(int sig) { ; }
+void Helper::noop_handler(int) { ; }
 void Helper::detach_children() {
-    struct sigaction sa {};
+    struct sigaction sa{};
 
     sa.sa_handler = noop_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART | SA_NOCLDWAIT;
     if (sigaction(SIGCHLD, &sa, nullptr) < 0) {
-        LOG(ERROR) << fmt::format("Failed to sigaction: %s", strerror(errno));
+        SPDLOG_ERROR("Failed to sigaction: %s", strerror(errno));
     }
 }
 int PMUInfo::start_all_pmcs() {
@@ -100,22 +116,20 @@ int PMUInfo::start_all_pmcs() {
     for (i = 0; i < this->cpus.size(); i++) {
         r = this->cpus[i].start();
         if (r < 0) {
-            LOG(ERROR) << fmt::format("start failed. cpu:{}\n", i);
+            SPDLOG_ERROR("start failed. cpu:{}\n", i);
             return r;
         }
     }
     return 0;
 }
 PMUInfo::PMUInfo(pid_t pid, Helper *helper, struct PerfConfig *perf_config) : helper(helper) {
-    int r;
-
     for (auto i : helper->used_cpu) {
         this->chas.emplace_back(i, perf_config);
     }
     // unfreeze counters
-    r = this->unfreeze_counters_cha_all();
+    int r = this->unfreeze_counters_cha_all();
     if (r < 0) {
-        LOG(DEBUG) << fmt::format("unfreeze_counters_cha_all failed.\n");
+        SPDLOG_DEBUG("unfreeze_counters_cha_all failed.\n");
         throw;
     }
 
@@ -125,45 +139,38 @@ PMUInfo::PMUInfo(pid_t pid, Helper *helper, struct PerfConfig *perf_config) : he
 
     r = this->start_all_pmcs();
     if (r < 0) {
-        LOG(ERROR) << fmt::format("start_all_pmcs failed\n");
+        SPDLOG_ERROR("start_all_pmcs failed\n");
     }
 }
 int PMUInfo::stop_all_pmcs() {
     /* disable all pmcs to count */
-    int i, r;
 
-    for (i = 0; i < this->cpus.size(); i++) {
-        r = this->cpus[i].stop();
-        if (r < 0) {
-            LOG(ERROR) << fmt::format("stop failed. cpu:{}\n", i);
+    for (int i = 0; i < this->cpus.size(); i++) {
+        if (const int r = this->cpus[i].stop(); r < 0) {
+            SPDLOG_ERROR("stop failed. cpu:{}\n", i);
             return r;
         }
     }
     return 0;
 }
 
-int PMUInfo::unfreeze_counters_cha_all() {
-    int i, r;
-
-    for (i = 0; i < this->chas.size(); i++) {
-        for (int j : {0, 1, 2, 3}) {
-            r = this->chas[i].perf[j]->start();
-            if (r < 0) {
-                LOG(ERROR) << fmt::format("perf_start failed. cha:{}\n", i);
+int PMUInfo::unfreeze_counters_cha_all() const {
+    for (int i = 0; i < this->chas.size(); i++) {
+        for (const int j : {0, 1, 2, 3}) {
+            if (int r = this->chas[i].perf[j]->start(); r < 0) {
+                SPDLOG_ERROR("perf_start failed. cha:{}\n", i);
                 return r;
             }
         }
     }
     return 0;
 }
-int PMUInfo::freeze_counters_cha_all() {
-    int i, r;
+int PMUInfo::freeze_counters_cha_all() const {
 
-    for (i = 0; i < this->chas.size(); i++) {
-        for (int j : {0, 1, 2, 3}) {
-            r = this->chas[i].perf[j]->stop();
-            if (r < 0) {
-                LOG(ERROR) << fmt::format("perf_stop failed. cha:{}\n", i);
+    for (int i = 0; i < this->chas.size(); i++) {
+        for (const int j : {0, 1, 2, 3}) {
+            if (const int r = this->chas[i].perf[j]->stop(); r < 0) {
+                SPDLOG_ERROR("perf_stop failed. cha:{}\n", i);
                 return r;
             }
         }

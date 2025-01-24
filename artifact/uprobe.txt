@@ -1,0 +1,46 @@
+root@banana:/bede-data/workloads/CXLMemSim-dev/lib/bpftime/example/minimal# bpftimetool export res.json
+[2025-01-17 20:19:11.107] [error] [bpftime_shm_internal.cpp:801] cudaHostRegister() failed: no CUDA-capable device is detected
+[2025-01-17 20:19:11.107] [info] [bpftime_shm_internal.cpp:676] Global shm constructed. shm_open_type 1 for bpftime_maps_shm
+[2025-01-17 20:19:11.107] [info] [bpftime_shm_internal.cpp:37] Global shm initialized
+[2025-01-17 20:19:11.107] [info] [bpftime_shm_json.cpp:275] bpf_map_handler name=stats_map found at 5
+[2025-01-17 20:19:11.107] [info] [bpftime_shm_json.cpp:275] bpf_map_handler name=allocs_map found at 6
+[2025-01-17 20:19:11.107] [info] [bpftime_shm_json.cpp:275] bpf_map_handler name=locks found at 7
+[2025-01-17 20:19:11.107] [info] [bpftime_shm_json.cpp:275] bpf_map_handler name=process_map found at 8
+[2025-01-17 20:19:11.107] [info] [bpftime_shm_json.cpp:275] bpf_map_handler name=thread_map found at 9
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:275] bpf_map_handler name=.rodata.str1.1 found at 10
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:270] find prog fd=11 name=malloc_entry
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:270] find prog fd=12 name=malloc_return
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:270] find prog fd=13 name=free_entry
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:270] find prog fd=14 name=brk_entry
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:270] find prog fd=15 name=brk_return
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:270] find prog fd=16 name=pthread_create_
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:270] find prog fd=17 name=pthread_create_
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:270] find prog fd=18 name=pthread_exit_pr
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:270] find prog fd=21 name=fork_probe
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:270] find prog fd=23 name=fork_ret
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:270] find prog fd=24 name=exit_probe
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:270] find prog fd=25 name=process_exit
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:292] bpf_perf_event_handler found at 30
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:305] bpf_link_handler found at 31，link 300175672 -> 29382
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:292] bpf_perf_event_handler found at 37
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:305] bpf_link_handler found at 38，link 300175672 -> 29382
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:292] bpf_perf_event_handler found at 43
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:305] bpf_link_handler found at 44，link 300175672 -> 29382
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:292] bpf_perf_event_handler found at 49
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:305] bpf_link_handler found at 50，link 300175672 -> 29382
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:292] bpf_perf_event_handler found at 56
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:305] bpf_link_handler found at 57，link 300175672 -> 29382
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:292] bpf_perf_event_handler found at 62
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:305] bpf_link_handler found at 63，link 300175672 -> 29382
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:292] bpf_perf_event_handler found at 69
+[2025-01-17 20:19:11.108] [info] [bpftime_shm_json.cpp:305] bpf_link_handler found at 70，link 300175672 -> 29382
+[2025-01-17 20:19:11.109] [info] [bpftime_shm_json.cpp:292] bpf_perf_event_handler found at 75
+[2025-01-17 20:19:11.109] [info] [bpftime_shm_json.cpp:305] bpf_link_handler found at 76，link 300175672 -> 29382
+[2025-01-17 20:19:11.109] [info] [bpftime_shm_json.cpp:292] bpf_perf_event_handler found at 81
+[2025-01-17 20:19:11.109] [info] [bpftime_shm_json.cpp:305] bpf_link_handler found at 82，link 300175672 -> 29382
+[2025-01-17 20:19:11.109] [info] [bpftime_shm_json.cpp:292] bpf_perf_event_handler found at 88
+[2025-01-17 20:19:11.109] [info] [bpftime_shm_json.cpp:305] bpf_link_handler found at 89，link 300175672 -> 29382
+[2025-01-17 20:19:11.109] [info] [bpftime_shm_json.cpp:292] bpf_perf_event_handler found at 94
+[2025-01-17 20:19:11.109] [info] [bpftime_shm_json.cpp:305] bpf_link_handler found at 95，link 300175672 -> 29382
+[2025-01-17 20:19:11.109] [info] [bpftime_shm_json.cpp:292] bpf_perf_event_handler found at 97
+[2025-01-17 20:19:11.109] [info] [bpftime_shm_json.cpp:305] bpf_link_handler found at 98，link 300175672 -> 29382

@@ -7,8 +7,7 @@
 # gromacs
 # smdk's
 
-git clone https://github.com/scott-beamer/gapbs.git
-cd gapbs
-make benchmark
+    # git clone https://github.com/scott-beamer/gapbs.git
+    # cd gapbs
+    # make benchmark
 
-wget https://files.rcsb.org/download/4i4f.pdb

@@ -1,5 +1,13 @@
-// Created by victoryang00 on 1/14/23.
-//
+/*
+ * CXLMemSim incore
+ *
+ *  By: Andrew Quinn
+ *      Yiwei Yang
+ *
+ *  Copyright 2025 Regents of the University of California
+ *  UC Santa Cruz Sluglab.
+ */
+
 
 #ifndef CXLMEMSIM_INCORE_H
 #define CXLMEMSIM_INCORE_H
@@ -8,7 +16,7 @@
 #include <array>
 #include <cstdint>
 
-class CXLController; // TODO: need to be shm gotten
+class CXLController;
 union CPUID_INFO {
     int array[4];
     struct {
