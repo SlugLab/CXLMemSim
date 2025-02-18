@@ -80,7 +80,7 @@ main(int argc, const char *argv[])
         // This prefetching instruction results in a speedup of >2x
         // on a Skylake machine running Linux when compiled with g++ -O3.
       //const int prefetch_distance = 5 * kStride * kLineSize;
-      //__builtin_prefetch(&buffer[position + prefetch_distance], 0, 0);
+      __builtin_prefetch(&buffer[position + prefetch_distance], 0, 0);
 
         position += (buffer[position] * kLineSize);
 	position = loop;

@@ -3,7 +3,8 @@
  *
  *  By: Andrew Quinn
  *      Yiwei Yang
- *
+ *      Brian Zhao
+ *  SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
  *  Copyright 2025 Regents of the University of California
  *  UC Santa Cruz Sluglab.
  */
@@ -56,13 +57,10 @@ int PerfInfo::stop() {
 
 PerfInfo *init_incore_perf(const pid_t pid, const int cpu, uint64_t conf, uint64_t conf1) {
     int n_pid, n_cpu, group_fd, flags;
-    struct perf_event_attr attr{.type = PERF_TYPE_RAW,
-                                .size = sizeof(attr),
-                                .config = conf,
-                                .disabled = 1,
-                                .inherit = 1,
-                                .config1 = conf1,
-                                .clockid = 0};
+    struct perf_event_attr attr {
+        .type = PERF_TYPE_RAW, .size = sizeof(attr), .config = conf, .disabled = 1, .inherit = 1, .config1 = conf1,
+        .clockid = 0
+    };
     n_pid = -1;
     n_cpu = cpu;
 

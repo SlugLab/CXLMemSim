@@ -3,7 +3,8 @@
  *
  *  By: Andrew Quinn
  *      Yiwei Yang
- *
+ *      Brian Zhao
+ *  SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
  *  Copyright 2025 Regents of the University of California
  *  UC Santa Cruz Sluglab.
  */
@@ -31,6 +32,7 @@ public:
 
 private:
     virtual void set_epoch(int epoch) = 0;
+    virtual void free_stats(double size) = 0;
     virtual std::string output() = 0;
     virtual void delete_entry(uint64_t addr, uint64_t length) = 0;
     virtual double calculate_latency(LatencyPass elem) = 0; // traverse the tree to calculate the latency
@@ -62,6 +64,7 @@ public:
     CXLMemExpander(int read_bw, int write_bw, int read_lat, int write_lat, int id, int capacity);
     std::tuple<int, int> get_all_access() override;
     void set_epoch(int epoch) override;
+    void free_stats(double size) override;
     int insert(uint64_t timestamp, uint64_t tid, struct lbr *lbrs, struct cntr *counters) override;
     int insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) override;
     double calculate_latency(LatencyPass elem) override; // traverse the tree to calculate the latency
@@ -91,6 +94,7 @@ public:
     std::string output() override;
     virtual std::tuple<double, std::vector<uint64_t>> calculate_congestion();
     void set_epoch(int epoch) override;
+    void free_stats(double size) override;
 };
 
 #endif // CXLMEMSIM_CXLENDPOINT_H

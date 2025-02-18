@@ -3,11 +3,11 @@
  *
  *  By: Andrew Quinn
  *      Yiwei Yang
- *
+ *      Brian Zhao
+ *  SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
  *  Copyright 2025 Regents of the University of California
  *  UC Santa Cruz Sluglab.
  */
-
 
 #ifndef CXLMEMSIM_PERF_H
 #define CXLMEMSIM_PERF_H
@@ -37,7 +37,7 @@ public:
     int cpu;
     pid_t pid;
     unsigned long flags;
-    struct perf_event_attr attr;
+    perf_event_attr attr;
     PerfInfo() = default;
     PerfInfo(int group_fd, int cpu, pid_t pid, unsigned long flags, struct perf_event_attr attr);
     ~PerfInfo();

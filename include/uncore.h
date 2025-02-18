@@ -3,7 +3,8 @@
  *
  *  By: Andrew Quinn
  *      Yiwei Yang
- *
+ *      Brian Zhao
+ *  SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
  *  Copyright 2025 Regents of the University of California
  *  UC Santa Cruz Sluglab.
  */

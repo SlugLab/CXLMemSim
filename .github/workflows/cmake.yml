@@ -2,14 +2,13 @@ name: CMake
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "asplos-dev" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "asplos-dev"  ]
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Release
-
 
 
 jobs:
@@ -23,40 +22,14 @@ jobs:
     - uses: actions/checkout@v3
 
     - name: Install dependencies
-      run: sudo apt install llvm-dev clang libbpf-dev libclang-dev python3-pip gcc-13 g++-13 ninja-build && git submodule update --init --recursive
-
-    - name: Install conan
-      working-directory: ${{github.workspace}}
-      run: pip3 install conan && conan profile detect && mkdir build && cd build && cp ../conanfile.txt . && CC=gcc-13 CXX=g++-13 conan install . -s compiler.cppstd=gnu23
+      run: sudo apt install llvm-dev clang libbpf-dev libclang-dev python3-pip gcc-13 g++-13 libcxxopts-dev libboost-dev nvidia-cuda-dev libfmt-dev libspdlog-dev && git submodule update --init --recursive
 
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
-      run: cmake -B ${{github.workspace}}/build -GNinja -DCMAKE_MAKE_PROGRAM=ninja -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13 -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_TOOLCHAIN_FILE=${{github.workspace}}/build/build/${{env.BUILD_TYPE}}/generators/conan_toolchain.cmake -DCMAKE_POLICY_DEFAULT_CMP0091=NEW
+      run: CC=gcc-13 CXX=g++-13 cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_POLICY_DEFAULT_CMP0091=NEW && sudo cp -r ${{github.workspace}}/include/vmlinux.h /usr/include
 
     - name: Build
       # Build your program with the given configuration
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
-
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
-      with:
-        tag_name: main
-        release_name: Release main
-        body: |
-          Changes in this Release
-          - First Change
-          - Second Change
-        draft: false
-        prerelease: false
-
-    - name: Upload Assets to Release with a wildcard
-      uses: csexton/release-asset-action@v2
-      with:
-        pattern: "build/CXLMemSim"
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        release-url: ${{ steps.create_release.outputs.upload_url }}
 

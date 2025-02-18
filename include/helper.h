@@ -3,7 +3,8 @@
  *
  *  By: Andrew Quinn
  *      Yiwei Yang
- *
+ *      Brian Zhao
+ *  SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
  *  Copyright 2025 Regents of the University of California
  *  UC Santa Cruz Sluglab.
  */
@@ -16,9 +17,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <linux/perf_event.h>
-#include <vector>
-#include <spdlog/spdlog.h>
 #include <ranges>
+#include <spdlog/spdlog.h>
+#include <vector>
 #include <x86intrin.h>
 
 #define PAGE_SIZE 4096
@@ -28,7 +29,16 @@
 #define barrier() _mm_mfence()
 
 /* CPU Models */
-enum { CPU_MDL_BDX = 63, CPU_MDL_SKX = 85, CPU_MDL_SPR = 143, CPU_MDL_ADL = 151, CPU_MDL_LNL = 189, CPU_MDL_END = 0x0ffff };
+enum {
+    CPU_MDL_BDX = 63,
+    CPU_MDL_SKX = 85,
+    CPU_MDL_SPR = 143,
+    CPU_MDL_ADL = 151,
+    CPU_MDL_LNL = 189,
+    CPU_MDL_ARL = 198,
+    CPU_MDL_SRF = 201,
+    CPU_MDL_END = 0x0ffff
+};
 class Incore;
 class Uncore;
 class Helper;
@@ -80,14 +90,14 @@ struct PEBSElem {
 };
 
 struct LBRElem {
-    //uint64_t ip[4];
+    uint64_t total;
     uint64_t tid;
-    //uint64_t cpu;
     uint64_t time;
     uint64_t branch_stack[96];
 };
 
 struct BPFTimeRuntimeElem {
+    uint64_t total;
     uint64_t va;
     uint64_t pa;
     uint64_t pid;
@@ -102,12 +112,12 @@ struct CPUInfo {
 };
 
 struct Elem {
-    struct CPUInfo cpuinfo;
+    CPUInfo cpuinfo;
     std::vector<CHAElem> chas;
     std::vector<CPUElem> cpus;
-    struct PEBSElem pebs;
-    struct LBRElem lbr;
-    struct BPFTimeRuntimeElem bpftime;
+    PEBSElem pebs;
+    LBRElem lbr;
+    BPFTimeRuntimeElem bpftime;
 };
 
 class PMUInfo {
@@ -115,7 +125,7 @@ public:
     std::vector<Uncore> chas;
     std::vector<Incore> cpus;
     Helper *helper;
-    PMUInfo(pid_t pid, Helper *h, struct PerfConfig *perf_config);
+    PMUInfo(pid_t pid, Helper *h, PerfConfig *perf_config);
     ~PMUInfo();
     int start_all_pmcs();
     int stop_all_pmcs();
@@ -127,6 +137,7 @@ class Helper {
 public:
     PerfConfig perf_conf{};
     Helper();
+    std::string path;
     int cpu;
     int cha;
     std::vector<int> used_cpu;
@@ -135,6 +146,7 @@ public:
     int num_of_cha();
     static void detach_children();
     static void noop_handler(int);
+    static void suspend_handler(int);
     double cpu_frequency();
     PerfConfig detect_model(uint32_t model, const std::vector<std::string> &perf_name,
                             const std::vector<uint64_t> &perf_conf1, const std::vector<uint64_t> &perf_conf2);

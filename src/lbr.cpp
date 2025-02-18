@@ -3,7 +3,8 @@
  *
  *  By: Andrew Quinn
  *      Yiwei Yang
- *
+ *      Brian Zhao
+ *  SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
  *  Copyright 2025 Regents of the University of California
  *  UC Santa Cruz Sluglab.
  */
@@ -61,6 +62,23 @@
  *   } && PERF_SAMPLE_BRANCH_STACK */
 
 LBR::LBR(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_period) {
+    // Configure perf_event_attr struct
+    /*perf_event_attr pe = {
+        .type = PERF_TYPE_RAW,
+        .size = sizeof(perf_event_attr),
+        .config = 0x00D3, // mem_load_retired.l3_miss
+        .sample_period = sample_period,
+        .sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_CPU | PERF_SAMPLE_TIME | PERF_SAMPLE_BRANCH_STACK,
+
+        .read_format = PERF_FORMAT_TOTAL_TIME_ENABLED,
+        .disabled = 1, // Event is initially disabled
+        .exclude_user = 0,
+        .exclude_kernel = 1,
+        .exclude_hv = 1,
+        .precise_ip = 1,
+        .branch_sample_type = PERF_SAMPLE_BRANCH_USER | PERF_SAMPLE_BRANCH_ANY |PERF_SAMPLE_BRANCH_COUNTERS,
+        //.config1 = 3,
+    };*/
     perf_event_attr pe = {
         .type = PERF_TYPE_RAW,
         .size = sizeof(perf_event_attr),
@@ -74,7 +92,7 @@ LBR::LBR(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_per
         .exclude_hv = 1,
         .precise_ip = 3,
         .config1 = 3,
-        .branch_sample_type = PERF_SAMPLE_BRANCH_USER | PERF_SAMPLE_BRANCH_ANY | PERF_SAMPLE_BRANCH_COUNTERS,
+        .branch_sample_type = PERF_SAMPLE_BRANCH_USER | PERF_SAMPLE_BRANCH_ANY | (1<<19),
     };
 
     int cpu = -1; // measure on any cpu
@@ -137,9 +155,12 @@ int LBR::read(CXLController *controller, LBRElem *elem) {
                                  data->pid, data->tid, header->size, /*data->nr,*/ data->nr2, sizeof(*data),
                                  /*data->ips[0],*/ data->cpu, data->timestamp, /* data->hw_idx,*/ data->lbrs[0].from,
                                  data->counters[0].counters, data->counters[1].counters, data->counters[2].counters);
-                    // controller->insert(data->timestamp, data->ips, data->lbrs, data->counters);
+                    controller->insert(data->timestamp, data->tid, data->lbrs, data->counters);
                     elem->tid = data->tid;
-                    memcpy(&elem->branch_stack, (32 * 8) + (void *)&data->counters, 92 * 8);
+                    memcpy(&elem->branch_stack,
+                           (char *)&data->counters + (32 * 8), // Cast to char* before arithmetic
+                           92 * 8);
+                    elem->total++;
                     r = 1;
                 }
                 break;

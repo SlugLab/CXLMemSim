@@ -17,20 +17,23 @@ add_subdirectory(workloads)
 list(APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR})
 
 find_package(cxxopts REQUIRED)
-#find_package(spdlog REQUIRED)
+find_package(spdlog REQUIRED)
 file(GLOB_RECURSE SOURCE_FILES src/*.cpp)
 
 execute_process(COMMAND uname -r OUTPUT_VARIABLE arch OUTPUT_STRIP_TRAILING_WHITESPACE)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fPIC -pthread -ldl -lrt -mavx2 -mpreferred-stack-boundary=4 -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fPIC -pthread -g")
+set(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -latomic")
 
 add_executable(CXLMemSim ${SOURCE_FILES} src/main.cc)
-add_executable(CXLMemSim-test ${SOURCE_FILES} src/main-test.cc)
 
 include_directories(CXLMemSim include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR} ${runtime_SOURCE_DIR}/include)
 target_link_libraries(CXLMemSim cxxopts::cxxopts spdlog::spdlog bpftime_vm bpftime-object bpftime_base_attach_impl bpftime-agent)
 
-include_directories(CXLMemSim-test include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR} ${runtime_SOURCE_DIR}/include)
-target_link_libraries(CXLMemSim-test cxxopts::cxxopts spdlog::spdlog bpftime_vm bpftime-object bpftime_base_attach_impl bpftime-agent)
+add_executable(CXLMemSimRoB ${SOURCE_FILES} src/rob.cc)
+
+include_directories(CXLMemSimRoB include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR} ${runtime_SOURCE_DIR}/include)
+target_link_libraries(CXLMemSimRoB cxxopts::cxxopts spdlog::spdlog bpftime_vm bpftime-object bpftime_base_attach_impl bpftime-agent)
+
 
 function(bpf prefix)
     add_custom_target(${prefix}_bpf ALL

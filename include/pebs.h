@@ -3,19 +3,19 @@
  *
  *  By: Andrew Quinn
  *      Yiwei Yang
- *
+ *      Brian Zhao
+ *  SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
  *  Copyright 2025 Regents of the University of California
  *  UC Santa Cruz Sluglab.
  */
-
 
 #ifndef CXLMEMSIM_PEBS_H
 #define CXLMEMSIM_PEBS_H
 
 #include "helper.h"
-#include <sys/mman.h>
 #include <cstdint>
 #include <cxlcontroller.h>
+#include <sys/mman.h>
 #include <sys/types.h>
 
 class PEBS {

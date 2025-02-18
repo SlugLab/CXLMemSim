@@ -22,7 +22,7 @@ int main(int argc, const char *const *argv) {
 
     use_malloc = true;
 
-    size_t mbcount = 1000;
+    size_t mbcount = 100000;
 
     mmap_path = "./mmapfile";
 

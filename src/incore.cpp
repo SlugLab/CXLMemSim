@@ -3,11 +3,11 @@
  *
  *  By: Andrew Quinn
  *      Yiwei Yang
- *
+ *      Brian Zhao
+ *  SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
  *  Copyright 2025 Regents of the University of California
  *  UC Santa Cruz Sluglab.
  */
-
 
 #include "incore.h"
 #include "helper.h"
@@ -45,7 +45,7 @@ int Incore::stop() {
 
 ssize_t Incore::read_cpu_elems(struct CPUElem *elem) {
     ssize_t r;
-    for (auto const &[idx, value] : this->perf |  std::views::enumerate) {
+    for (auto const &[idx, value] : this->perf | std::views::enumerate) {
         r = value->read_pmu(&elem->cpu[idx]);
         if (r < 0) {
             SPDLOG_ERROR("read cpu_elems[{}] failed.\n", std::get<0>(helper.perf_conf.cpu[idx]));

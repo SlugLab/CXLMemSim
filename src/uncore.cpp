@@ -3,15 +3,16 @@
  *
  *  By: Andrew Quinn
  *      Yiwei Yang
- *
+ *      Brian Zhao
+ *  SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
  *  Copyright 2025 Regents of the University of California
  *  UC Santa Cruz Sluglab.
  */
 
 #include "uncore.h"
 #include <climits>
-#include <unistd.h>
 #include <fcntl.h>
+#include <unistd.h>
 extern Helper helper;
 Uncore::Uncore(const uint32_t unc_idx, PerfConfig *perf_config) {
     unsigned long value;

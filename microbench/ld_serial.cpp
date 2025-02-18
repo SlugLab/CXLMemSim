@@ -87,19 +87,18 @@ int main(int argc, char **argv) {
     asm volatile(
 		 "mov %[buf], %%rsi\n"
 		 "clflush (%%rsi)\n"
+          "mfence\n"
 		 :
 		 : [buf] "r" (addr)
 		 : "rsi");
     addr += CACHELINE_SIZE;
   }
 
-  asm volatile ("mfence\n" :::);
 
   clock_gettime(CLOCK_MONOTONIC, &tstart);
 for (int i=0;i<1e3;i++){
   addr = base;
   while (addr < (base + MAP_SIZE)) {
-    //fprintf (stderr, "addr %p bound %p\n", addr, base + MAP_SIZE);
     asm volatile(
 		 BODY(addr)
 		 :

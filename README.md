@@ -1,15 +1,14 @@
 # CXL.mem Simulator
-The CXL.mem simulator is to use the target latency for simulating the CPU perspective taking ROB and different cacheline state's into panelty from the application level.
+The CXL.mem simulator uses the target latency for simulating the CPU perspective taking ROB and different cacheline states into penalty from the application level.
 
 ## Prerequisite
 ```bash
-$ uname -a
-Linux banana 6.4.0+ #86 SMP PREEMPT_DYNAMIC Fri Jul 28 23:49:33 UTC 2023 x86_64 x86_64 x86_64 GNU/Linux
-$ echo 0 | sudo tee /sys/devices/system/node/node1/cpu*/online >/dev/null 2>&1
+root@victoryang00-ASUS-Zenbook-S-14-UX5406SA-UX5406SA:/home/victoryang00/CLionProjects/CXLMemSim-dev/build# uname -a
+Linux victoryang00-ASUS-Zenbook-S-14-UX5406SA-UX5406SA 6.13.0-rc4+ #12 SMP PREEMPT_DYNAMIC Fri Jan 24 07:08:46 CST 2025 x86_64 x86_64 x86_64 GNU/Linux
 ```
 ## User input
 ```bash
-LOGV=1 ./CXL-MEM-Simulator -t ./microbench/ld -i 5 -c 0,2 -d 85 -b 10,10 -l 100,100 -c 100,100 -w 85.5,86.5,87.5,85.5,86.5,87.5,88. -o "(1,(2,3))"
+SPDLOG_LEVEL=debug ./CXLMemSim -t ./microbench/ld -i 5 -c 0,2 -d 85 -c 100,100 -w 85.5,86.5,87.5,85.5,86.5,87.5,88. -o "(1,(2,3))"
 ```
 1. -t Target: The path to the executable
 2. -i Interval: The epoch of the simulator, the parameter is in milisecond
@@ -29,4 +28,4 @@ LOGV=1 ./CXL-MEM-Simulator -t ./microbench/ld -i 5 -c 0,2 -d 85 -b 10,10 -l 100,
                  \ 
                   3
 ```
-9. env LOGV stands for logs level that you can see.
+9. env SPDLOG_LEVEL stands for logs level that you can see.
