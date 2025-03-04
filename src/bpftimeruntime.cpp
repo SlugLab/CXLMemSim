@@ -45,7 +45,7 @@ int BpfTimeRuntime::read(CXLController *controller, BPFTimeRuntimeElem *elem) {
     for (int i = 6; i < 11; i++) {
         int key = 0;
         int key1 = 0;
-        auto item1 = bpftime_map_get_next_key(i, &key1, &key); // process map
+        bpftime_map_get_next_key(i, &key1, &key); // process map
         auto item2 = bpftime_map_lookup_elem(i, &key); // allocs map
         SPDLOG_DEBUG("Process map key: {} {} {}", key1, key, tid);
         if (i == 6 && item2 != nullptr) {

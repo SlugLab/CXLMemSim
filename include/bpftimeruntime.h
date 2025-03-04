@@ -61,6 +61,7 @@ struct proc_info {
     u64 thread_count; // 线程数量（仅对进程有效）
     u64 current_pid; // 当前进程 ID
     u64 current_tid; // 当前线程 ID
+    u64 sleep_time; // 睡眠时间
     struct mem_info mem_info;
 };
 

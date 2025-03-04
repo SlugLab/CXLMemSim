@@ -28,6 +28,15 @@ ModelContext model_ctx[] = {{CPU_MDL_BDX,
                              {
                                  "/sys/bus/event_source/devices/uncore_cha_%u/type",
                              }},
+                            {CPU_MDL_GNR,
+                             {
+                                 "/sys/bus/event_source/devices/uncore_cha_%u/type",
+                             }},
+                            {CPU_MDL_SRF,
+                             {
+                                 "/sys/bus/event_source/devices/uncore_cha_%u/type",
+                             }},
+
                             {CPU_MDL_ADL,
                              {
                                  "/sys/bus/event_source/devices/uncore_cbo_%u/type",
@@ -39,10 +48,6 @@ ModelContext model_ctx[] = {{CPU_MDL_BDX,
                             {CPU_MDL_ARL,
                              {
                                  "/sys/bus/event_source/devices/uncore_cbox_%u/type",
-                             }},
-                            {CPU_MDL_SRF,
-                             {
-                                 "/sys/bus/event_source/devices/uncore_cha_%u/type",
                              }},
                             {CPU_MDL_END, {""}}};
 

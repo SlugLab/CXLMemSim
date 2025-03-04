@@ -15,7 +15,6 @@
 PerfInfo::PerfInfo(int group_fd, int cpu, pid_t pid, unsigned long flags, perf_event_attr attr)
     : group_fd(group_fd), cpu(cpu), pid(pid), flags(flags), attr(attr) {
     this->fd = perf_event_open(&this->attr, this->pid, this->cpu, this->group_fd, this->flags);
-    // SPDLOG_INFO("fd: {}", this->fd);
     if (this->fd == -1) {
         SPDLOG_ERROR("perf_event_open");
         throw;

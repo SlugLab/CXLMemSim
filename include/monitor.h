@@ -44,7 +44,7 @@ public:
     void stop_all(int);
     void run_all(int);
     Monitor *get_mon(int, int);
-    int enable(const uint32_t, const uint32_t, bool, uint64_t, const int32_t);
+    int enable(uint32_t, uint32_t, bool, uint64_t, int32_t);
     void disable(uint32_t target);
     int terminate(uint32_t, uint32_t, int32_t);
     bool check_all_terminated(uint32_t);
@@ -66,9 +66,9 @@ public:
     double total_delay;
     timespec start_exec_ts, end_exec_ts;
     bool is_process;
-    PEBS *pebs_ctx;
-    LBR *lbr_ctx;
-    BpfTimeRuntime *bpftime_ctx;
+    PEBS *pebs_ctx{};
+    LBR *lbr_ctx{};
+    BpfTimeRuntime *bpftime_ctx{};
 
     Monitor(const Monitor &other)
         : tgid(other.tgid), tid(other.tid), cpu_core(other.cpu_core), wanted_delay(other.wanted_delay),

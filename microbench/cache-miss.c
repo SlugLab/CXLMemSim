@@ -6,7 +6,7 @@
 // 假设每个缓存行是64字节，LLC是8MB
 #define ARRAY_SIZE (32 * 1024 * 1024)  // 32MB
 #define STRIDE 64  // 以缓存行大小作为步长
-#define ITERATIONS 1000000000
+#define ITERATIONS 10000000
 
 int main() {
     // 分配大数组

@@ -39,13 +39,15 @@
 
 #define BODY(start)						\
   "xor %%r8, %%r8 \n"						\
+  "pxor %%xmm1, %%xmm1 \n"					\
   "LOOP_START%=: \n"						\
   "lea (%[" #start "], %%r8), %%r9 \n"				\
-  "movdqa  (%%r9), %%xmm0 \n"					\
+  "movdqa  %%xmm1, (%%r9) \n"					\
   "add $" STR(MOVE_SIZE) ", %%r8 \n"				\
   "cmp $" STR(FENCE_BOUND) ",%%r8\n"				\
-  "jl LOOP_START%= \n"						\
-  "mfence \n"						\
+   "clflush (%%r9) \n"					\
+  "mfence \n" \
+  "jl LOOP_START%= \n"
 
 
 int main(int argc, char **argv) {
@@ -87,18 +89,18 @@ int main(int argc, char **argv) {
     asm volatile(
 		 "mov %[buf], %%rsi\n"
 		 "clflush (%%rsi)\n"
-          "mfence\n"
 		 :
 		 : [buf] "r" (addr)
 		 : "rsi");
     addr += CACHELINE_SIZE;
   }
 
+  asm volatile ("mfence\n" :::);
 
   clock_gettime(CLOCK_MONOTONIC, &tstart);
-for (int i=0;i<1e3;i++){
   addr = base;
   while (addr < (base + MAP_SIZE)) {
+    //fprintf (stderr, "addr %p bound %p\n", addr, base + MAP_SIZE);
     asm volatile(
 		 BODY(addr)
 		 :
@@ -113,6 +115,6 @@ for (int i=0;i<1e3;i++){
 
 
   printf("%lu\n", nanos);
-}
   return 0;
 }
+

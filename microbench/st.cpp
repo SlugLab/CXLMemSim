@@ -46,6 +46,7 @@
   "add $" STR(MOVE_SIZE) ", %%r8 \n"				\
   "cmp $" STR(FENCE_BOUND) ",%%r8\n"				\
   "jl LOOP_START%= \n"						\
+  "clflush (%%r9) \n"					\
   "mfence \n"
 
 

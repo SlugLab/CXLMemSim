@@ -16,3 +16,15 @@
 [submodule "lib/bpftime"]
 	path = lib/bpftime
 	url = https://github.com/victoryang00/bpftime
+[submodule "workloads/llama.cpp"]
+	path = workloads/llama.cpp
+	url = https://github.com/ggml-org/llama.cpp
+[submodule "workloads/vsag"]
+	path = workloads/vsag
+	url = https://github.com/antgroup/vsag
+[submodule "workloads/ann-benchmarks"]
+	path = workloads/ann-benchmarks
+	url = https://github.com/erikbern/ann-benchmarks
+[submodule "workloads/YCSB"]
+	path = workloads/YCSB
+	url = https://github.com/brianfrankcooper/YCSB/

@@ -28,6 +28,7 @@
 Helper helper{};
 CXLController *controller;
 Monitors *monitors;
+auto cha_mapping = std::vector{0, 1, 2, 3, 4, 5, 6, 7, 8};
 int main(int argc, char *argv[]) {
     spdlog::cfg::load_env_levels();
     cxxopts::Options options("CXLMemSim", "For simulation of CXL.mem Type 3 on Xeon 6");
@@ -37,7 +38,7 @@ int main(int argc, char *argv[]) {
         "c,cpuset", "The CPUSET for CPU to set affinity on and only run the target process on those CPUs",
         cxxopts::value<std::vector<int>>()->default_value("0"))("d,dramlatency", "The current platform's dram latency",
                                                                 cxxopts::value<double>()->default_value("110"))(
-        "p,pebsperiod", "The pebs sample period", cxxopts::value<int>()->default_value("100"))(
+        "p,pebsperiod", "The pebs sample period", cxxopts::value<int>()->default_value("10"))(
         "m,mode", "Page mode or cacheline mode", cxxopts::value<std::string>()->default_value("p"))(
         "o,topology", "The newick tree input for the CXL memory expander topology",
         cxxopts::value<std::string>()->default_value("(1,(2,3))"))(
@@ -93,7 +94,10 @@ int main(int argc, char *argv[]) {
         mode = PAGE;
     }
 
-    auto *policy = new InterleavePolicy();
+    auto *policy1 = new InterleavePolicy();
+    auto *policy2 = new HeatAwareMigrationPolicy();
+    auto *policy3 = new PagingPolicy();
+    auto *policy4 = new FIFOPolicy();
 
     uint64_t use_cpus = 0;
     cpu_set_t use_cpuset;
@@ -117,7 +121,7 @@ int main(int argc, char *argv[]) {
     for (auto const &[idx, value] : capacity | std::views::enumerate) {
         if (idx == 0) {
             SPDLOG_DEBUG("local_memory_region capacity:{}", value);
-            controller = new CXLController(policy, capacity[0], mode, 100);
+            controller = new CXLController({policy1, policy2, policy3, policy4}, capacity[0], mode, 100, dramlatency);
         } else {
             SPDLOG_DEBUG("memory_region:{}", (idx - 1) + 1);
             SPDLOG_DEBUG(" capacity:{}", capacity[(idx - 1) + 1]);
@@ -126,13 +130,11 @@ int main(int argc, char *argv[]) {
             SPDLOG_DEBUG(" read_bandwidth:{}", bandwidth[(idx - 1) * 2]);
             SPDLOG_DEBUG(" write_bandwidth:{}", bandwidth[(idx - 1) * 2 + 1]);
             auto *ep = new CXLMemExpander(bandwidth[(idx - 1) * 2], bandwidth[(idx - 1) * 2 + 1],
-                                          latency[(idx - 1) * 2], latency[(idx - 1) * 2 + 1], (idx - 1), capacity[idx]);
+                                          latency[(idx - 1) * 2], latency[(idx - 1) * 2 + 1], idx - 1, capacity[idx]);
             controller->insert_end_point(ep);
         }
     }
     controller->construct_topo(topology);
-    SPDLOG_INFO("{}", controller->output());
-
     /** Hove been got by socket if it's not main thread and synchro */
     SPDLOG_DEBUG("cpu_freq:{}", frequency);
     SPDLOG_DEBUG("num_of_cha:{}", ncha);
@@ -238,7 +240,7 @@ int main(int argc, char *argv[]) {
                 clock_gettime(CLOCK_MONOTONIC, &start_ts);
                 SPDLOG_DEBUG("[{}:{}:{}] start_ts: {}.{}", i, mon.tgid, mon.tid, start_ts.tv_sec, start_ts.tv_nsec);
                 /** Read CHA values */
-                std::vector<uint64_t> cha_vec, cpu_vec{};
+                std::vector<uint64_t> cha_vec{0, 0, 0, 0}, cpu_vec{0, 0, 0, 0};
 
                 /*** read CPU params */
                 uint64_t wb_cnt = 0;
@@ -249,28 +251,24 @@ int main(int argc, char *argv[]) {
                 if (mon.bpftime_ctx->read(controller, &mon.after->bpftime) < 0) {
                     SPDLOG_ERROR("[{}:{}:{}] Warning: Failed BPFTIMERUNTIME read", i, mon.tgid, mon.tid);
                 }
-                /* read LBR sample */
-                if (mon.lbr_ctx->read(controller, &mon.after->lbr) < 0) {
-                    SPDLOG_ERROR("[{}:{}:{}] Warning: Failed LBR read", i, mon.tgid, mon.tid);
-                }
                 /* read PEBS sample */
                 if (mon.pebs_ctx->read(controller, &mon.after->pebs) < 0) {
                     SPDLOG_ERROR("[{}:{}:{}] Warning: Failed PEBS read", i, mon.tgid, mon.tid);
                 }
+                /* read LBR sample */
+                if (mon.lbr_ctx->read(controller, &mon.after->lbr) < 0) {
+                    SPDLOG_ERROR("[{}:{}:{}] Warning: Failed LBR read", i, mon.tgid, mon.tid);
+                }
                 target_llcmiss = mon.after->pebs.total - mon.before->pebs.total;
 
-                for (int j = 0; j < helper.used_cpu.size(); j++) {
-                    for (auto const &[idx, value] : pmu.cpus | std::views::enumerate) {
-                        value.read_cpu_elems(&mon.after->cpus[j]);
-                        cpu_vec.emplace_back(mon.after->cpus[j].cpu[idx] - mon.before->cpus[j].cpu[idx]);
-                    }
+                for (auto const &[idx, value] : pmu.cpus | std::views::enumerate) {
+                    value.read_cpu_elems(&mon.after->cpus[i]);
+                    cpu_vec[idx] = mon.after->cpus[i].cpu[idx] - mon.before->cpus[i].cpu[idx];
                 }
 
-                for (int j = 0; j < helper.used_cha.size(); j++) {
-                    for (auto const &[idx, value] : pmu.chas | std::views::enumerate) {
-                        value.read_cha_elems(&mon.after->chas[j]);
-                        cha_vec.emplace_back(mon.after->chas[j].cha[idx] - mon.before->chas[j].cha[idx]);
-                    }
+                for (auto const &[idx, value] : pmu.chas | std::views::enumerate) {
+                    value.read_cha_elems(&mon.after->chas[cha_mapping[i]]);
+                    cha_vec[idx] = mon.after->chas[cha_mapping[i]].cha[idx] - mon.before->chas[cha_mapping[i]].cha[idx];
                 }
                 target_llchits = cpu_vec[0];
                 wb_cnt = cpu_vec[1];
@@ -278,49 +276,12 @@ int main(int argc, char *argv[]) {
 
                 clflush = cha_vec[0];
                 target_l2miss = cha_vec[2];
-                SPDLOG_DEBUG("[{}:{}:{}] LLC_WB = {}", i, mon.tgid, mon.tid, wb_cnt);
-
-                uint64_t llcmiss_wb = 0;
-                // To estimate the number of the writeback-involving LLC
-                // misses of the CPU core (llcmiss_wb), the total number of
-                // writebacks observed in L3 (wb_cnt) is devided
-                // proportionally, according to the number of the ratio of
-                // the LLC misses of the CPU core (target_llcmiss) to that
-                // of the LLC misses of all the CPU cores and the
-                // prefetchers (cpus_dram_rds).
-                llcmiss_wb = wb_cnt * std::lround(((double)target_llcmiss) / ((double)read_config));
-                uint64_t llcmiss_ro = 0;
-                if (target_llcmiss < llcmiss_wb) { // tunning
-                    SPDLOG_ERROR("[{}:{}:{}] clflush {}, llcmiss_wb {}, target_llcmiss {}", i, mon.tgid, mon.tid,
-                                 clflush, llcmiss_wb, target_llcmiss);
-                    llcmiss_wb = target_llcmiss;
-                    llcmiss_ro = 0;
-                } else {
-                    llcmiss_ro = target_llcmiss - llcmiss_wb;
-                }
-                SPDLOG_DEBUG("[{}:{}:{}]llcmiss_wb={}, llcmiss_ro={}", i, mon.tgid, mon.tid, llcmiss_wb, llcmiss_ro);
-
-                uint64_t emul_delay = 0;
+                uint64_t emul_delay = (controller->latency_lat + controller->bandwidth_lat) * 1000000;
 
                 SPDLOG_DEBUG("[{}:{}:{}] pebs: total={}, ", i, mon.tgid, mon.tid, mon.after->pebs.total);
 
                 /** TODO: calculate latency construct the passing value and use interleaving policy and counter to
                  * get the sample_prop */
-                auto all_access = controller->get_all_access();
-                LatencyPass lat_pass = {
-                    .all_access = all_access,
-                    .dramlatency = dramlatency,
-                    .readonly = llcmiss_ro,
-                    .writeback = llcmiss_wb,
-                };
-                BandwidthPass bw_pass = {
-                    .all_access = all_access,
-                    .read_config = read_config,
-                    .write_config = read_config,
-                };
-                emul_delay += std::lround(controller->calculate_latency(lat_pass));
-                emul_delay += controller->calculate_bandwidth(bw_pass);
-                emul_delay += std::get<0>(controller->calculate_congestion());
 
                 mon.before->pebs.total = mon.after->pebs.total;
                 mon.before->lbr.total = mon.after->lbr.total;
@@ -353,6 +314,8 @@ int main(int argc, char *argv[]) {
                     SPDLOG_DEBUG("{}:{}", new_wanted.tv_sec, new_wanted.tv_nsec);
                     SPDLOG_DEBUG("{}", *monitors);
                 }
+                controller->latency_lat = 0;
+                controller->bandwidth_lat = 0;
             }
 
         } // End for-loop for all target processes

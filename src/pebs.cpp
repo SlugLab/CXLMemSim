@@ -24,7 +24,7 @@ struct perf_sample {
 
 PEBS::PEBS(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_period) {
     // Configure perf_event_attr struct
-    struct perf_event_attr pe = {
+    perf_event_attr pe = {
         .type = PERF_TYPE_RAW,
         .size = sizeof(struct perf_event_attr),
         .config = 0x20d1, // mem_load_retired.l3_miss
@@ -55,9 +55,12 @@ PEBS::PEBS(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_p
         throw;
     }
 
-    this->start();
+    if (this->start() < 0) {
+        perror("start");
+        throw;
+    }
 }
-int PEBS::read(CXLController *controller, struct PEBSElem *elem) {
+int PEBS::read(CXLController *controller, PEBSElem *elem) {
     if (this->fd < 0) {
         return 0;
     }
@@ -69,13 +72,13 @@ int PEBS::read(CXLController *controller, struct PEBSElem *elem) {
     perf_event_header *header;
     perf_sample *data;
     uint64_t last_head;
-    char *dp = ((char *)mp) + PAGE_SIZE;
+    char *dp = (char *)mp + PAGE_SIZE;
 
     do {
         this->seq = mp->lock; // explicit copy
         barrier();
         last_head = mp->data_head;
-        while ((uint64_t)this->rdlen < last_head) {
+        while (this->rdlen < last_head) {
             header = reinterpret_cast<perf_event_header *>(dp + this->rdlen % DATA_SIZE);
 
             switch (header->type) {
@@ -94,7 +97,7 @@ int PEBS::read(CXLController *controller, struct PEBSElem *elem) {
                     SPDLOG_TRACE("pid:{} tid:{} time:{} addr:{} phys_addr:{} llc_miss:{} timestamp={}\n", data->pid,
                                  data->tid, data->time_enabled, data->addr, data->phys_addr, data->value,
                                  data->timestamp);
-                    controller->insert(data->timestamp, data->phys_addr, data->addr, 0);
+                    controller->insert(data->timestamp, data->tid, data->phys_addr, data->addr, data->value);
                     elem->total++;
                     elem->llcmiss = data->value; // this is the number of llc miss
                 }
@@ -144,7 +147,9 @@ int PEBS::stop() const {
     return 0;
 }
 PEBS::~PEBS() {
-    this->stop();
+    if (this->stop() < 0) {
+        SPDLOG_ERROR("failed to stop PEBS");
+    }
 
     if (this->fd < 0) {
         return;

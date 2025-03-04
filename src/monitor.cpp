@@ -54,8 +54,7 @@ Monitor *Monitors::get_mon(const int tgid, const int tid) {
     }
     return new Monitor();
 }
-int Monitors::enable(const uint32_t tgid, const uint32_t tid, bool is_process, uint64_t pebs_sample_period,
-                     const int32_t tnum) {
+int Monitors::enable(uint32_t tgid, uint32_t tid, bool is_process, uint64_t pebs_sample_period, int32_t tnum) {
     int target = -1;
 
     for (int i = 0; i < tnum; i++) {
@@ -105,7 +104,7 @@ int Monitors::enable(const uint32_t tgid, const uint32_t tid, bool is_process, u
         mon[target].pebs_ctx = new PEBS(tgid, pebs_sample_period);
         SPDLOG_DEBUG("{}Process [tgid={}, tid={}]: enable to pebs.", target, mon[target].tgid,
                      mon[target].tid); // multiple tid multiple pid
-        mon[target].lbr_ctx = new LBR(tgid, 1);
+        mon[target].lbr_ctx = new LBR(tgid, 1000);
     }
     SPDLOG_INFO("pid {}[tgid={}, tid={}] monitoring start", target, mon[target].tgid, mon[target].tid);
 
@@ -208,13 +207,14 @@ int Monitors::terminate(const uint32_t tgid, const uint32_t tid, const int32_t t
         double emulated_time =
             (double)(mon[target].end_exec_ts.tv_sec - mon[target].start_exec_ts.tv_sec) +
             (double)(mon[target].end_exec_ts.tv_nsec - mon[target].start_exec_ts.tv_nsec) / 1000000000;
-        SPDLOG_INFO("emulated time ={}", emulated_time);
-        SPDLOG_INFO("total delay   ={}", mon[target].total_delay);
-
-        SPDLOG_INFO("PEBS sample total {}", mon[target].before->pebs.total);
-        SPDLOG_INFO("LBR sample total {}", mon[target].before->lbr.total);
-        SPDLOG_INFO("bpftime sample total {}", mon[target].before->bpftime.total);
-        std::cout << std::format("{}",*controller) << "\n";
+        std::cout << std::format("emulated time ={}", emulated_time) << std::endl;
+        std::cout << std::format("total delay   ={}", mon[target].total_delay) << std::endl;
+        std::cout << std::format("PEBS sample total {} {}", mon[target].before->pebs.total,
+                                 mon[target].after->pebs.llcmiss)
+                  << std::endl;
+        std::cout << std::format("LBR sample total {}", mon[target].before->lbr.total) << std::endl;
+        std::cout << std::format("bpftime sample total {}", mon[target].before->bpftime.total) << std::endl;
+        std::cout << std::format("{}", *controller) << std::endl;
         break;
     }
 
@@ -336,7 +336,6 @@ timespec operator*(const timespec &lhs, const timespec &rhs) {
 void Monitor::wait(std::vector<Monitor> *mons, int target) {
     auto &mon = (*mons)[target];
     uint64_t diff_nsec, target_nsec;
-    SPDLOG_ERROR("[{}:{}][OFF] total:", mon.tgid, mon.tid);
     timespec start_ts{}, end_ts{};
     timespec sleep_target{};
     // timespec wanted_delay;

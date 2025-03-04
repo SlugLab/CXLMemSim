@@ -26,7 +26,6 @@
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
-#include <thread>
 #include <tuple>
 #include <unistd.h>
 

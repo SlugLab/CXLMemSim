@@ -19,166 +19,174 @@ CXLMemExpander::CXLMemExpander(int read_bw, int write_bw, int read_lat, int writ
     this->latency.read = read_lat;
     this->latency.write = write_lat;
 }
-double CXLMemExpander::calculate_latency(LatencyPass lat) {
-    auto all_access = lat.all_access;
-    auto dramlatency = lat.dramlatency;
-    auto ma_ro = lat.readonly;
-    auto ma_wb = lat.writeback;
-    auto all_read = std::get<0>(all_access);
-    auto all_write = std::get<1>(all_access);
-    double read_sample = 0.;
-    if (all_read != 0) {
-        read_sample = (double)last_read / all_read;
+// 修改CXLMemExpander的calculate_latency函数
+double CXLMemExpander::calculate_latency(const std::vector<std::tuple<uint64_t, uint64_t>> &elem, double dramlatency) {
+    if (elem.empty()) {
+        return 0.0;
     }
-    double write_sample = 0.;
-    if (all_write != 0) {
-        write_sample = (double)last_write / all_write;
-    }
-    this->last_latency =
-        ma_ro * read_sample * (latency.read - dramlatency) + ma_wb * write_sample * (latency.write - dramlatency);
-    return this->last_latency;
-}
-double CXLMemExpander::calculate_bandwidth(BandwidthPass bw) {
-    // Iterate the map within the last 20ms
-    auto all_access = bw.all_access;
-    auto read_config = bw.read_config;
-    auto write_config = bw.write_config;
 
-    double res = 0.0;
-    auto all_read = std::get<0>(all_access);
-    auto all_write = std::get<1>(all_access);
-    double read_sample = 0.;
-    if (all_read != 0) {
-        read_sample = ((double)last_read / all_read);
+    // 首先更新地址缓存以确保其最新
+    update_address_cache();
+
+    double total_latency = 0.0;
+    size_t access_count = 0;
+
+    for (const auto &[timestamp, addr] : elem) {
+        // 使用哈希表检查是否是本endpoint的访问
+        bool is_local_access = is_address_local(addr);
+
+        if (!is_local_access)
+            continue;
+
+        // 基础延迟计算
+        double current_latency = (this->latency.read + this->latency.write) / 2.0;
+
+        // 考虑DRAM延迟影响
+        current_latency += dramlatency * 0.1;
+
+        total_latency += current_latency;
+        access_count++;
     }
-    double write_sample = 0.; // based on time series
-    if (all_write != 0) {
-        write_sample = ((double)last_write / all_write);
+
+    return access_count > 0 ? total_latency / access_count : 0.0;
+}
+
+double CXLMemExpander::calculate_bandwidth(const std::vector<std::tuple<uint64_t, uint64_t>> &elem) {
+    if (elem.empty()) {
+        return 0.0;
     }
-    if (read_sample * 64 * read_config / 1024 / 1024 / (this->epoch + this->last_latency) * 1000 >
-        bandwidth.read) {
-        res +=
-            read_sample * 64 * read_config / 1024 / 1024 / (this->epoch + this->last_latency) * 1000 / bandwidth.read -
-            this->epoch * 0.001; // TODO: read
+
+    // 获取20ms时间窗口内的访问
+    uint64_t current_time = std::get<0>(elem.back());
+    uint64_t window_start = current_time - 20000000; // 20ms = 20,000,000ns
+
+    // 计算时间窗口内的访问次数
+    size_t access_count = 0;
+    uint64_t total_data = 0;
+    constexpr uint64_t CACHE_LINE_SIZE = 64; // 假设缓存行大小为64字节
+
+    for (const auto &[timestamp, addr] : elem) {
+        if (timestamp >= window_start) {
+            access_count++;
+            total_data += CACHE_LINE_SIZE; // TODO other than cacheline granularity
+        }
     }
-    if (write_sample * 64 * write_config / 1024 / 1024 / (this->epoch + this->last_latency) * 1000 >
-        bandwidth.write) {
-        res += write_sample * 64 * write_config / 1024 / 1024 / (this->epoch + this->last_latency) * 1000 /
-                bandwidth.write -
-               this->epoch * 0.001; // TODO: wb+clflush
-    }
-    return res;
+
+    // 计算带宽 (GB/s)
+    // 带宽 = (总数据量 / 时间窗口)
+    double time_window_seconds = 0.02; // 20ms = 0.02s
+    double bandwidth_gbps = (total_data / time_window_seconds) / (1024.0 * 1024.0 * 1024.0);
+
+    // 确保带宽不超过设备限制
+    double max_bandwidth = this->bandwidth.read + this->bandwidth.write;
+    return std::min(bandwidth_gbps- max_bandwidth, 0.0);
 }
 void CXLMemExpander::delete_entry(uint64_t addr, uint64_t length) {
-    for (auto it1 = va_pa_map.begin(); it1 != va_pa_map.end();) {
-        if (it1->second >= addr && it1->second <= addr + length) {
-            for (auto it = occupation.begin(); it != occupation.end();) {
-                if (it->second == addr) {
-                    it = occupation.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-            it1 = va_pa_map.erase(it1);
-            this->counter.inc_load();
+    bool modified = false;
+
+    // 使用引用来确保可以修改 occupation 中的元素
+    for (auto& occ : occupation) {
+        if (occ.address == addr) {
+            occ.access_count++;
+            occ.timestamp = last_timestamp;
+            modified = true;
         }
     }
+
     // kernel mode access
-    for (auto it = occupation.begin(); it != occupation.end();) {
-        if (it->second >= addr && it->second <= addr + length) {
-            if (it->second == addr) {
-                it = occupation.erase(it);
-            } else {
-                ++it;
+    this->counter.inc_load();  // 只调用一次而不是每次迭代
+    for (auto& occ : occupation) {
+        if (occ.address >= addr && occ.address <= addr + length) {
+            if (occ.address == addr) {
+                continue;  // 已经在上面处理过
             }
+            occ.access_count++;
+            occ.timestamp = last_timestamp;
+            modified = true;
         }
-        this->counter.inc_load();
+    }
+
+    // 如果有修改，标记缓存为无效
+    if (modified) {
+        invalidate_cache();
     }
 }
 
-int CXLMemExpander::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
-
+int CXLMemExpander::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint64_t virt_addr, int index) {
     if (index == this->id) {
-        last_timestamp = last_timestamp > timestamp ? last_timestamp : timestamp; // Update the last timestamp
-        // Check if the address is already in the map)
+        last_timestamp = last_timestamp > timestamp ? last_timestamp : timestamp;
+
         if (phys_addr != 0) {
-            if (va_pa_map.find(virt_addr) == va_pa_map.end()) {
-                this->va_pa_map.emplace(virt_addr, phys_addr);
-            } else {
-                this->va_pa_map[virt_addr] = phys_addr;
-                SPDLOG_DEBUG("virt:{} phys:{} conflict insertion detected\n", virt_addr, phys_addr);
-            }
-            for (auto it = this->occupation.cbegin(); it != this->occupation.cend(); it++) {
-                if ((*it).second == phys_addr) {
-                    this->occupation.erase(it);
-                    this->occupation.emplace(timestamp, phys_addr);
-                    this->counter.inc_load();
-                    return 2;
+            // 使用哈希表快速检查地址是否已存在
+            bool address_exists = address_cache.find(phys_addr) != address_cache.end();
+
+            if (address_exists) {
+                // 地址已存在，找到并更新
+                for (auto it = this->occupation.cbegin(); it != this->occupation.cend(); it++) {
+                    if (it->address == phys_addr) {
+                        this->occupation.erase(it);
+                        this->occupation.emplace_back(timestamp, phys_addr, 0);
+                        this->counter.inc_load();
+
+                        // 不需要更新缓存，地址没变
+                        return 2;
+                    }
                 }
             }
-            this->occupation.emplace(timestamp, phys_addr);
+
+            // 地址不存在，添加新条目
+            this->occupation.emplace_back(timestamp, phys_addr, 0);
+
+            // 更新地址缓存
+            address_cache.insert(phys_addr);
+
             this->counter.inc_store();
             return 1;
-        } // kernel mode access
-        for (auto it = this->occupation.cbegin(); it != this->occupation.cend(); it++) {
-            if ((*it).second == virt_addr) {
-                this->occupation.erase(it);
-                this->occupation.emplace(timestamp, virt_addr);
-                this->counter.inc_load();
-                return 2;
-            }
         }
-
-        this->occupation.emplace(timestamp, virt_addr);
         this->counter.inc_store();
         return 1;
     }
     return 0;
 }
-std::string CXLMemExpander::output() { return std::format("CXLMemExpander {}", this->id); }
-std::tuple<int, int> CXLMemExpander::get_all_access() {
-    this->last_read = this->counter.load - this->last_counter.load;
-    this->last_write = this->counter.store - this->last_counter.store;
+std::vector<std::tuple<uint64_t, uint64_t>> CXLMemExpander::get_access(uint64_t timestamp) {
+    // 原子操作更新计数器
     last_counter = CXLMemExpanderEvent(counter);
-    return std::make_tuple(this->last_read, this->last_write);
+
+    // 使用互斥锁保护对共享资源的访问
+
+    // 创建一个本地副本，减少持锁时间
+    std::vector<std::tuple<uint64_t, uint64_t>> result;
+    for (const auto &it : occupation) {
+        // 如果 occupation 中的元素是指针，需要先检查指针有效性
+        if (it.timestamp > timestamp - 100000) {
+            result.emplace_back(it.timestamp, it.address);
+        }
+    }
+    return result;
 }
 void CXLMemExpander::set_epoch(int epoch) { this->epoch = epoch; }
 void CXLMemExpander::free_stats(double size) {
-    std::vector<uint64_t> keys;
-    for (auto &it : this->va_pa_map) {
-        keys.push_back(it.first);
-    }
-    std::shuffle(keys.begin(), keys.end(), std::mt19937(std::random_device()()));
-    for (auto it = keys.begin(); it != keys.end(); ++it) {
-        if (this->va_pa_map[*it] > size) {
-            this->va_pa_map.erase(*it);
-            this->occupation.erase(*it);
-            this->counter.inc_load();
+    bool modified = false;
+
+    // 随机删除
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(0, 1);
+    for (auto it = occupation.begin(); it != occupation.end();) {
+        if (dis(gen) == 1) {
+            it = occupation.erase(it);
+            modified = true;
+        } else {
+            ++it;
         }
+    }
+
+    // 如果有修改，重建地址缓存
+    if (modified) {
+        invalidate_cache();
     }
 }
 
-std::string CXLSwitch::output() {
-    std::string res = std::format("CXLSwitch {} ", this->id);
-    if (!this->switches.empty()) {
-        res += "(";
-        res += this->switches[0]->output();
-        for (size_t i = 1; i < this->switches.size(); ++i) {
-            res += ",";
-            res += this->switches[i]->output();
-        }
-        res += ")";
-    } else if (!this->expanders.empty()) {
-        res += "(";
-        res += this->expanders[0]->output();
-        for (size_t i = 1; i < this->expanders.size(); ++i) {
-            res += ",";
-            res += this->expanders[i]->output();
-        }
-        res += ")";
-    }
-    return res;
-}
 void CXLSwitch::delete_entry(uint64_t addr, uint64_t length) {
     for (auto &expander : this->expanders) {
         expander->delete_entry(addr, length);
@@ -188,17 +196,17 @@ void CXLSwitch::delete_entry(uint64_t addr, uint64_t length) {
     }
 }
 CXLSwitch::CXLSwitch(int id) : id(id) {}
-double CXLSwitch::calculate_latency(LatencyPass elem) {
+double CXLSwitch::calculate_latency(const std::vector<std::tuple<uint64_t, uint64_t>> &elem, double dramlatency) {
     double lat = 0.0;
     for (auto &expander : this->expanders) {
-        lat += expander->calculate_latency(elem);
+        lat += expander->calculate_latency(elem, dramlatency);
     }
     for (auto &switch_ : this->switches) {
-        lat += switch_->calculate_latency(elem);
+        lat += switch_->calculate_latency(elem, dramlatency);
     }
     return lat;
 }
-double CXLSwitch::calculate_bandwidth(BandwidthPass elem) {
+double CXLSwitch::calculate_bandwidth(const std::vector<std::tuple<uint64_t, uint64_t>> &elem) {
     double bw = 0.0;
     for (auto &expander : this->expanders) {
         bw += expander->calculate_bandwidth(elem);
@@ -209,29 +217,68 @@ double CXLSwitch::calculate_bandwidth(BandwidthPass elem) {
     // time series
     return bw;
 }
-int CXLSwitch::insert(uint64_t timestamp, uint64_t tid, struct lbr *lbrs, struct cntr *counters) {
-    // 这里可以根据你的功能逻辑来处理 LBR 的插入信息
-    SPDLOG_DEBUG("CXLSwitch insert lbr for switch id:{}\n", this->id);
+double CXLSwitch::get_endpoint_rob_latency(CXLMemExpander *endpoint,
+                                         const std::vector<std::tuple<uint64_t, uint64_t>> &accesses,
+                                         const thread_info &t_info, double dramlatency) {
+    const auto &rob = t_info.rob;
 
-    // 简单示例: 依次尝试调用下属的 Expander 和 Switch
-    for (auto &expander : this->expanders) {
-        int ret = expander->insert(timestamp, tid, lbrs, counters);
-        if (ret != 0) {
-            // 如果需要，执行相应的 load/store 计数
-            this->counter.inc_load();
-            return ret;
+    // 计算当前endpoint的基础延迟
+    double base_latency = (endpoint->latency.read + endpoint->latency.write) / 2.0;
+
+    // 计算ROB相关指标
+    double llc_miss_ratio = (rob.ins_count > 0) ? static_cast<double>(rob.llcm_count) / rob.ins_count : 0.0;
+
+    // 使用find替代operator[]来访问const map
+    double remote_ratio = 0.0;
+    auto count_0 = rob.m_count.find(0);
+    auto count_1 = rob.m_count.find(1);
+
+    if (count_0 != rob.m_count.end() && count_1 != rob.m_count.end()) {
+        int64_t local_count = count_0->second;
+        int64_t remote_count = count_1->second;
+        if (local_count + remote_count > 0) {
+            remote_ratio = static_cast<double>(remote_count) / (local_count + remote_count);
         }
     }
-    for (auto &sw : this->switches) {
-        int ret = sw->insert(timestamp, tid, lbrs, counters);
-        if (ret != 0) {
-            this->counter.inc_load();
-            return ret;
+
+    // 确保地址缓存是最新的
+    endpoint->update_address_cache();
+
+    double total_latency = 0.0;
+    size_t access_count = 0;
+
+    for (const auto &[timestamp, addr] : accesses) {
+        // 使用哈希表快速检查地址是否属于这个endpoint
+        bool is_endpoint_access = endpoint->is_address_local(addr);
+
+        if (is_endpoint_access)
+            continue;
+
+        double current_latency = base_latency;
+        access_count++;
+
+        // ROB拥塞调整
+        if (rob.ins_count >= ROB_SIZE * 0.8) {
+            double rob_penalty = 1.0 + (llc_miss_ratio * 0.5);
+            current_latency *= rob_penalty;
         }
+
+        // 远程访问影响
+        auto remote_count = rob.m_count.find(1);
+        if (remote_count != rob.m_count.end() && remote_count->second > 0) {
+            current_latency *= (1.0 + remote_ratio * 0.3);
+        }
+
+        // 考虑DRAM延迟
+        current_latency += dramlatency * (remote_ratio + 0.1);
+
+        total_latency += current_latency;
     }
-    return 0; // 未找到合适的处理者
+
+    return access_count > 0 ? total_latency / access_count : 0.0;
 }
-std::tuple<double, std::vector<uint64_t>> CXLSwitch::calculate_congestion() {
+
+std::tuple<double, std::vector<uint64_t>> CXLSwitch::calculate_congestion() {//TODO reader writer congestion
     double latency = 0.0;
     std::vector<uint64_t> congestion;
     for (auto &switch_ : this->switches) {
@@ -242,8 +289,8 @@ std::tuple<double, std::vector<uint64_t>> CXLSwitch::calculate_congestion() {
     for (auto &expander : this->expanders) {
         for (auto &it : expander->occupation) {
             // every epoch
-            if (it.first > this->last_timestamp - epoch * 1e3) {
-                congestion.push_back(it.first);
+            if (it.timestamp > this->last_timestamp - epoch * 1000) {
+                congestion.push_back(it.timestamp);
             }
         }
     }
@@ -260,19 +307,28 @@ std::tuple<double, std::vector<uint64_t>> CXLSwitch::calculate_congestion() {
     }
     return std::make_tuple(latency, congestion);
 }
-std::tuple<int, int> CXLSwitch::get_all_access() {
-    int read = 0, write = 0;
-    for (auto &expander : this->expanders) {
-        auto [r, w] = expander->get_all_access();
-        read += r;
-        write += w;
+std::vector<std::tuple<uint64_t, uint64_t>> CXLSwitch::get_access(uint64_t timestamp) {
+    std::vector<std::tuple<uint64_t, uint64_t>> res;
+    size_t total_size = 0;
+    for (const auto &expander : expanders) {
+        total_size += expander->get_access(timestamp).size();
     }
-    for (auto &switch_ : this->switches) {
-        auto [r, w] = switch_->get_all_access();
-        read += r;
-        write += w;
+    for (const auto &switch_ : switches) {
+        total_size += switch_->get_access(timestamp).size();
     }
-    return std::make_tuple(read, write);
+    res.reserve(total_size);
+
+    // 直接使用 insert 合并结果
+    for (auto &expander : expanders) {
+        auto tmp = expander->get_access(timestamp);
+        res.insert(res.end(), tmp.begin(), tmp.end());
+    }
+    for (auto &switch_ : switches) {
+        auto tmp = switch_->get_access(timestamp);
+        res.insert(res.end(), tmp.begin(), tmp.end());
+    }
+
+    return res;
 }
 void CXLSwitch::set_epoch(int epoch) { this->epoch = epoch; }
 void CXLSwitch::free_stats(double size) {
@@ -282,25 +338,14 @@ void CXLSwitch::free_stats(double size) {
     }
 }
 
-int CXLMemExpander::insert(uint64_t timestamp, uint64_t tid, struct lbr *lbrs, struct cntr *counters) {
-    // 这里可以根据你的功能逻辑来处理 LBR 的插入信息
-    SPDLOG_DEBUG("CXLMemExpander insert lbr for expander id:{}\n", this->id);
-
-    // 简单示例: 统计一次 load 或 store
-    this->counter.inc_load();
-    // 或者根据需要添加更多逻辑
-
-    return 1; // 返回非 0，表明已被当前 Expander 处理
-}
-
-int CXLSwitch::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr, int index) {
+int CXLSwitch::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint64_t virt_addr, int index) {
     // 简单示例：依次调用下属的 expander 和 switch
     SPDLOG_DEBUG("CXLSwitch insert phys_addr={}, virt_addr={}, index={} for switch id:{}", phys_addr, virt_addr, index,
                  this->id);
 
     for (auto &expander : this->expanders) {
         // 在每个 expander 上尝试插入
-        int ret = expander->insert(timestamp, phys_addr, virt_addr, index);
+        int ret = expander->insert(timestamp, tid, phys_addr, virt_addr, index);
         if (ret == 1) {
             this->counter.inc_store();
             return 1;
@@ -312,7 +357,7 @@ int CXLSwitch::insert(uint64_t timestamp, uint64_t phys_addr, uint64_t virt_addr
     }
     // 如果没有合适的 expander，就尝试下属的 switch
     for (auto &sw : this->switches) {
-        int ret = sw->insert(timestamp, phys_addr, virt_addr, index);
+        int ret = sw->insert(timestamp, tid, phys_addr, virt_addr, index);
         if (ret == 1) {
             this->counter.inc_store();
             return 1;

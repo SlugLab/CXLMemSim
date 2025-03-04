@@ -34,9 +34,10 @@ enum {
     CPU_MDL_SKX = 85,
     CPU_MDL_SPR = 143,
     CPU_MDL_ADL = 151,
+    CPU_MDL_GNR = 173,
+    CPU_MDL_SRF = 175,
     CPU_MDL_LNL = 189,
     CPU_MDL_ARL = 198,
-    CPU_MDL_SRF = 201,
     CPU_MDL_END = 0x0ffff
 };
 class Incore;
@@ -61,19 +62,6 @@ struct EmuCXLLatency {
 struct EmuCXLBandwidth {
     double read;
     double write;
-};
-
-struct BandwidthPass {
-    std::tuple<int, int> all_access;
-    uint64_t read_config;
-    uint64_t write_config;
-};
-
-struct LatencyPass {
-    std::tuple<int, int> all_access;
-    double dramlatency;
-    uint64_t readonly;
-    uint64_t writeback;
 };
 
 struct CHAElem {

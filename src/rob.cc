@@ -1,78 +1,18 @@
 #include "rob.h"
 #include "policy.h"
+#include <atomic>
 #include <cxxopts.hpp>
 #include <fstream>
+#include <future>
 #include <iostream>
+#include <mutex>
+#include <queue>
 #include <ranges>
 #include <spdlog/cfg/env.h>
 #include <sstream>
+#include <thread>
+#include <vector>
 
-// 发射指令到ROB
-bool Rob::issue(const InstructionGroup &ins) {
-    if (queue_.size() >= maxSize_) {
-        stallCount_++;
-        return false; // ROB已满,停顿
-    }
-
-    // 将指令加入ROB尾部
-    queue_.push_back(ins);
-
-    // 对于内存访问指令,通知控制器
-    if (ins.address != 0) {
-        controller_->insert(ins.retireTimestamp, 0, ins.address, 0);
-    }
-
-    return true;
-}
-
-// 检查指令是否可以提交
-bool Rob::canRetire(const InstructionGroup &ins) {
-    if (ins.address == 0) {
-        return true; // 非内存指令可以直接提交
-    }
-
-    // 检查内存访问是否完成
-    if (cur_latency == 0) {
-        auto allAccess = controller_->get_all_access();
-        cur_latency = controller_->calculate_latency(LatencyPass{allAccess, 80, 1, 1});
-    }
-    // SPDLOG_INFO("{}",cur_latency);
-    if (currentCycle_ - ins.cycleCount >= cur_latency) {
-        cur_latency = 0;
-        return true;
-    }
-    return false;
-}
-
-// 提交最老的指令
-void Rob::retire() {
-    if (queue_.empty()) {
-        return;
-    }
-
-    auto &oldestIns = queue_.front();
-    if (!canRetire(oldestIns)) {
-        stallCount_++; // 无法提交,增加停顿
-        return;
-    }
-
-    // 计算这条指令的实际延迟
-    if (oldestIns.address != 0) {
-        auto allAccess = controller_->get_all_access();
-        uint64_t latency = controller_->calculate_latency(LatencyPass{allAccess, 80, 1, 1}); // also delete the latency
-        totalLatency_ += latency;
-    }
-
-    // 提交指令
-    queue_.pop_front();
-}
-
-// 时钟周期推进
-void Rob::tick() {
-    currentCycle_++;
-    // 尝试提交指令
-    retire();
-}
 Helper helper{};
 CXLController *controller;
 Monitors *monitors;
@@ -189,6 +129,86 @@ InstructionGroup parseGroup(const std::vector<std::string> &group) {
     }
     return ig;
 }
+void parseInParallel(std::ifstream &file, std::vector<InstructionGroup> &instructions) {
+    std::mutex queueMutex;
+    std::condition_variable cv;
+    std::queue<std::vector<std::string>> groupsQueue;
+    std::atomic<bool> done{false};
+    std::vector<std::string> groupLines;
+
+    // 创建解析线程池
+    const int numThreads = 4;
+    std::vector<std::thread> parseThreads;
+    std::mutex resultsMutex;
+
+    // 消费者线程函数
+    auto parseWorker = [&]() {
+        while (true) {
+            std::vector<std::string> group;
+            {
+                std::unique_lock<std::mutex> lock(queueMutex);
+                cv.wait(lock, [&]() { return !groupsQueue.empty() || done; });
+                if (groupsQueue.empty() && done)
+                    break;
+                group = std::move(groupsQueue.front());
+                groupsQueue.pop();
+            }
+
+            auto result = parseGroup(group);
+            if (result.retireTimestamp != 0) {
+                std::lock_guard<std::mutex> lock(resultsMutex);
+                instructions.emplace_back(std::move(result));
+            }
+        }
+    };
+
+    // 启动消费者线程
+    for (int i = 0; i < numThreads; ++i) {
+        parseThreads.emplace_back(parseWorker);
+    }
+
+    // 生产者部分 - 主线程
+    for (const std::string &line : std::ranges::istream_view<std::string>(file)) {
+        if (line.rfind("O3PipeView:fetch:", 0) == 0) {
+            if (!groupLines.empty()) {
+                {
+                    std::lock_guard<std::mutex> lock(queueMutex);
+                    groupsQueue.push(groupLines);
+                }
+                cv.notify_one();
+                groupLines.clear();
+            }
+        }
+        if (!line.empty()) {
+            groupLines.push_back(line);
+        }
+    }
+
+    // 处理最后一组
+    if (!groupLines.empty()) {
+        {
+            std::lock_guard<std::mutex> lock(queueMutex);
+            groupsQueue.push(std::move(groupLines));
+        }
+        cv.notify_one();
+    }
+
+    // 通知所有消费者线程完成
+    {
+        std::lock_guard<std::mutex> lock(queueMutex);
+        done = true;
+    }
+    cv.notify_all();
+
+    // 等待所有线程完成
+    for (auto &thread : parseThreads) {
+        thread.join();
+    }
+
+    // 排序结果
+    std::sort(instructions.begin(), instructions.end(),
+              [](InstructionGroup &a, InstructionGroup &b) { return a.cycleCount < b.cycleCount; });
+}
 
 int main(int argc, char *argv[]) {
     spdlog::cfg::load_env_levels();
@@ -198,6 +218,7 @@ int main(int argc, char *argv[]) {
         "h,help", "Help for CXLMemSimRoB", cxxopts::value<bool>()->default_value("false"))(
         "o,topology", "The newick tree input for the CXL memory expander topology",
         cxxopts::value<std::string>()->default_value("(1,(2,3))"))(
+        "d,dramlatency", "The current platform's dram latency", cxxopts::value<double>()->default_value("110"))(
         "e,capacity", "The capacity vector of the CXL memory expander with the first local",
         cxxopts::value<std::vector<int>>()->default_value("0,20,20,20"))(
         "m,mode", "Page mode or cacheline mode", cxxopts::value<std::string>()->default_value("cacheline"))(
@@ -217,6 +238,7 @@ int main(int argc, char *argv[]) {
     auto latency = result["latency"].as<std::vector<int>>();
     auto bandwidth = result["bandwidth"].as<std::vector<int>>();
     auto topology = result["topology"].as<std::string>();
+    auto dramlatency = result["dramlatency"].as<double>();
     page_type mode;
     if (result["mode"].as<std::string>() == "hugepage_2M") {
         mode = HUGEPAGE_2M;
@@ -227,12 +249,15 @@ int main(int argc, char *argv[]) {
     } else {
         mode = PAGE;
     }
-    auto *policy = new InterleavePolicy();
+    auto *policy1 = new InterleavePolicy();
+    auto *policy2 = new HeatAwareMigrationPolicy();
+    auto *policy3 = new HugePagePolicy();
+    auto *policy4 = new FIFOPolicy();
 
     for (auto const &[idx, value] : capacity | std::views::enumerate) {
         if (idx == 0) {
             SPDLOG_DEBUG("local_memory_region capacity:{}", value);
-            controller = new CXLController(policy, capacity[0], mode, 100);
+            controller = new CXLController({policy1, policy2, policy3, policy4}, capacity[0], mode, 100, dramlatency);
         } else {
             SPDLOG_DEBUG("memory_region:{}", (idx - 1) + 1);
             SPDLOG_DEBUG(" capacity:{}", capacity[(idx - 1) + 1]);
@@ -246,7 +271,6 @@ int main(int argc, char *argv[]) {
         }
     }
     controller->construct_topo(topology);
-    SPDLOG_INFO("{}", controller->output());
     Rob rob(controller, 512);
 
     // read from file
@@ -255,41 +279,13 @@ int main(int argc, char *argv[]) {
         std::cerr << "Failed to open " << target << std::endl;
         return 1;
     }
-
-    std::vector<std::string> groupLines;
+    // std::vector<std::string> groupLines;
     std::vector<InstructionGroup> instructions;
-
-    // Read the file line by line using std::ranges::istream_view.
-    for (const std::string &line : std::ranges::istream_view<std::string>(file)) {
-        // If the line starts with "O3PipeView:fetch:" then it's the start of a new group.
-        if (line.rfind("O3PipeView:fetch:", 0) == 0) {
-            // If we have an existing group, process it.
-            if (!groupLines.empty()) {
-                instructions.emplace_back(parseGroup(groupLines));
-                if (instructions.back().retireTimestamp == 0) {
-                    // auto& back = instructions.back();
-                    // std::cout << "throwing out: " << back.address << back.cycleCount << "[]" << back.retireTimestamp
-                    // << std::endl;
-                    instructions.pop_back();
-                }
-                // Clear the group for the next one.
-                groupLines.clear();
-            }
-        }
-        // Add the current line to the group if it’s not empty.
-        if (!line.empty()) {
-            groupLines.push_back(line);
-        }
-    }
-    // Process any remaining group.
-    if (!groupLines.empty()) {
-        instructions.emplace_back(parseGroup(groupLines));
-    }
-
-    std::sort(instructions.begin(), instructions.end(),
-              [](InstructionGroup &a, InstructionGroup &b) { return a.cycleCount < b.cycleCount; });
+    parseInParallel(file, instructions);
+    // rob.processInstructions(instructions);
     // Now simulate issuing them into the ROB
-    for (const auto &instruction : instructions) {
+    SPDLOG_INFO("{} instructions to process", instructions.size());
+    for (const auto &[idx, instruction] : instructions|std::views::enumerate) {
         bool issued = false;
         while (!issued) {
             issued = rob.issue(instruction);
@@ -298,6 +294,9 @@ int main(int argc, char *argv[]) {
             }
         }
         rob.tick(); // 正常推进时钟
+        if (idx % 10000 == 0) {
+            SPDLOG_INFO("Processing instruction {}", idx);
+        }
     }
 
     // 清空ROB
@@ -306,7 +305,7 @@ int main(int argc, char *argv[]) {
     }
     // After processing all groups, call your ROB method.
     int nonMemInstr = std::count_if(instructions.begin(), instructions.end(),
-                                [](const InstructionGroup &ins) { return ins.address == 0; });
+                                    [](const InstructionGroup &ins) { return ins.address == 0; });
     SPDLOG_INFO("Non-memory instructions: {}", nonMemInstr);
 
     std::cout << "Stalls: " << rob.getStallCount() << std::endl;

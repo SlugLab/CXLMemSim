@@ -157,6 +157,54 @@ int calloc_return(struct pt_regs *ctx) {
 
     return 0;
 }
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:mmap")
+int mmap_entry(struct pt_regs *ctx) {
+    u64 size;
+    u32 pid = bpf_get_current_pid_tgid();
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+
+    bpf_probe_read_user(&size, sizeof(size), (void *)&PT_REGS_PARM2(ctx));
+   // 更新统计信息
+    struct mem_stats *stats, zero_stats = {};
+    stats = bpf_map_lookup_elem(&stats_map, &pid);
+    if (!stats) {
+        bpf_map_update_elem(&stats_map, &pid, &zero_stats, BPF_ANY);
+        stats = bpf_map_lookup_elem(&stats_map, &pid);
+        if (!stats)
+            return 0;
+    }
+
+    // 记录请求的大小
+    struct alloc_info info = {
+        .size = size,
+    };
+    bpf_map_update_elem(&allocs_map, &pid_tgid, &info, BPF_ANY);
+    return 0;
+}
+SEC("uretprobe//lib/x86_64-linux-gnu/libc.so.6:mmap")
+int mmap_return(struct pt_regs *ctx) {
+    u32 pid = bpf_get_current_pid_tgid();
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+
+    struct alloc_info *info = bpf_map_lookup_elem(&allocs_map, &pid_tgid);
+    if (!info) {
+        bpf_printk("alloc info not found for pid_tgid: %llu\n", pid_tgid);
+        return 0;
+    }
+
+    if (info->address) {
+        struct mem_stats *stats = bpf_map_lookup_elem(&stats_map, &pid);
+        if (stats) {
+            stats->total_freed += info->size;
+            stats->current_usage -= info->size;
+            stats->free_count += 1;
+        }
+    }
+
+    bpf_map_delete_elem(&allocs_map, &pid_tgid);
+
+    return 0;
+}
 
 SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:free")
 int free_entry(struct pt_regs *ctx) {
@@ -448,6 +496,68 @@ int fork_ret(struct pt_regs *ctx) {
     return 0;
 }
 
+SEC("uprobe//lib/x86_64-linux-gnu/libpthread.so.0:pthread_mutex_unlock")
+int pthread_mutex_unlock_enter(struct pt_regs *ctx) {
+    u32 pid = bpf_get_current_pid_tgid();
+    u32 tid = (u32)pid;
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+
+    // 获取锁的地址
+    void *mutex_addr;
+    bpf_probe_read(&mutex_addr, sizeof(mutex_addr), (void *)&PT_REGS_PARM1(ctx));
+
+    // 更新锁的状态
+    u32 locked = 0;
+    bpf_map_update_elem(&locks, &pid, &locked, BPF_ANY);
+
+    return 0;
+
+}
+
+SEC("uprobe//lib/x86_64-linux-gnu/libpthread.so.0:pthread_mutex_trylock")
+int pthread_mutex_trylock_enter(struct pt_regs *ctx) {
+    u32 pid = bpf_get_current_pid_tgid();
+    u32 tid = (u32)pid;
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+
+    // 获取锁的地址
+    void *mutex_addr;
+    bpf_probe_read(&mutex_addr, sizeof(mutex_addr), (void *)&PT_REGS_PARM1(ctx));
+
+    // 尝试获取锁
+    u32 locked = 1;
+    bpf_map_update_elem(&locks, &pid, &locked, BPF_ANY);
+
+    return 0;
+}
+
+SEC("uprobe//lib/x86_64-linux-gnu/libpthread.so.0:pthread_mutex_lock")
+int pthread_mutex_lock_enter(struct pt_regs *ctx)
+{
+    u32 pid = bpf_get_current_pid_tgid();
+    u32 tid = (u32)pid;
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+
+    // 获取锁的地址
+    void *mutex_addr;
+    bpf_probe_read(&mutex_addr, sizeof(mutex_addr), (void *)&PT_REGS_PARM1(ctx));
+
+    // 尝试获取锁
+    u32 locked = 1;
+    bpf_map_update_elem(&locks, &pid, &locked, BPF_ANY);
+    struct proc_info *delay = bpf_map_lookup_elem(&thread_map, &tid);
+    if (delay) {
+        u64 delay_start = bpf_ktime_get_ns();
+      #pragma unroll
+        for (int i = 0; i < 100; i++) {
+            if ((bpf_ktime_get_ns() - delay_start) < delay->sleep_time) {
+                break;
+            }
+        }
+    }
+    return 0;
+}
+
 SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:exit")
 int exit_probe(struct pt_regs *ctx) {
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -458,4 +568,6 @@ int exit_probe(struct pt_regs *ctx) {
 
     return 0;
 }
+
+
 char _license[] SEC("license") = "GPL";

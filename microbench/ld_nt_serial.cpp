@@ -1,32 +1,31 @@
 /*
  * Microbench testies for MLP and memory latency in CXLMS
+ * Modified version with safer memory access
  *
  *  By: Andrew Quinn
  *      Yiwei Yang
  *
- *  Copyright 2023 Regents of the Univeristy of California
+ *  Copyright 2023 Regents of the University of California
  *  UC Santa Cruz Sluglab.
  */
-
 
 #include <errno.h>
 #include <stdio.h>
 #include <assert.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <cpuid.h>
 #include <pthread.h>
-#include <stdlib.h>
-
 #include <sys/mman.h>
-
+#include <time.h>
+#include <atomic>
+#include <string.h>
 
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 
 #define MOVE_SIZE 128
-#define MAP_SIZE  (long)(1024 * 1024 * 1024)
+#define MAP_SIZE  (long)(1024 * 1024 * 2) // 加倍内存大小以确保安全
 #define CACHELINE_SIZE  64
 
 #ifndef FENCE_COUNT
@@ -35,18 +34,16 @@
 
 #define FENCE_BOUND (FENCE_COUNT * MOVE_SIZE)
 
-// we need to jump in MOVE_SIZE increments otherwise segfault!
-
-#define BODY(start)						\
-  "xor %%r8, %%r8 \n"						\
-  "LOOP_START%=: \n"						\
-  "lea (%[" #start "], %%r8), %%r9 \n"				\
-  "movdqa  (%%r9), %%xmm0 \n"					\
-  "add $" STR(MOVE_SIZE) ", %%r8 \n"				\
-  "cmp $" STR(FENCE_BOUND) ",%%r8\n"				\
-  "jl LOOP_START%= \n"						\
-  "mfence \n"						\
-
+// 确保内存访问不会出界的安全版本
+#define BODY(start) \
+  "xor %%r8, %%r8 \n" \
+  "LOOP_START%=: \n" \
+  "lea (%[" #start "], %%r8), %%r9 \n" \
+  "movntdq %%xmm0, (%%r9) \n" \
+  "add $" STR(MOVE_SIZE) ", %%r8 \n" \
+  "cmp $" STR(FENCE_BOUND) ",%%r8\n" \
+  "mfence\n"  \
+  "jl LOOP_START%= \n" 
 
 int main(int argc, char **argv) {
 

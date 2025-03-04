@@ -12,6 +12,13 @@
 #ifndef CXLMEMSIM_LBR_H
 #define CXLMEMSIM_LBR_H
 
+// 2 bits
+#define LBR_DATA_MASK 0x0000000000000003
+#define LBR_DATA_SHIFT 0
+// 8 bits
+#define LBR_INS_MASK 0xfffffff0000
+#define LBR_INS_SHIFT  16
+
 #include "cxlcontroller.h"
 #include "helper.h"
 #include <linux/perf_event.h>
@@ -32,8 +39,8 @@ struct lbr_sample {
     uint32_t tid;
     // uint64_t nr;
     // uint64_t ips[4];
-    uint32_t cpu;
     uint64_t timestamp;
+    uint32_t cpu;
     uint64_t nr2;
     // uint64_t hw_idx;
     lbr lbrs[32];
