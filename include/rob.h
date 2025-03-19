@@ -34,6 +34,7 @@ public:
     const size_t maxSize_;
     std::deque<InstructionGroup> queue_; // ROB队列
     int64_t stallCount_ = 0; // 停顿计数
+    int64_t stallEventCount_ = 0; // 停顿事件计数
     int64_t cur_latency = 0;
     int64_t totalLatency_ = 0;
     int64_t currentCycle_ = 0; // 当前周期
@@ -46,6 +47,7 @@ public:
 
     // 性能统计
     int64_t getStallCount() const { return stallCount_; }
+    int64_t getStallEventCount() const { return stallEventCount_;}
     int64_t getCurrentCycle() const { return currentCycle_; }
     double getAverageLatency() const { return queue_.empty() ? 0 : static_cast<double>(totalLatency_) / queue_.size(); }
 };

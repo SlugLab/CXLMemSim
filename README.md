@@ -29,3 +29,14 @@ SPDLOG_LEVEL=debug ./CXLMemSim -t ./microbench/ld -i 5 -c 0,2 -d 85 -c 100,100 -
                   3
 ```
 9. env SPDLOG_LEVEL stands for logs level that you can see.
+
+## Cite
+```bash
+@article{yangyarch23,
+  title={CXLMemSim: A pure software simulated CXL.mem for performance characterization},
+  author={Yiwei Yang, Pooneh Safayenikoo, Jiacheng Ma, Tanvir Ahmed Khan, Andrew Quinn},
+  journal={arXiv preprint arXiv:2303.06153},
+  booktitle={The fifth Young Architect Workshop (YArch'23)},
+  year={2023}
+}
+```

@@ -37,12 +37,9 @@ struct lbr_sample {
     perf_event_header header;
     uint32_t pid;
     uint32_t tid;
-    // uint64_t nr;
-    // uint64_t ips[4];
     uint64_t timestamp;
     uint32_t cpu;
     uint64_t nr2;
-    // uint64_t hw_idx;
     lbr lbrs[32];
     cntr counters[32];
 };

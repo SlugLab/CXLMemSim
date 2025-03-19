@@ -134,53 +134,6 @@ int NUMAPolicy::compute_once(CXLController *controller) {
     return best_node;
 }
 
-// HugePagePolicy实现
-// 大页面策略实现
-int HugePagePolicy::compute_once(CXLController *controller) {
-    // 如果当前不是大页面模式,尝试升级到大页面
-    if (controller->page_type_ == PAGE) {
-        // 检查连续的小页面数量
-        size_t consecutive_pages = 0;
-        size_t max_consecutive = 0;
-
-        for (size_t i = 1; i < controller->occupation.size(); i++) {
-            if (controller->occupation[i].address == controller->occupation[i - 1].address + 4096) {
-                consecutive_pages++;
-                max_consecutive = std::max(max_consecutive, consecutive_pages);
-            } else {
-                consecutive_pages = 0;
-            }
-        }
-
-        // 如果有足够多连续页面,切换到2M大页面
-        if (max_consecutive >= 512) { // 512 * 4KB = 2MB
-            controller->page_type_ = HUGEPAGE_2M;
-            return 1; // 返回1表示进行了页面大小调整
-        }
-    }
-    // 同理检查是否可以升级到1G大页面
-    else if (controller->page_type_ == HUGEPAGE_2M) {
-        size_t consecutive_pages = 0;
-        size_t max_consecutive = 0;
-
-        for (size_t i = 1; i < controller->occupation.size(); i++) {
-            if (controller->occupation[i].address == controller->occupation[i - 1].address + 2 * 1024 * 1024) {
-                consecutive_pages++;
-                max_consecutive = std::max(max_consecutive, consecutive_pages);
-            } else {
-                consecutive_pages = 0;
-            }
-        }
-
-        if (max_consecutive >= 512) { // 512 * 2MB = 1GB
-            controller->page_type_ = HUGEPAGE_1G;
-            return 1;
-        }
-    }
-
-    return 0; // 返回0表示没有进行调整
-}
-
 // FIFOPolicy实现
 // 先进先出缓存策略
 int FIFOPolicy::compute_once(CXLController *controller) {

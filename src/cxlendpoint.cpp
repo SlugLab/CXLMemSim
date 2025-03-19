@@ -278,35 +278,105 @@ double CXLSwitch::get_endpoint_rob_latency(CXLMemExpander *endpoint,
     return access_count > 0 ? total_latency / access_count : 0.0;
 }
 
-std::tuple<double, std::vector<uint64_t>> CXLSwitch::calculate_congestion() {//TODO reader writer congestion
+std::tuple<double, std::vector<uint64_t>> CXLSwitch::calculate_congestion() {
     double latency = 0.0;
     std::vector<uint64_t> congestion;
+
+    // 收集所有子交换机的拥塞信息
     for (auto &switch_ : this->switches) {
         auto [lat, con] = switch_->calculate_congestion();
         latency += lat;
+        // 预先分配空间以避免多次重新分配
+        congestion.reserve(congestion.size() + con.size());
         congestion.insert(congestion.end(), con.begin(), con.end());
     }
+
+    // 使用哈希表来聚合地址访问信息，避免后续多次排序
+    struct AccessInfo {
+        std::vector<uint64_t> timestamps;
+        std::vector<bool> is_write;
+    };
+
+    std::unordered_map<uint64_t, AccessInfo> address_map;
+    uint64_t current_time = this->last_timestamp - epoch * 1000;
+
+    // 一次性收集所有访问记录
     for (auto &expander : this->expanders) {
         for (auto &it : expander->occupation) {
-            // every epoch
-            if (it.timestamp > this->last_timestamp - epoch * 1000) {
+            if (it.timestamp > current_time) {
+                bool is_write = it.access_count == 0;
+
+                // 直接添加到对应地址的记录中
+                address_map[it.address].timestamps.push_back(it.timestamp);
+                address_map[it.address].is_write.push_back(is_write);
+
                 congestion.push_back(it.timestamp);
             }
         }
     }
-    sort(congestion.begin(), congestion.end());
-    for (auto it = congestion.begin(); it != congestion.end(); ++it) {
-        if (*(it + 1) - *it < 2000) { // if less than 20ns
-            latency += this->congestion_latency;
-            this->counter.inc_conflict();
-            if (it + 1 == congestion.end()) {
-                break;
+
+    // 时间冲突检测 - 使用桶排序思想
+    if (!congestion.empty()) {
+        std::sort(congestion.begin(), congestion.end());
+
+        // 使用单次遍历检测时间冲突
+        auto it = congestion.begin();
+        auto end = congestion.end() - 1;
+        while (it < end) {
+            if (*(it + 1) - *it < 2000) {
+                latency += this->congestion_latency;
+                this->counter.inc_conflict();
+                // 使用交换和弹出末尾元素代替erase，避免移动元素
+                std::swap(*it, *end);
+                congestion.pop_back();
+                end--;
+                // 不更新it，因为新交换的元素也需要检查
+            } else {
+                ++it;
             }
-            congestion.erase(it);
         }
     }
+
+    // 读写冲突检测 - 针对每个地址只排序一次
+    for (auto& [address, info] : address_map) {
+        auto& timestamps = info.timestamps;
+        auto& is_write = info.is_write;
+
+        if (timestamps.size() <= 1) continue;
+
+        // 对时间戳和操作类型同时排序
+        std::vector<std::pair<uint64_t, bool>> sorted_access;
+        sorted_access.reserve(timestamps.size());
+
+        for (size_t i = 0; i < timestamps.size(); ++i) {
+            sorted_access.emplace_back(timestamps[i], is_write[i]);
+        }
+
+        std::sort(sorted_access.begin(), sorted_access.end());
+
+        // 单次遍历检测冲突
+        for (size_t i = 0; i < sorted_access.size() - 1; i++) {
+            const auto& current = sorted_access[i];
+            const auto& next = sorted_access[i + 1];
+
+            if (next.first - current.first < 2000) {
+                if (current.second || next.second) {
+                    if (current.second && next.second) {
+                        latency += this->congestion_latency * 2.0; // 写-写冲突
+                    } else {
+                        latency += this->congestion_latency * 1.5; // 读-写或写-读冲突
+                    }
+                    this->counter.inc_conflict();
+                } else {
+                    latency += this->congestion_latency * 0.5; // 读-读冲突
+                }
+            }
+        }
+    }
+
     return std::make_tuple(latency, congestion);
 }
+
 std::vector<std::tuple<uint64_t, uint64_t>> CXLSwitch::get_access(uint64_t timestamp) {
     std::vector<std::tuple<uint64_t, uint64_t>> res;
     size_t total_size = 0;

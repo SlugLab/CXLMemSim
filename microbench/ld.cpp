@@ -26,7 +26,7 @@
 #define STR(x) STR_HELPER(x)
 
 #define MOVE_SIZE 128
-#define MAP_SIZE  (long)(1024 * 1024 * 1024)
+#define MAP_SIZE  (long)( 1024)
 #define CACHELINE_SIZE  64
 
 #ifndef FENCE_COUNT
@@ -45,7 +45,7 @@
   "add $" STR(MOVE_SIZE) ", %%r8 \n"				\
   "cmp $" STR(FENCE_BOUND) ",%%r8\n"				\
   "jl LOOP_START%= \n"						\
-  "mfence \n"						\
+  "cpuid \n"						\
 
 
 int main(int argc, char **argv) {
@@ -86,8 +86,7 @@ int main(int argc, char **argv) {
   while (addr < (base + MAP_SIZE)) {
     asm volatile(
 		 "mov %[buf], %%rsi\n"
-		 "clflush (%%rsi)\n"
-          "mfence\n"
+          "cpuid \n"
 		 :
 		 : [buf] "r" (addr)
 		 : "rsi");

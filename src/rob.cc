@@ -137,11 +137,13 @@ void parseInParallel(std::ifstream &file, std::vector<InstructionGroup> &instruc
     std::vector<std::string> groupLines;
 
     // 创建解析线程池
+    // Create parsing thread pool
     const int numThreads = 4;
     std::vector<std::thread> parseThreads;
     std::mutex resultsMutex;
 
     // 消费者线程函数
+    // Consumer thread function
     auto parseWorker = [&]() {
         while (true) {
             std::vector<std::string> group;
@@ -163,11 +165,13 @@ void parseInParallel(std::ifstream &file, std::vector<InstructionGroup> &instruc
     };
 
     // 启动消费者线程
+    // Start consumer threads
     for (int i = 0; i < numThreads; ++i) {
         parseThreads.emplace_back(parseWorker);
     }
 
     // 生产者部分 - 主线程
+    // Producer part - main thread
     for (const std::string &line : std::ranges::istream_view<std::string>(file)) {
         if (line.rfind("O3PipeView:fetch:", 0) == 0) {
             if (!groupLines.empty()) {
@@ -185,6 +189,7 @@ void parseInParallel(std::ifstream &file, std::vector<InstructionGroup> &instruc
     }
 
     // 处理最后一组
+    // Process the last group
     if (!groupLines.empty()) {
         {
             std::lock_guard<std::mutex> lock(queueMutex);
@@ -194,6 +199,7 @@ void parseInParallel(std::ifstream &file, std::vector<InstructionGroup> &instruc
     }
 
     // 通知所有消费者线程完成
+    // Notify all consumer threads to complete
     {
         std::lock_guard<std::mutex> lock(queueMutex);
         done = true;
@@ -201,11 +207,13 @@ void parseInParallel(std::ifstream &file, std::vector<InstructionGroup> &instruc
     cv.notify_all();
 
     // 等待所有线程完成
+    // Wait for all threads to complete
     for (auto &thread : parseThreads) {
         thread.join();
     }
 
     // 排序结果
+    // Sort results
     std::sort(instructions.begin(), instructions.end(),
               [](InstructionGroup &a, InstructionGroup &b) { return a.cycleCount < b.cycleCount; });
 }
@@ -291,9 +299,11 @@ int main(int argc, char *argv[]) {
             issued = rob.issue(instruction);
             if (!issued) {
                 rob.tick(); // 如果无法发射,推进时钟直到有空间
+                            // If unable to issue, advance clock until space is available
             }
         }
         rob.tick(); // 正常推进时钟
+                    // Normal clock advancement
         if (idx % 10000 == 0) {
             SPDLOG_INFO("Processing instruction {}", idx);
         }
@@ -309,6 +319,8 @@ int main(int argc, char *argv[]) {
     SPDLOG_INFO("Non-memory instructions: {}", nonMemInstr);
 
     std::cout << "Stalls: " << rob.getStallCount() << std::endl;
+    std::cout << "ROB Events: " << rob.getStallEventCount() << std::endl;
+
     std::cout << std::format("{}",*controller)  << std::endl;
     return 0;
 }

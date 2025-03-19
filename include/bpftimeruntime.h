@@ -17,16 +17,48 @@
 #include <linux/bpf.h>
 #include <string>
 #include <sys/types.h>
+#include "bpftime_config.hpp"
+#include "bpftime_logger.hpp"
+#include "bpftime_shm.hpp"
+template <typename K, typename V>
+class BPFUpdater {
+public:
+    int map_fd;
+    BPFUpdater(int map_fd) : map_fd(map_fd) {}
 
+    void update(K key, V value) {
+        int key1 = 0;
+        bpftime_map_get_next_key(map_fd, &key1, &key); // process map
+        auto item2 = (struct proc_info *)bpftime_map_lookup_elem(map_fd, &key); // allocs map
+        item2->sleep_time = (uint64_t)value;
+        int ret = bpftime_map_update_elem(map_fd, &key, item2, BPF_ANY);
+        if (ret != 0) {
+            SPDLOG_ERROR("Error updating map: {}\n", strerror(errno));
+            throw std::runtime_error("Error updating the bpf map");
+        }
+    }
+
+    bool get(K key) {
+        int key1 = 0;
+        bpftime_map_get_next_key(map_fd, &key1, &key); // process map
+        auto item2 = (struct proc_info *)bpftime_map_lookup_elem(map_fd, &key); // allocs map
+        if (item2 == nullptr) {
+            return false;
+        }
+        return item2->is_locked;
+    }
+};
 class BpfTimeRuntime {
 public:
     BpfTimeRuntime(pid_t, std::string);
     ~BpfTimeRuntime();
 
     int read(CXLController *, BPFTimeRuntimeElem *);
-
+    BPFUpdater<uint64_t,uint64_t> *updater;
     pid_t tid;
 };
+
+
 #define u64 unsigned long long
 #define u32 unsigned int
 #else
@@ -62,7 +94,15 @@ struct proc_info {
     u64 current_pid; // 当前进程 ID
     u64 current_tid; // 当前线程 ID
     u64 sleep_time; // 睡眠时间
+    bool is_locked; // 是否锁定
     struct mem_info mem_info;
 };
 
+// 线程创建参数
+struct thread_create_args {
+	void **thread_ptr;
+	void *attr;
+	void *start_routine;
+	void *arg;
+};
 #endif

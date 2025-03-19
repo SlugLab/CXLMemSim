@@ -29,15 +29,24 @@ const char localName[] = "local";
 const char remoteName[] = "remote";
 const char hitmName[] = "hitm";
 const char backinvName[] = "backinv";
+const char hitName[] = "hit";
+const char missName[] = "miss";
+const char totalName[] = "total";
+const char tlbhits4kName[] = "tlbhits4k";
+const char tlbmisses4kName[] = "tlbmisses4k";
+const char tlbhits2mName[] = "tlbhits2m";
+const char tlbmisses2mName[] = "tlbmisses2m";
+const char tlbhits1gName[] = "tlbhits1g";
+const char tlbmisses1gName[] = "tlbmisses1g";
+const char ptwcountName[] = "ptwcount";
 
-
-// 基础计数器模板类
+// 基础计数器模板类 (Basic counter template class)
 template<const char* Name>
 class AtomicCounter {
 public:
     std::atomic<uint64_t> value = 0;
     constexpr AtomicCounter() noexcept = default;
-    constexpr AtomicCounter(const AtomicCounter& other) noexcept : value(other.value.load()) { // 复制构造函数
+    constexpr AtomicCounter(const AtomicCounter& other) noexcept : value(other.value.load()) { // 复制构造函数 (Copy constructor)
 
     };
     AtomicCounter& operator=(const AtomicCounter&other) {
@@ -47,7 +56,7 @@ public:
         return *this;
     };
 
-    // C++26允许constexpr修饰原子操作
+    // C++26允许constexpr修饰原子操作 (C++26 allows constexpr to modify atomic operations)
     constexpr void increment() noexcept {
         value.fetch_add(1, std::memory_order_relaxed);
     }
@@ -60,12 +69,12 @@ public:
         return get();
     }
 
-    // 用于可能需要记录的事件日志
+    // 用于可能需要记录的事件日志 (For event logs that may need to be recorded)
     void log_increment(std::source_location loc = std::source_location::current()) const {
-        // 未来可以实现日志记录
+        // 未来可以实现日志记录 (Logging can be implemented in the future)
     }
 };
-// 确保AtomicCounter满足Counter概念
+// 确保AtomicCounter满足Counter概念 (Ensure AtomicCounter meets the Counter concept)
 template<const char* Name>
 inline constexpr bool implements_counter_concept = requires(AtomicCounter<Name> t) {
     { t.value } -> std::convertible_to<uint64_t>;
@@ -81,12 +90,12 @@ struct std::formatter<AtomicCounter<Name>> {
 
     template <typename FormatContext>
     auto format(const AtomicCounter<Name>& counter, FormatContext& ctx) const -> decltype(ctx.out()) {
-        // 简化formatter实现，避免嵌套std::format调用
+        // 简化formatter实现，避免嵌套std::format调用 (Simplify formatter implementation, avoid nested std::format calls)
         return format_to(ctx.out(), "{}", counter.get());
     }
 };
 
-// 使用C++20的enum class和强类型枚举
+// 使用C++20的enum class和强类型枚举 (Use C++20 enum class and strong-typed enumerations)
 enum class EventType {
     Load,
     Store,
@@ -99,7 +108,7 @@ enum class EventType {
     Hitm
 };
 
-// 开关事件计数器
+// 开关事件计数器 (Switch event counter)
 class CXLSwitchEvent {
 public:
     AtomicCounter<loadName> load;
@@ -108,7 +117,7 @@ public:
 
     constexpr CXLSwitchEvent() noexcept = default;
 
-    // 使用C++20的模板元编程和编译期字符串实现更灵活的接口
+    // 使用C++20的模板元编程和编译期字符串实现更灵活的接口 (Use C++20 template metaprogramming and compile-time strings to implement more flexible interfaces)
     template<EventType Type>
     constexpr void increment() noexcept {
         if constexpr (Type == EventType::Load) {
@@ -220,7 +229,53 @@ public:
     }
 };
 
-// 实现部分现在可以以内联方式编写，不需要单独的.cpp文件
-// 但为了兼容性，我们仍保留.cpp文件的实现
+class CXLPageTableEvent {
+public:
+    AtomicCounter<hitName> hit;
+    AtomicCounter<missName> miss;
+    AtomicCounter<totalName> total;
+    constexpr CXLPageTableEvent() noexcept = default;
+
+    constexpr void inc_hit() noexcept { hit.increment(); }
+    constexpr void inc_miss() noexcept { miss.increment(); }
+    constexpr void inc_total() noexcept { total.increment(); }
+
+    constexpr uint64_t get_hit() const noexcept { return hit; }
+    constexpr uint64_t get_miss() const noexcept { return miss; }
+    constexpr uint64_t get_total() const noexcept { return total; }
+
+    constexpr double hit_ratio() const noexcept {
+        uint64_t total = hit + miss;
+        return total > 0 ? static_cast<double>(hit) / total : 0.0;
+    }
+};
+
+class CXLHugePageEvent {
+public:
+
+    AtomicCounter<tlbhits4kName> tlb_hits_4k;
+    AtomicCounter<tlbmisses4kName> tlb_misses_4k;
+    AtomicCounter<tlbhits2mName> tlb_hits_2m;
+    AtomicCounter<tlbmisses2mName> tlb_misses_2m;
+    AtomicCounter<tlbhits1gName> tlb_hits_1g;
+    AtomicCounter<tlbmisses1gName> tlb_misses_1g;
+    AtomicCounter<ptwcountName> ptw_count; // 页表遍历次数
+    constexpr CXLHugePageEvent() noexcept = default;
+    constexpr void inc_tlb_hits_4k() noexcept { tlb_hits_4k.increment(); }
+    constexpr void inc_tlb_misses_4k() noexcept { tlb_misses_4k.increment(); }
+    constexpr void inc_tlb_hits_2m() noexcept { tlb_hits_2m.increment(); }
+    constexpr void inc_tlb_misses_2m() noexcept { tlb_misses_2m.increment(); }
+    constexpr void inc_tlb_hits_1g() noexcept { tlb_hits_1g.increment(); }
+    constexpr void inc_tlb_misses_1g() noexcept { tlb_misses_1g.increment(); }
+    constexpr void inc_ptw_count() noexcept { ptw_count.increment(); }
+
+    constexpr uint64_t get_tlb_hits_4k() const noexcept { return tlb_hits_4k; }
+    constexpr uint64_t get_tlb_misses_4k() const noexcept { return tlb_misses_4k; }
+    constexpr uint64_t get_tlb_hits_2m() const noexcept { return tlb_hits_2m; }
+    constexpr uint64_t get_tlb_misses_2m() const noexcept { return tlb_misses_2m; }
+    constexpr uint64_t get_tlb_hits_1g() const noexcept { return tlb_hits_1g; }
+    constexpr uint64_t get_tlb_misses_1g() const noexcept { return tlb_misses_1g; }
+    constexpr uint64_t get_ptw_count() const noexcept { return ptw_count; }
+};
 
 #endif // CXLMEMSIM_CXLCOUNTER_H

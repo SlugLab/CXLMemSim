@@ -1,3 +1,12 @@
+/*
+ * Microbench testies for MLP and memory latency in CXLMS
+ *
+ *  By: Andrew Quinn
+ *      Yiwei Yang
+ *
+ *  Copyright 2023 Regents of the Univeristy of California
+ *  UC Santa Cruz Sluglab.
+ */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -14,21 +14,77 @@
 #include <csignal>
 #include <ctime>
 #include <iostream>
+#include <vector>
+timespec Monitor::last_delay = {0, 0};
+
+std::vector<pid_t> get_thread_ids(pid_t pid) {
+    std::vector<pid_t> thread_ids;
+
+    // 构建task目录路径
+    std::string task_dir = "/proc/" + std::to_string(pid) + "/task";
+
+    DIR *dir = opendir(task_dir.c_str());
+    if (dir == nullptr) {
+        std::cerr << "无法打开目录: " << task_dir << " - " << strerror(errno) << std::endl;
+        return thread_ids;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        // 跳过 . 和 ..
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        // 将线程ID添加到结果中
+        pid_t tid = std::stoi(entry->d_name);
+        thread_ids.push_back(tid);
+    }
+
+    closedir(dir);
+    return thread_ids;
+}
+
+// 为特定线程设置CPU亲和性
+bool set_thread_affinity(pid_t tid, int cpu_id) {
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(cpu_id, &cpuset);
+
+    int result = sched_setaffinity(tid, sizeof(cpu_set_t), &cpuset);
+
+    if (result != 0) {
+        std::cerr << "设置线程 " << tid << " 的CPU亲和性失败: " << strerror(errno) << std::endl;
+        return false;
+    }
+
+    return true;
+}
 
 Monitors::Monitors(int cpu_count, cpu_set_t *use_cpuset) : print_flag(true) {
     mon = std::vector<Monitor>(cpu_count);
     /** Init mon */
     for (int i = 0; i < cpu_count; i++) {
         disable(i);
-        int cpucnt = 0;
+
+        // 直接分配第i个可用的CPU
+        int available_cpu = -1;
+        int count = 0;
+
         for (int cpuid = 0; cpuid < helper.num_of_cpu(); cpuid++) {
             if (!CPU_ISSET(cpuid, use_cpuset)) {
-                if (i == cpucnt) {
-                    mon[i].cpu_core = cpuid;
+                if (count == i) {
+                    available_cpu = cpuid;
                     break;
                 }
-                cpucnt++;
+                count++;
             }
+        }
+
+        if (available_cpu != -1) {
+            mon[i].cpu_core = available_cpu;
+        } else {
+            std::cout << "No available CPU" << std::endl;
         }
     }
 }
@@ -83,12 +139,24 @@ int Monitors::enable(uint32_t tgid, uint32_t tid, bool is_process, uint64_t pebs
     s = sched_setaffinity(tid, sizeof(cpu_set_t), &cpuset);
     if (s != 0) {
         if (errno == ESRCH) {
-            SPDLOG_DEBUG("Process [{}:{}] is terminated.", tgid, tid);
-            return -2;
+            if (tid != tgid) {
+                static auto thread_ids = get_thread_ids(tgid);
+                tid = thread_ids.back();
+                if (tid) {
+                    thread_ids.pop_back();
+                    std::cout << "set affinity for thread " << tid << std::endl;
+                    s = sched_setaffinity(tid, sizeof(cpu_set_t), &cpuset);
+                    if (s != 0) {
+                        std::cout << "Failed to setaffinity for thread " << tid << std::endl;
+                        return -2;
+                    }
+                }
+            } else {
+                return -2;
+            }
         } else {
-            SPDLOG_ERROR("Failed to setaffinity");
+            std::cout << "Failed to setaffinity" << std::endl;
         }
-        throw;
     }
 
     /* init */
@@ -105,10 +173,10 @@ int Monitors::enable(uint32_t tgid, uint32_t tid, bool is_process, uint64_t pebs
         SPDLOG_DEBUG("{}Process [tgid={}, tid={}]: enable to pebs.", target, mon[target].tgid,
                      mon[target].tid); // multiple tid multiple pid
         mon[target].lbr_ctx = new LBR(tgid, 1000);
+        new std::jthread(mon[target].wait, &mon, target);
     }
     SPDLOG_INFO("pid {}[tgid={}, tid={}] monitoring start", target, mon[target].tgid, mon[target].tid);
 
-    new std::thread(Monitor::wait, &mon, target);
     return target;
 }
 void Monitors::disable(const uint32_t target) {
@@ -119,8 +187,6 @@ void Monitors::disable(const uint32_t target) {
     mon[target].before = &mon[target].elem[0];
     mon[target].after = &mon[target].elem[1];
     mon[target].total_delay = 0;
-    mon[target].squabble_delay.tv_sec = 0;
-    mon[target].squabble_delay.tv_nsec = 0;
     mon[target].injected_delay.tv_sec = 0;
     mon[target].injected_delay.tv_nsec = 0;
     mon[target].end_exec_ts.tv_sec = 0;
@@ -240,7 +306,6 @@ void Monitor::stop() { // thread create and proecess create get the pmu
             // in this case process or process group does not exist.
             // It might be a zombie or has terminated execution.
             this->status = MONITOR_TERMINATED;
-            SPDLOG_ERROR("Process [{}:{}] is terminated.", this->tgid, this->tid);
         } else if (errno == EPERM) {
             this->status = MONITOR_NOPERMISSION;
             SPDLOG_ERROR("Failed to signal to any of the target processes. Due to does not have permission.  It "
@@ -268,7 +333,7 @@ void Monitor::run() {
         } else {
             this->status = MONITOR_UNKNOWN;
             perror("Failed to signal to any of the target processes");
-            SPDLOG_ERROR("I'm dying{} {}", this->tgid, this->tid);
+            SPDLOG_ERROR("I'm dying {} {}", this->tgid, this->tid);
         }
     } else {
         this->status = MONITOR_ON;
@@ -281,9 +346,8 @@ void Monitor::clear_time(timespec *time) {
 }
 
 Monitor::Monitor() // which one to hook
-    : tgid(0), tid(0), cpu_core(0), status(0), injected_delay({0}), wasted_delay({0}), squabble_delay({0}),
-      before(nullptr), after(nullptr), total_delay(0), start_exec_ts({0}), end_exec_ts({0}), is_process(false),
-      bpftime_ctx(nullptr) {
+    : tgid(0), tid(0), cpu_core(0), status(0), injected_delay({0}), wasted_delay({0}), before(nullptr), after(nullptr),
+      total_delay(0), start_exec_ts({0}), end_exec_ts({0}), is_process(false) {
 
     for (auto &j : this->elem) {
         j.cpus = std::vector<CPUElem>(helper.used_cpu.size());
@@ -332,14 +396,11 @@ timespec operator*(const timespec &lhs, const timespec &rhs) {
 
     return result;
 }
-
 void Monitor::wait(std::vector<Monitor> *mons, int target) {
     auto &mon = (*mons)[target];
     uint64_t diff_nsec, target_nsec;
     timespec start_ts{}, end_ts{};
-    timespec sleep_target{};
-    // timespec wanted_delay;
-    timespec wanted_delay{};
+    timespec sleep_target{}, wanted_delay{}, interval_target{};
     timespec prev_wanted_delay = mon.wanted_delay;
     // while we're alive
     while ((mon.status == MONITOR_ON || mon.status == MONITOR_OFF)) {
@@ -347,7 +408,11 @@ void Monitor::wait(std::vector<Monitor> *mons, int target) {
         wanted_delay = mon.wanted_delay;
         sleep_target = start_ts + wanted_delay * prev_wanted_delay;
         target_nsec = wanted_delay - prev_wanted_delay;
-
+        interval_target = end_ts + interval_delay;
+        if (mon.bpftime_ctx && mon.bpftime_ctx->updater->get(mon.tid))
+            mon.bpftime_ctx->updater->update(mon.tgid, prev_wanted_delay.tv_nsec - mon.wanted_delay.tv_nsec);
+        else
+            clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &interval_target, nullptr);
         // start time before we ask them to sleep
         clock_gettime(CLOCK_MONOTONIC, &start_ts);
         mon.stop();
@@ -356,20 +421,13 @@ void Monitor::wait(std::vector<Monitor> *mons, int target) {
         // until we've waited enough time...
         while (diff_nsec < target_nsec) {
             SPDLOG_DEBUG("[{}:{}][OFF] total: {}", mon.tgid, mon.tid, wanted_delay.tv_nsec);
-            // SPDLOG_INFO("target: {}:{}", sleep_target.tv_sec, sleep_target.tv_nsec);
-            // SPDLOG_INFO("start: {}:{}", start_ts.tv_sec, start_ts.tv_nsec);
-            //  sleep to the target
             clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &sleep_target, nullptr);
             clock_gettime(CLOCK_MONOTONIC, &end_ts);
             diff_nsec = end_ts - start_ts;
-            // SPDLOG_INFO("diff: {}:{}", diff_nsec, target_nsec);
         }
         mon.run();
-        // keep track of how much we've delayed them for
-        // TODO: use the diff_nsec to help calculate the prev_wanted_delay, to avoid timing errors building up from over
-        // waiting
         prev_wanted_delay = wanted_delay;
-        // break;
+        clock_gettime(CLOCK_MONOTONIC, &end_ts);
     }
-    SPDLOG_INFO("{}:{}", prev_wanted_delay.tv_sec, prev_wanted_delay.tv_nsec);
+    // SPDLOG_INFO("{}:{}", prev_wanted_delay.tv_sec, prev_wanted_delay.tv_nsec);
 }

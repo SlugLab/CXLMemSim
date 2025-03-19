@@ -27,7 +27,7 @@
 #define STR(x) STR_HELPER(x)
 
 #define MOVE_SIZE 128
-#define MAP_SIZE  (long)(1024 * 1024) // 加倍内存大小以确保安全
+#define MAP_SIZE  (long)(1024)
 #define CACHELINE_SIZE  64
 
 #ifndef FENCE_COUNT
@@ -120,26 +120,25 @@ int main(int argc, char **argv) {
 
   printf("Starting benchmark...\n");
   clock_gettime(CLOCK_MONOTONIC, &tstart);
-  for (int i = 0; i < 10000000; i++) {
-    addr = aligned_base;
+  clock_gettime(CLOCK_MONOTONIC, &tstart);
+for (int i=0;i<1e3;i++){
+  addr = base;
+  while (addr < (base + MAP_SIZE)) {
+    asm volatile(
+		 BODY(addr)
+		 :
+		 : [addr] "r" (addr)
+		 : "r8", "r9", "xmm0");
 
-    // 添加额外安全检查，确保不会越界
-    while (addr < (aligned_base + MAP_SIZE - FENCE_BOUND)) {
-      asm volatile(
-        BODY(addr)
-        :
-        : [addr] "r" (addr)
-        : "r8", "r9", "xmm0", "memory");
       addr += (FENCE_COUNT * MOVE_SIZE);
-    }
   }
   clock_gettime(CLOCK_MONOTONIC, &tend);
-
-  uint64_t nanos = (1000000000 * tend.tv_sec + tend.tv_nsec);
+  uint64_t nanos = (1000000000  * tend.tv_sec + tend.tv_nsec);
   nanos -= (1000000000 * tstart.tv_sec + tstart.tv_nsec);
 
-  printf("Benchmark completed: %lu ns\n", nanos);
 
+  printf("%lu\n", nanos);
+}
   // 解除内存映射
   munmap(base, MAP_SIZE + CACHELINE_SIZE);
 

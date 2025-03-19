@@ -157,7 +157,7 @@ public:
     // TODO get the approximate congestion and target done time
     std::unordered_map<uint64_t, uint64_t> timeseries_map;
 
-    double congestion_latency = 90; // 200ns is the latency of the switch
+    double congestion_latency = 0.02; // 200ns is the latency of the switch
     explicit CXLSwitch(int id);
     std::vector<std::tuple<uint64_t, uint64_t>> get_access(uint64_t timestamp) override;
     double calculate_latency(const std::vector<std::tuple<uint64_t, uint64_t>> &elem,

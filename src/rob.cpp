@@ -7,6 +7,7 @@
 bool Rob::issue(const InstructionGroup &ins) {
     if (queue_.size() >= maxSize_) {
         stallCount_++;
+        stallEventCount_++;
         return false; // ROB已满,停顿
     }
 
@@ -15,7 +16,7 @@ bool Rob::issue(const InstructionGroup &ins) {
 
     // 对于内存访问指令,通知控制器
     if (ins.address != 0) {
-        counter ++;
+        counter++;
         auto lbrs = std::vector<lbr>();
         lbrs.reserve(32);
         controller_->insert(ins.retireTimestamp, 0, ins.address, 0, counter);
@@ -75,10 +76,10 @@ void Rob::tick() {
 }
 
 // 并行处理所有指令
-void ParallelRob::processInstructions(const std::vector<InstructionGroup>& instructions) {
+void ParallelRob::processInstructions(const std::vector<InstructionGroup> &instructions) {
     // 第一步：预处理 - 将指令分配到不同分区
     std::vector<std::vector<InstructionGroup>> partitionedInstructions(NUM_PARTITIONS);
-    for (const auto& ins : instructions) {
+    for (const auto &ins : instructions) {
         size_t partIndex = getPartitionIndex(ins);
         partitionedInstructions[partIndex].push_back(ins);
     }
@@ -89,31 +90,29 @@ void ParallelRob::processInstructions(const std::vector<InstructionGroup>& instr
 
     for (int p = 0; p < NUM_PARTITIONS; p++) {
         threads.emplace_back([this, p, &partitionedInstructions, &globalMaxCycle]() {
-            auto& partition = this->partitions_[p];
-            auto& insForPartition = partitionedInstructions[p];
+            auto &partition = this->partitions_[p];
+            auto &insForPartition = partitionedInstructions[p];
 
             // 按照循环计数排序，确保正确的处理顺序
             std::sort(insForPartition.begin(), insForPartition.end(),
-                     [](const InstructionGroup& a, const InstructionGroup& b) {
-                         return a.cycleCount < b.cycleCount;
-                     });
+                      [](const InstructionGroup &a, const InstructionGroup &b) { return a.cycleCount < b.cycleCount; });
 
             uint64_t localCycle = this->currentCycle_.load();
 
-            for (const auto& ins : insForPartition) {
+            for (const auto &ins : insForPartition) {
                 // 处理这条指令
                 {
-                    std::lock_guard<std::mutex> lock(partition.mutex);  // 修正：使用.而不是->
+                    std::lock_guard<std::mutex> lock(partition.mutex); // 修正：使用.而不是->
 
                     // 等待直到有空间
-                    while (partition.queue.size() >= this->maxSize_ / NUM_PARTITIONS) {  // 修正：使用.
+                    while (partition.queue.size() >= this->maxSize_ / NUM_PARTITIONS) { // 修正：使用.
                         this->stallCount_++;
 
                         // 尝试退休指令以释放空间
-                        auto it = partition.queue.begin();  // 修正：使用.
-                        while (it != partition.queue.end()) {  // 修正：使用.
-                            if (this->processRetirement(*it, partition)) {  // 修正：直接传递partition
-                                it = partition.queue.erase(it);  // 修正：使用.
+                        auto it = partition.queue.begin(); // 修正：使用.
+                        while (it != partition.queue.end()) { // 修正：使用.
+                            if (this->processRetirement(*it, partition)) { // 修正：直接传递partition
+                                it = partition.queue.erase(it); // 修正：使用.
                             } else {
                                 ++it;
                             }
@@ -124,22 +123,22 @@ void ParallelRob::processInstructions(const std::vector<InstructionGroup>& instr
                     }
 
                     // 发射指令
-                    partition.queue.push_back(ins);  // 修正：使用.
+                    partition.queue.push_back(ins); // 修正：使用.
 
                     // 对于内存访问指令，通知控制器
                     if (ins.address != 0) {
                         int currentCounter = this->counter.fetch_add(1) + 1;
                         auto lbrs = std::vector<lbr>();
                         lbrs.resize(32);
-                        this->controller_->insert(ins.retireTimestamp, 0, ins.address, 0, currentCounter*10);
+                        this->controller_->insert(ins.retireTimestamp, 0, ins.address, 0, currentCounter * 10);
                         this->controller_->insert(ins.retireTimestamp, 0, lbrs.data(), {});
                     }
 
                     // 尝试退休已完成的指令
-                    auto it = partition.queue.begin();  // 修正：使用.
-                    while (it != partition.queue.end()) {  // 修正：使用.
-                        if (this->processRetirement(*it, partition)) {  // 修正：直接传递partition
-                            it = partition.queue.erase(it);  // 修正：使用.
+                    auto it = partition.queue.begin(); // 修正：使用.
+                    while (it != partition.queue.end()) { // 修正：使用.
+                        if (this->processRetirement(*it, partition)) { // 修正：直接传递partition
+                            it = partition.queue.erase(it); // 修正：使用.
                         } else {
                             ++it;
                         }
@@ -154,13 +153,12 @@ void ParallelRob::processInstructions(const std::vector<InstructionGroup>& instr
             uint64_t current;
             do {
                 current = globalMaxCycle.load();
-            } while (localCycle > current &&
-                    !globalMaxCycle.compare_exchange_weak(current, localCycle));
+            } while (localCycle > current && !globalMaxCycle.compare_exchange_weak(current, localCycle));
         });
     }
 
     // 等待所有线程完成
-    for (auto& thread : threads) {
+    for (auto &thread : threads) {
         thread.join();
     }
 
@@ -171,21 +169,21 @@ void ParallelRob::processInstructions(const std::vector<InstructionGroup>& instr
     threads.clear();
     for (int p = 0; p < NUM_PARTITIONS; p++) {
         threads.emplace_back([this, p]() {
-            auto& partition = this->partitions_[p];
+            auto &partition = this->partitions_[p];
             uint64_t localCycle = this->currentCycle_.load();
 
             while (true) {
                 bool allEmpty = true;
                 {
-                    std::lock_guard<std::mutex> lock(partition.mutex);  // 修正：使用.
-                    if (!partition.queue.empty()) {  // 修正：使用.
+                    std::lock_guard<std::mutex> lock(partition.mutex); // 修正：使用.
+                    if (!partition.queue.empty()) { // 修正：使用.
                         allEmpty = false;
 
                         // 尝试退休指令
-                        auto it = partition.queue.begin();  // 修正：使用.
-                        while (it != partition.queue.end()) {  // 修正：使用.
-                            if (this->processRetirement(*it, partition)) {  // 修正：直接传递partition
-                                it = partition.queue.erase(it);  // 修正：使用.
+                        auto it = partition.queue.begin(); // 修正：使用.
+                        while (it != partition.queue.end()) { // 修正：使用.
+                            if (this->processRetirement(*it, partition)) { // 修正：直接传递partition
+                                it = partition.queue.erase(it); // 修正：使用.
                             } else {
                                 ++it;
                             }
@@ -196,26 +194,26 @@ void ParallelRob::processInstructions(const std::vector<InstructionGroup>& instr
                     }
                 }
 
-                if (allEmpty) break;
+                if (allEmpty)
+                    break;
             }
 
             // 更新全局周期
             int64_t current; // 从uint64_t改为int64_t
             do {
                 current = this->currentCycle_.load();
-            } while (localCycle > current &&
-                    !this->currentCycle_.compare_exchange_weak(current, localCycle));
+            } while (localCycle > current && !this->currentCycle_.compare_exchange_weak(current, localCycle));
         });
     }
 
     // 等待所有线程完成
-    for (auto& thread : threads) {
+    for (auto &thread : threads) {
         thread.join();
     }
 }
 
 // 处理指令退休
-bool ParallelRob::processRetirement(InstructionGroup& ins, RobPartition& partition) {
+bool ParallelRob::processRetirement(InstructionGroup &ins, RobPartition &partition) {
     if (ins.address == 0) {
         return true; // 非内存指令可以直接提交
     }
@@ -240,13 +238,12 @@ bool ParallelRob::processRetirement(InstructionGroup& ins, RobPartition& partiti
     return false;
 }
 
-double ParallelRob::getAverageLatency()  {
+double ParallelRob::getAverageLatency() {
     size_t totalInstructions = 0;
-    for (auto& part : partitions_) {
-        std::lock_guard<std::mutex> lock(part.mutex);  // 修正：使用.而不是->
-        totalInstructions += part.queue.size();  // 修正：使用.
+    for (auto &part : partitions_) {
+        std::lock_guard<std::mutex> lock(part.mutex); // 修正：使用.而不是->
+        totalInstructions += part.queue.size(); // 修正：使用.
     }
 
-    return totalInstructions == 0 ? 0 :
-        static_cast<double>(totalLatency_.load()) / totalInstructions;
+    return totalInstructions == 0 ? 0 : static_cast<double>(totalLatency_.load()) / totalInstructions;
 }

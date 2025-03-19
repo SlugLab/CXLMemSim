@@ -55,7 +55,6 @@ CXLController::CXLController(std::array<Policy *, 4> p, int capacity, page_type 
     for (auto expander : this->expanders) {
         expander->set_epoch(epoch);
     }
-    // TODO deferentiate R/W for multi reader multi writer
 }
 
 double CXLController::calculate_latency(const std::vector<std::tuple<uint64_t, uint64_t>> &elem, double dramlatency) {
@@ -82,12 +81,19 @@ void CXLController::set_stats(mem_stats stats) {
 }
 
 void CXLController::set_process_info(const proc_info &process_info) {
-    monitors->enable(process_info.current_pid, process_info.current_tid, true, 1000, 0);
+    monitors->enable(process_info.current_pid, process_info.current_tid, true, 1000, helper.num_of_cpu());
 }
 
 void CXLController::set_thread_info(const proc_info &thread_info) {
-    monitors->enable(thread_info.current_pid, thread_info.current_tid, false, 0, 0);
+    if (thread_info.current_pid == monitors->mon[0].tgid) {
+        monitors->enable(thread_info.current_pid, thread_info.current_tid, false, 0, helper.num_of_cpu());
+        // std::cout << "set thread info " << thread_info.current_pid << " " << thread_info.current_tid << std::endl;
+        auto lbr_ = new lbr{.from = 0, .to = 0, .flags = 0};
+        this->insert_one(thread_map[thread_info.current_tid], *lbr_);
+        delete lbr_;
+    }
 }
+
 void CXLController::perform_migration() {
     if (!migration_policy)
         return;
@@ -242,7 +248,7 @@ void CXLController::insert_one(thread_info &t_info, lbr &lbr) {
 int CXLController::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint64_t virt_addr, int index) {
     auto &t_info = thread_map[tid];
 
-    // 计算时间步长,使timestamp均匀分布
+    // 计算时间步长
     uint64_t time_step = 0;
     if (index > last_index) {
         time_step = (timestamp - last_timestamp) / (index - last_index);
@@ -259,7 +265,7 @@ int CXLController::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, 
 
         if (cache_result.has_value()) {
             // 缓存命中
-            this->counter.inc_local();
+            this->counter.inc_hitm();
             t_info.llcm_type.push(0); // 本地访问类型
             continue;
         }
@@ -267,27 +273,42 @@ int CXLController::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, 
         // 缓存未命中，决定分配策略
         auto numa_policy = allocation_policy->compute_once(this);
 
+        // 检查是否需要页表遍历，并获取额外延迟
+        uint64_t ptw_latency = 0;
+        if (paging_policy) {
+            // 判断是远程访问还是本地访问
+            bool is_remote = numa_policy != -1;
+            ptw_latency = paging_policy->check_page_table_walk(virt_addr, phys_addr, is_remote, page_type_);
+
+            // 如果需要页表遍历，增加延迟
+            if (ptw_latency > 0) {
+                // 这里可以根据需要处理额外延迟
+                latency_lat += ptw_latency;
+                // 或者在计算总延迟时考虑这个因素
+            }
+        }
+
         if (numa_policy == -1) {
             // 本地访问
-            this->occupation.emplace(current_timestamp, phys_addr);
+            this->occupation.emplace(current_timestamp, occupation_info{phys_addr, 1, current_timestamp + ptw_latency});
             this->counter.inc_local();
             t_info.llcm_type.push(0);
 
             // 更新缓存
-            update_cache(phys_addr, phys_addr, current_timestamp); // 使用物理地址作为值
+            update_cache(phys_addr, phys_addr, current_timestamp);
         } else {
             // 远程访问
             this->counter.inc_remote();
             for (auto switch_ : this->switches) {
-                res &= switch_->insert(current_timestamp, tid, phys_addr, virt_addr, numa_policy);
+                res &= switch_->insert(current_timestamp + ptw_latency, tid, phys_addr, virt_addr, numa_policy);
             }
             for (auto expander_ : this->expanders) {
-                res &= expander_->insert(current_timestamp, tid, phys_addr, virt_addr, numa_policy);
+                res &= expander_->insert(current_timestamp + ptw_latency, tid, phys_addr, virt_addr, numa_policy);
             }
             t_info.llcm_type.push(1); // 远程访问类型
-            // 可以选择是否缓存远程访问的数据
-            if (caching_policy->compute_once(this)) {
-                counter.inc_hitm();
+
+            // 如果缓存策略允许缓存远程访问的数据
+            if (caching_policy->should_cache(phys_addr, current_timestamp)) {
                 update_cache(phys_addr, phys_addr, current_timestamp);
             }
         }
@@ -372,28 +393,16 @@ void CXLController::perform_back_invalidation() {
     if (!caching_policy)
         return;
 
-    // 统计结构
-    struct {
-        uint64_t invalidations_performed{0}; // 执行的失效操作数
-        uint64_t invalidations_attempts{0}; // 尝试的失效操作数
-    } local_stats;
-
-    // 获取需要失效的地址列表
     auto invalidation_list = caching_policy->get_invalidation_list(this);
-    local_stats.invalidations_attempts = invalidation_list.size();
 
     // 对每个地址执行失效
     for (const auto &addr : invalidation_list) {
         // 从本地缓存中移除
         if (lru_cache.remove(addr)) {
-            local_stats.invalidations_performed++;
+            counter.inc_backinv();
         }
-
         // 从所有内存扩展器的occupation中移除
         invalidate_in_expanders(addr);
-    }
-    for (int i = 0; i < local_stats.invalidations_performed;) {
-        counter.inc_backinv();
     }
 }
 

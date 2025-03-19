@@ -1,6 +1,9 @@
 add_subdirectory(gapbs)
+set(GGML_AVX ON)
+set(LLAMA_CURL ON)
 add_subdirectory(llama.cpp)
-add_subdirectory(vsag)
+#add_subdirectory(vsag)
+#add_subdirectory(gromacs)
 
 macro(memcached_build)
     set(memcached_src ${CMAKE_CURRENT_SOURCE_DIR}/memcached)

@@ -60,7 +60,8 @@ public:
     std::mutex wanted_delay_mutex;
     timespec injected_delay; // recorded time for injected
     timespec wasted_delay; // recorded time for calling between continue and calculation
-    timespec squabble_delay; // inj-was
+    constexpr static timespec interval_delay = {0,10000000}; // inj-was
+    static timespec last_delay; // last delay
     Elem elem[2]; // before & after
     Elem *before, *after;
     double total_delay;
@@ -72,7 +73,7 @@ public:
 
     Monitor(const Monitor &other)
         : tgid(other.tgid), tid(other.tid), cpu_core(other.cpu_core), wanted_delay(other.wanted_delay),
-          injected_delay(other.injected_delay), squabble_delay(other.squabble_delay),
+          injected_delay(other.injected_delay),
           before(nullptr), // Will be set after copying elements
           after(nullptr), // Will be set after copying elements
           total_delay(other.total_delay), start_exec_ts(other.start_exec_ts), end_exec_ts(other.end_exec_ts),
