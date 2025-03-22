@@ -26,7 +26,7 @@ double CXLMemExpander::calculate_latency(const std::vector<std::tuple<uint64_t, 
     }
 
     // 首先更新地址缓存以确保其最新
-    update_address_cache();
+    // update_address_cache();
 
     double total_latency = 0.0;
     size_t access_count = 0;

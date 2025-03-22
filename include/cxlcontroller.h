@@ -15,8 +15,8 @@
 #include "cxlendpoint.h"
 #include "lbr.h"
 #include <queue>
+#include <shared_mutex>
 #include <string_view>
-
 class Monitors;
 struct mem_stats;
 struct proc_info;
@@ -110,55 +110,46 @@ public:
 };
 
 struct LRUCacheEntry {
-    uint64_t key; // 缓存键（地址）
-                  // Cache key (address)
-    uint64_t value; // 缓存值
-                    // Cache value
-    uint64_t timestamp; // 最后访问时间戳
-                        // Last access timestamp
+    uint64_t key; // Cache key (address)
+    uint64_t value; // Cache value
+    uint64_t timestamp; // Last access timestamp
 };
-
-// LRU缓存
-// LRU cache
+// 使用读写锁的线程安全LRU缓存
 class LRUCache {
 public:
     int capacity; // 缓存容量
-                  // Cache capacity
     std::unordered_map<uint64_t, LRUCacheEntry> cache; // 缓存映射
-                                                       // Cache mapping
     std::list<uint64_t> lru_list; // LRU列表，最近使用的在前面
-                                  // LRU list, most recently used at front
     std::unordered_map<uint64_t, std::list<uint64_t>::iterator> lru_map; // 用于O(1)查找列表位置
-                                                                         // For O(1) lookup of list positions
-
+    mutable std::shared_mutex rwmutex_; // 读写锁
     explicit LRUCache(int size) : capacity(size) {}
-
-    // 获取缓存值，如果存在则更新访问顺序
-    // Get cache value, update access order if it exists
+    // 获取缓存值，如果存在则更新访问顺序（需要写锁，因为会修改LRU顺序）
     std::optional<uint64_t> get(uint64_t key, uint64_t timestamp) {
+        // 首先尝试以共享锁方式检查键是否存在
+        {
+            std::shared_lock<std::shared_mutex> readLock(rwmutex_);
+            auto it = cache.find(key);
+            if (it == cache.end()) {
+                return std::nullopt; // 缓存未命中
+            }
+        }
+        // 如果键存在，需要升级到独占锁进行更新
+        std::unique_lock<std::shared_mutex> writeLock(rwmutex_);
         auto it = cache.find(key);
         if (it == cache.end()) {
-            return std::nullopt; // 缓存未命中
-                                 // Cache miss
+            return std::nullopt; // 在获取写锁期间键可能已被删除
         }
-
         // 更新访问顺序
-        // Update access order
         lru_list.erase(lru_map[key]);
         lru_list.push_front(key);
         lru_map[key] = lru_list.begin();
-
         // 更新时间戳
-        // Update timestamp
         it->second.timestamp = timestamp;
-
         return it->second.value; // 返回缓存值
-                                 // Return cache value
     }
-
     // 添加或更新缓存
-    // Add or update cache
     void put(uint64_t key, uint64_t value, uint64_t timestamp) {
+        std::unique_lock<std::shared_mutex> writeLock(rwmutex_);
         // 如果已存在，先移除旧位置
         if (cache.find(key) != cache.end()) {
             lru_list.erase(lru_map[key]);
@@ -170,42 +161,57 @@ public:
             lru_map.erase(lru_key);
             cache.erase(lru_key);
         }
-
         // 添加新项到最前面（最近使用）
         lru_list.push_front(key);
         lru_map[key] = lru_list.begin();
         cache[key] = {key, value, timestamp};
     }
-
-    // 获取缓存使用情况统计
-    std::tuple<int, int> get_stats() { return {cache.size(), capacity}; }
-
+    // 获取缓存使用情况统计（只读操作）
+    std::tuple<int, int> get_stats() const {
+        std::shared_lock<std::shared_mutex> readLock(rwmutex_);
+        return {cache.size(), capacity};
+    }
     // 清除缓存
     void clear() {
+        std::unique_lock<std::shared_mutex> writeLock(rwmutex_);
         cache.clear();
         lru_list.clear();
         lru_map.clear();
     }
-    // LRU缓存类中添加size()方法
-    size_t size() const { return cache.size(); }
-
-    // LRU缓存类中添加remove()方法
+    // 获取缓存大小（只读操作）
+    size_t size() const {
+        std::shared_lock<std::shared_mutex> readLock(rwmutex_);
+        return cache.size();
+    }
+    // 移除指定键
     bool remove(uint64_t key) {
+        std::unique_lock<std::shared_mutex> writeLock(rwmutex_);
         auto it = cache.find(key);
         if (it == cache.end()) {
             return false; // 键不存在
         }
-
         // 从LRU列表中移除
         lru_list.erase(lru_map[key]);
-
         // 从映射中移除
         lru_map.erase(key);
-
         // 从缓存中移除
         cache.erase(key);
-
         return true;
+    }
+    // 判断键是否存在（只读操作，不更新LRU顺序）
+    bool contains(uint64_t key) const {
+        std::shared_lock<std::shared_mutex> readLock(rwmutex_);
+        return cache.find(key) != cache.end();
+    }
+
+    // 添加一个查看值但不更新LRU顺序的方法（只读操作）
+    std::optional<uint64_t> peek(uint64_t key) const {
+        std::shared_lock<std::shared_mutex> readLock(rwmutex_);
+        auto it = cache.find(key);
+        if (it == cache.end()) {
+            return std::nullopt;
+        }
+        return it->second.value;
     }
 };
 

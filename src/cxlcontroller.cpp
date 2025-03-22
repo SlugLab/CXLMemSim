@@ -87,7 +87,6 @@ void CXLController::set_process_info(const proc_info &process_info) {
 void CXLController::set_thread_info(const proc_info &thread_info) {
     if (thread_info.current_pid == monitors->mon[0].tgid) {
         monitors->enable(thread_info.current_pid, thread_info.current_tid, false, 0, helper.num_of_cpu());
-        // std::cout << "set thread info " << thread_info.current_pid << " " << thread_info.current_tid << std::endl;
         auto lbr_ = new lbr{.from = 0, .to = 0, .flags = 0};
         this->insert_one(thread_map[thread_info.current_tid], *lbr_);
         delete lbr_;

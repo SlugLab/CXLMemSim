@@ -36,13 +36,15 @@ public:
     int64_t stallCount_ = 0; // 停顿计数
     int64_t stallEventCount_ = 0; // 停顿事件计数
     int64_t cur_latency = 0;
+    int64_t last_latency = 0;
     int64_t totalLatency_ = 0;
     int64_t currentCycle_ = 0; // 当前周期
     int counter = 0;
     // 主要方法
     bool issue(const InstructionGroup &ins);
     bool canRetire(const InstructionGroup &ins);
-    void retire();
+    bool tryAlternativeRetire();
+    bool retire();
     void tick(); // 新增:时钟周期推进
 
     // 性能统计
@@ -65,6 +67,7 @@ public:
     CXLController *controller_;
     const size_t maxSize_;
     std::atomic<int64_t> stallCount_{0};
+    std::atomic<int64_t> robCount_{0};
     std::atomic<int64_t> totalLatency_{0};
     std::atomic<int64_t> currentCycle_{0};
     std::atomic<int> counter{0};
@@ -94,6 +97,7 @@ public:
 
     // 性能统计
     int64_t getStallCount() const { return stallCount_.load(); }
+    int64_t getStallEventCount() const { return robCount_.load(); }
     int64_t getCurrentCycle() const { return currentCycle_.load(); }
     double getAverageLatency();
 };

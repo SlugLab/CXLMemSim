@@ -232,7 +232,7 @@ int main(int argc, char *argv[]) {
         "m,mode", "Page mode or cacheline mode", cxxopts::value<std::string>()->default_value("cacheline"))(
         "f,frequency", "The frequency for the running thread", cxxopts::value<double>()->default_value("4000"))(
         "l,latency", "The simulated latency by epoch based calculation for injected latency",
-        cxxopts::value<std::vector<int>>()->default_value("100,150,100,150,100,150"))(
+        cxxopts::value<std::vector<int>>()->default_value("100,100,100,100,100,100"))(
         "b,bandwidth", "The simulated bandwidth by linear regression",
         cxxopts::value<std::vector<int>>()->default_value("50,50,50,50,50,50"));
 
@@ -258,9 +258,9 @@ int main(int argc, char *argv[]) {
         mode = PAGE;
     }
     auto *policy1 = new InterleavePolicy();
-    auto *policy2 = new HeatAwareMigrationPolicy();
-    auto *policy3 = new HugePagePolicy();
-    auto *policy4 = new FIFOPolicy();
+    auto *policy2 = new MigrationPolicy();
+    auto *policy3 = new PagingPolicy();
+    auto *policy4 = new CachingPolicy();
 
     for (auto const &[idx, value] : capacity | std::views::enumerate) {
         if (idx == 0) {
@@ -290,10 +290,10 @@ int main(int argc, char *argv[]) {
     // std::vector<std::string> groupLines;
     std::vector<InstructionGroup> instructions;
     parseInParallel(file, instructions);
+    SPDLOG_INFO("{} instructions to process", instructions.size());
     // rob.processInstructions(instructions);
     // Now simulate issuing them into the ROB
-    SPDLOG_INFO("{} instructions to process", instructions.size());
-    for (const auto &[idx, instruction] : instructions|std::views::enumerate) {
+    for (const auto &[idx, instruction] : instructions | std::views::enumerate) {
         bool issued = false;
         while (!issued) {
             issued = rob.issue(instruction);
@@ -321,6 +321,6 @@ int main(int argc, char *argv[]) {
     std::cout << "Stalls: " << rob.getStallCount() << std::endl;
     std::cout << "ROB Events: " << rob.getStallEventCount() << std::endl;
 
-    std::cout << std::format("{}",*controller)  << std::endl;
+    std::cout << std::format("{}", *controller) << std::endl;
     return 0;
 }
