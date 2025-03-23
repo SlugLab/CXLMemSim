@@ -1,0 +1,89 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+[2025-03-23 00:37:50.590] [info] [bpftime_shm_internal.cpp:34] Global shm initialized
+[2025-03-23 00:37:50.593] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.593] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.594] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.594] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.595] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.595] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.596] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.598] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.599] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.599] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.599] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.600] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.600] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.601] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.601] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.602] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:50.602] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:37:51][info][142031] Global shm initialized
+[2025-03-23 00:37:51][info][142031] Initializing agent..
+[2025-03-23 00:37:55][info][142031] Attach successfully
+error while handling argument "--cache-type-k": Unsupported cache type: q2_0
+
+usage:
+-ctk,  --cache-type-k TYPE              KV cache data type for K
+                                        allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1
+                                        (default: f16)
+                                        (env: LLAMA_ARG_CACHE_TYPE_K)
+
+
+to show complete usage, run with -h
+pthread_create_probe: pid: 142030 thread_ptr: 5dd0afb7a3e8
+pthread_create_return_probe: pid: 142030 thread_id: 130935339091648 (0x7715c26006c0)
+========== Process 0[tgid=142031, tid=142031] statistics summary ==========
+emulated time =3.472977265
+total delay   =2.098577944
+PEBS sample total 504 8090
+LBR sample total 0
+bpftime sample total 18281
+CXLController:
+Total system memory capacity: 60GB
+  Page Type: PAGE
+  Global Counter:
+    Local: 0
+    Remote: 486
+    HITM: 32932
+Topology:
+Switch:
+  Events:
+    Load: 0
+    Store: 0
+    Conflict: 0
+  Switch:
+    Events:
+      Load: 0
+      Store: 0
+      Conflict: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+  Expander:
+    Events:
+      Load: 0
+      Store: 486
+      Migrate in: 0
+      Migrate out: 0
+      Hit Old: 0
+
+Statistics:
+  Number of Switches: 2
+  Number of Endpoints: 3
+  Number of Threads created: 1
+  Memory Freed: 8538509320 bytes
+

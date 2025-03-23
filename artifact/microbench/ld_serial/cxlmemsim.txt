@@ -1,0 +1,77 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+[2025-03-23 00:38:02.089] [info] [bpftime_shm_internal.cpp:34] Global shm initialized
+[2025-03-23 00:38:02.111] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.113] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.115] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.117] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.118] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.120] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.122] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.132] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.134] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.135] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.136] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.138] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.140] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.141] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.143] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.145] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:02.146] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-23 00:38:03.091] [error] [main.cc:245] Exec: failed to create target process
+pthread_create_probe: pid: 142156 thread_ptr: 5fa26f422188
+pthread_create_return_probe: pid: 142156 thread_id: 133075910526656 (0x7908266006c0)
+========== Process 0[tgid=142157, tid=142157] statistics summary ==========
+emulated time =1.672875262
+total delay   =0.69155561
+PEBS sample total 34 340
+LBR sample total 0
+bpftime sample total 18270
+CXLController:
+Total system memory capacity: 60GB
+  Page Type: PAGE
+  Global Counter:
+    Local: 0
+    Remote: 34
+    HITM: 306
+Topology:
+Switch:
+  Events:
+    Load: 0
+    Store: 0
+    Conflict: 0
+  Switch:
+    Events:
+      Load: 0
+      Store: 0
+      Conflict: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+  Expander:
+    Events:
+      Load: 0
+      Store: 34
+      Migrate in: 0
+      Migrate out: 0
+      Hit Old: 0
+
+Statistics:
+  Number of Switches: 2
+  Number of Endpoints: 3
+  Number of Threads created: 1
+  Memory Freed: 8538509320 bytes
+

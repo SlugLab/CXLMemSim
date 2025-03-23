@@ -1,0 +1,5 @@
+numactl: execution of `./microbench/st': No such file or directory
+
+Command exited with non-zero status 1
+0.00user 0.00system 0:00.00elapsed 79%CPU (0avgtext+0avgdata 1920maxresident)k
+0inputs+0outputs (0major+93minor)pagefaults 0swaps

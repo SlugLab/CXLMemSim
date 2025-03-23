@@ -1,0 +1,4 @@
+/usr/bin/python3: can't open file '/home/steve/CXLMemSim-dev/build/run_algorithm.py': [Errno 2] No such file or directory
+Command exited with non-zero status 2
+0.00user 0.00system 0:00.01elapsed 86%CPU (0avgtext+0avgdata 10624maxresident)k
+0inputs+0outputs (0major+1188minor)pagefaults 0swaps

@@ -41,25 +41,25 @@ WORKLOADS = {
         "programs": [
             "bc", "bfs", "cc", "pr", "sssp", "tc"  # All algorithms provided by GAPBS
         ],
-        "args": "-f ../workloads/gapbs/benchmark/graphs/twitter.sg -n64",  # Default arguments
+        "args": "-f ../workloads/gapbs/test/graphs/4.el -n100000",  # Default arguments
         "env": {}  # Default environment variables
     },
     "memcached": {
         "path": "./workloads/memcached",
         "programs": ["memcached"],
-        "args": "-u try",
+        "args": "-u steve",
         "env": {}
     },
     "llama": {
         "path": "../workloads/llama.cpp/build/bin",
         "programs": ["llama-cli"],
-        "args": "-hf bartowski/DeepSeek-R1-Distill-Qwen-32B-GGUF --cache-type-k q8_0 --threads 4 --prompt '</think>What is 1+1?</think>' -no-cnv",
+        "args": "--model /storage/deepseek/DeepSeek-R1-Distill-Qwen-32B-IQ2_XXS.gguf --cache-type-k q2_0 --threads 12 --prompt '</think>Generate a poem about a cat in 200 words</think>' -no-cnv",
         "env": {}
     },
     "gromacs": {
         "path": "../workloads/gromacs/build/bin",
         "programs": ["gmx"],
-        "args": "mdrun -s ../workloads/gromacs/build/topol.tpr -nsteps 1 -ntomp 1 -ntmpi 1",
+        "args": "mdrun -s ../workloads/gromacs/build/topol.tpr -nsteps 4 -ntomp 1 -ntmpi 1",
         "env": {}
     },
     "vsag": {
@@ -145,13 +145,23 @@ def run_original(workload, program, args, base_dir):
     log_path = os.path.join(base_dir, "orig.txt")
 
     # Build command
-    cmd = f"{program_path} {args}" if args else program_path
+    cmd = f"time numactl --cpunodebind=0 --membind=0 {program_path} {args}" if args else f"time numactl --cpunodebind=0 --membind=0 {program_path}"
+
+    # Execute command
+    return run_command(cmd, log_path, WORKLOADS[workload].get("env"), shell=True)
+def run_remote(workload, program, args, base_dir):
+    """Run original program"""
+    program_path = os.path.join(WORKLOADS[workload]["path"], program)
+    log_path = os.path.join(base_dir, "remote.txt")
+
+    # Build command
+    cmd = f"time numactl --cpunodebind=0 --membind=1 {program_path} {args}" if args else f"time numactl --cpunodebind=0 --membind=1 {program_path}"
 
     # Execute command
     return run_command(cmd, log_path, WORKLOADS[workload].get("env"), shell=True)
 
 def run_cxl_mem_sim(workload, program, args, base_dir, policy_combo=None, pebs_period=10,
-                    latency="200,250,200,250,200,250", bandwidth="50,50,50,50,50,50"):
+                    latency="100,100,100,100,100,100", bandwidth="100,100,100,100,100,100"):
     """Run program with CXLMemSim"""
     program_path = os.path.join(WORKLOADS[workload]["path"], program)
 
@@ -234,6 +244,12 @@ def run_all_workloads(args):
             if args.run_original:
                 logger.info(f"Running original program: {program}")
                 returncode, _ = run_original(
+                    workload_name,
+                    program,
+                    workload_config["args"],
+                    program_dir
+                )
+                returncode, _ = run_remote(
                     workload_name,
                     program,
                     workload_config["args"],
