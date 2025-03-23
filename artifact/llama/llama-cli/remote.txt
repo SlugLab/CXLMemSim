@@ -1,0 +1,13 @@
+error while handling argument "--cache-type-k": Unsupported cache type: q2_0
+
+usage:
+-ctk,  --cache-type-k TYPE              KV cache data type for K
+                                        allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1
+                                        (default: f16)
+                                        (env: LLAMA_ARG_CACHE_TYPE_K)
+
+
+to show complete usage, run with -h
+Command exited with non-zero status 1
+0.00user 0.00system 0:00.01elapsed 100%CPU (0avgtext+0avgdata 14592maxresident)k
+0inputs+0outputs (0major+962minor)pagefaults 0swaps

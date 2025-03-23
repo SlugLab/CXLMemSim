@@ -1,0 +1,27 @@
+     :-) GROMACS - gmx mdrun, 2026.0-dev-20250321-66aade4-dirty-unknown (-:
+
+Executable:   /home/steve/CXLMemSim-dev/build/../workloads/gromacs/build/bin/gmx
+Data prefix:  /home/steve/CXLMemSim-dev/workloads/gromacs (source tree)
+Working dir:  /home/steve/CXLMemSim-dev/build
+Command line:
+  gmx mdrun -s ../workloads/gromacs/build/topol.tpr -nsteps 1 -ntomp 1 -ntmpi 1
+
+
+Back Off! I just backed up md.log to ./#md.log.7#
+Reading file ../workloads/gromacs/build/topol.tpr, VERSION 2026.0-dev-20250321-66aade4-dirty-unknown (single precision)
+
+-------------------------------------------------------
+Program:     gmx mdrun, version 2026.0-dev-20250321-66aade4-dirty-unknown
+Source file: src/gromacs/mdlib/gmx_omp_nthreads.cpp (line 198)
+
+Fatal error:
+Environment variable OMP_NUM_THREADS (4) and the number of threads requested
+on the command line (1) have different values. Either omit one, or set them
+both to the same value.
+
+For more information and tips for troubleshooting, please check the GROMACS
+website at https://manual.gromacs.org/current/user-guide/run-time-errors.html
+-------------------------------------------------------
+Command exited with non-zero status 1
+0.01user 0.00system 0:00.01elapsed 94%CPU (0avgtext+0avgdata 22320maxresident)k
+0inputs+24outputs (0major+3130minor)pagefaults 0swaps

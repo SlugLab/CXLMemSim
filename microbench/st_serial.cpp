@@ -20,7 +20,7 @@
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 #define MOVE_SIZE 128
-#define MAP_SIZE  (long)(1024)
+#define MAP_SIZE  (long)(1024* 1024* 1024)
 #define CACHELINE_SIZE  64
 #ifndef FENCE_COUNT
 #define FENCE_COUNT 8
