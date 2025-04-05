@@ -2,82 +2,10 @@ use cpuid: 0 0
 use cpuid: 1 0
 use cpuid: 2 0
 use cpuid: 3 0
-[2025-03-23 00:42:36.186] [info] [bpftime_shm_internal.cpp:34] Global shm initialized
-[2025-03-23 00:42:36.203] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.205] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.206] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.208] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.209] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.211] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.212] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.221] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.222] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.223] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.224] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.226] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.227] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.228] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.230] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.231] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:36.232] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:42:37][info][142824] Global shm initialized
-[2025-03-23 00:42:37][info][142824] Initializing agent..
-[2025-03-23 00:42:37][info][142824] Attach successfully
+terminate called after throwing an instance of 'boost::interprocess::interprocess_exception'
+  what():  Permission denied
+ERROR: ld.so: object '/root/.bpftime/libbpftime-agent.so' from LD_PRELOAD cannot be preloaded (cannot open shared object file): ignored.
 argv[0] = ./microbench/malloc
-allocating 100000 MB
+allocating 1000 MB
 allocated - press enter to fill/read
 filling
-pthread_create_probe: pid: 142823 thread_ptr: 5f88fe2fe188
-pthread_create_return_probe: pid: 142823 thread_id: 132602673497792 (0x7899f74006c0)
-========== Process 0[tgid=142824, tid=142824] statistics summary ==========
-emulated time =218.412208513
-total delay   =1.3856698079999998
-PEBS sample total 251 2962
-LBR sample total 0
-bpftime sample total 4491371
-CXLController:
-Total system memory capacity: 60GB
-  Page Type: PAGE
-  Global Counter:
-    Local: 0
-    Remote: 251
-    HITM: 2711
-Topology:
-Switch:
-  Events:
-    Load: 0
-    Store: 0
-    Conflict: 0
-  Switch:
-    Events:
-      Load: 0
-      Store: 0
-      Conflict: 0
-    Expander:
-      Events:
-        Load: 0
-        Store: 0
-        Migrate in: 0
-        Migrate out: 0
-        Hit Old: 0
-    Expander:
-      Events:
-        Load: 0
-        Store: 0
-        Migrate in: 0
-        Migrate out: 0
-        Hit Old: 0
-  Expander:
-    Events:
-      Load: 0
-      Store: 251
-      Migrate in: 0
-      Migrate out: 0
-      Hit Old: 0
-
-Statistics:
-  Number of Switches: 2
-  Number of Endpoints: 3
-  Number of Threads created: 1
-  Memory Freed: 8538509320 bytes
-

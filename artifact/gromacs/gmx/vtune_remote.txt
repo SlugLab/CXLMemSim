@@ -1,0 +1,381 @@
+vtune: Peak bandwidth measurement started.
+vtune: Peak bandwidth measurement finished.
+vtune: Collection started. To stop the collection, either press CTRL-C or enter from another console window: vtune -r /home/steve/CXLMemSim-dev/build/r019macc -command stop.
+     :-) GROMACS - gmx mdrun, 2026.0-dev-20250321-66aade4-dirty-unknown (-:
+
+Executable:   /home/steve/CXLMemSim-dev/build/../workloads/gromacs/build/bin/gmx
+Data prefix:  /home/steve/CXLMemSim-dev/workloads/gromacs (source tree)
+Working dir:  /home/steve/CXLMemSim-dev/build
+Command line:
+  gmx mdrun -s ../workloads/gromacs/build/topol.tpr -nsteps 4 -ntomp 1 -ntmpi 1
+
+
+Back Off! I just backed up md.log to ./#md.log.11#
+Reading file ../workloads/gromacs/build/topol.tpr, VERSION 2026.0-dev-20250321-66aade4-dirty-unknown (single precision)
+Overriding nsteps with value passed on the command line: 4 steps, 0.008 ps
+Changing nstlist from 10 to 50, rlist from 1 to 1.113
+
+
+Using 1 MPI thread
+Using 1 OpenMP thread 
+
+
+NOTE: Thread affinity was not set.
+
+Back Off! I just backed up traj_comp.xtc to ./#traj_comp.xtc.7#
+
+Back Off! I just backed up ener.edr to ./#ener.edr.7#
+starting mdrun 'PEPSIN in water'
+4 steps,      0.0 ps.
+
+Step 0, time 0 (ps)  LINCS WARNING
+relative constraint deviation after LINCS:
+rms 0.098330, max 2.407218 (between atoms 3851 and 3852)
+bonds that rotated more than 30 degrees:
+ atom 1 atom 2  angle  previous, current, constraint length
+   1541   1542   78.0    0.1004   0.1092      0.1090
+   1511   1514   90.0    0.1004   0.1929      0.1090
+    704    706   63.9    0.1004   0.1091      0.1090
+    626    627   48.5    0.1004   0.1090      0.1090
+   4128   4130   59.4    0.1002   0.1090      0.1090
+   1054   1055   90.0    0.0996   0.2275      0.1090
+   1020   1021   90.0    0.0994   0.2099      0.1090
+   3320   3321   80.7    0.0999   0.1091      0.1090
+   3231   3233   90.0    0.1008   0.1379      0.1090
+   3173   3176   90.0    0.1007   0.1191      0.1090
+   1449   1450   40.3    0.0994   0.1080      0.1080
+   3360   3361   90.0    0.1005   0.1765      0.1090
+   4047   4048   36.0    0.1001   0.1010      0.1010
+   1664   1666   90.0    0.0998   0.1450      0.1090
+   3110   3111   90.0    0.1003   0.1126      0.1090
+   1274   1275   90.0    0.1000   0.3068      0.1090
+   1274   1277   90.0    0.0994   0.2912      0.1090
+    293    294   90.0    0.1004   0.1429      0.1090
+    293    296   52.0    0.0996   0.1151      0.1090
+   2787   2788   90.0    0.0998   0.2080      0.1090
+   2787   2789   40.4    0.0996   0.1137      0.1090
+   1966   1967   79.9    0.0997   0.1091      0.1090
+   3986   3988   90.0    0.1005   0.1126      0.1090
+   3884   3885   90.0    0.1001   0.1546      0.1090
+   3665   3668   77.7    0.0996   0.1089      0.1090
+   1346   1347   33.4    0.0993   0.1010      0.1010
+   1348   1349   40.5    0.1007   0.1090      0.1090
+   1350   1351   33.8    0.1005   0.1090      0.1090
+   4534   4535   90.0    0.1006   0.1240      0.1090
+   4534   4537   90.0    0.1004   0.2666      0.1090
+   2274   2276   90.0    0.1000   0.2113      0.1090
+   3851   3852   90.0    0.0999   0.3714      0.1090
+   3804   3806   48.2    0.0999   0.1092      0.1090
+   2163   2164   90.0    0.0999   0.2315      0.1090
+   2312   2313   90.0    0.0999   0.2365      0.1090
+
+Back Off! I just backed up step0b.pdb to ./#step0b.pdb.7#
+
+Back Off! I just backed up step0c.pdb to ./#step0c.pdb.7#
+Wrote pdb files with previous and current coordinates
+
+Step 1 Pressure scaling more than 1%. This may mean your system is not yet equilibrated. Use of Parrinello-Rahman pressure coupling during equilibration can lead to simulation instability, and is discouraged.
+
+Step 1, time 0.002 (ps)  LINCS WARNING
+relative constraint deviation after LINCS:
+rms 1515840.750000, max 57458660.000000 (between atoms 2787 and 2788)
+bonds that rotated more than 30 degrees:
+ atom 1 atom 2  angle  previous, current, constraint length
+   1507   1508   90.0    0.1090 647.2371      0.1090
+   1511   1512   90.0    0.1087 375.1739      0.1090
+   1511   1513   90.0    0.1086 505.2137      0.1090
+   1511   1514   90.0    0.1929 5247.2373      0.1090
+   1018   1019   90.0    0.1090  24.8892      0.1090
+   3227   3228   90.0    0.1010   2.2547      0.1010
+   4128   4130   33.9    0.1090   0.1090      0.1090
+   1054   1055   52.1    0.2275   0.1090      0.1090
+   1020   1021   90.0    0.2099  28.6252      0.1090
+   1020   1022   90.0    0.1083   0.4161      0.1090
+   1020   1023   90.0    0.1083   0.3998      0.1090
+   1024   1025   90.0    0.1090   0.3701      0.1090
+   1024   1026   90.0    0.1090   0.2536      0.1090
+   1024   1027   90.0    0.1090   0.3673      0.1090
+   3231   3232   90.0    0.1085   1.5035      0.1090
+   3231   3233   90.0    0.1379   9.8724      0.1090
+   3231   3234   90.0    0.1082   2.1525      0.1090
+   3173   3176   43.5    0.1191   0.1090      0.1090
+   3114   3115   80.6    0.0960   0.0960      0.0960
+   3360   3361   90.0    0.1765 171.0080      0.1090
+   3360   3362   90.0    0.1086   7.9793      0.1090
+   1664   1666   46.7    0.1450   0.1090      0.1090
+   3110   3111   90.0    0.1126   0.8272      0.1090
+   3110   3112   41.4    0.1091   0.1054      0.1090
+   3110   3113   43.4    0.1090   0.1047      0.1090
+    291    292   90.0    0.1090   1.0528      0.1090
+   1274   1275   90.0    0.3068 341036.4375      0.1090
+   1274   1276   90.0    0.1078 333912.8750      0.1090
+   1274   1277   90.0    0.2912 1042143.1250      0.1090
+    293    294   90.0    0.1429   1.0151      0.1090
+   2787   2788   90.0    0.2080 6262994.0000      0.1090
+   2787   2789   90.0    0.1137 221169.5312      0.1090
+   2787   2790   90.0    0.1085 237147.0000      0.1090
+   2791   2792   90.0    0.0960 439649.0938      0.0960
+   1966   1967   90.0    0.1091   0.2870      0.1090
+   3986   3988   90.0    0.1126   0.1377      0.1090
+   3884   3885   48.4    0.1546   0.1090      0.1090
+   1270   1271   90.0    0.1090 514.7838      0.1090
+   1270   1272   90.0    0.1090 515.1422      0.1090
+   1270   1273   90.0    0.1090 57106.8789      0.1090
+   1266   1267   90.0    0.1090 4548814.0000      0.1090
+   3665   3667   35.4    0.1103   0.1095      0.1090
+   3665   3668   35.2    0.1089   0.1083      0.1090
+   2165   2166   90.0    0.1090 7272.0771      0.1090
+   2165   2167   90.0    0.1090 707.2671      0.1090
+   4530   4531   90.0    0.1010  32.2014      0.1010
+   4534   4535   90.0    0.1240  20.2215      0.1090
+   4534   4536   90.0    0.1086  22.3616      0.1090
+   4534   4537   90.0    0.2666 716.8351      0.1090
+   2274   2275   45.3    0.1079   0.1029      0.1090
+   2274   2276   90.0    0.2113  14.5009      0.1090
+   2272   2273   90.0    0.1090   0.7964      0.1090
+   3851   3852   90.0    0.3714  30.7908      0.1090
+   3851   3853   90.0    0.1080   0.5181      0.1090
+   2163   2164   90.0    0.2315 9758.9238      0.1090
+   2308   2309   90.0    0.1010  28.1765      0.1010
+   2312   2313   90.0    0.2365 407.3259      0.1090
+   2312   2314   90.0    0.1084   3.2545      0.1090
+   2223   2224   32.8    0.1080   0.1080      0.1080
+
+Back Off! I just backed up step1b.pdb to ./#step1b.pdb.7#
+
+Back Off! I just backed up step1c.pdb to ./#step1c.pdb.7#
+Wrote pdb files with previous and current coordinates
+vtune: Collection stopped.
+vtune: Using result path `/home/steve/CXLMemSim-dev/build/r019macc'
+
+vtune: Executing actions  0 %                                                  
+vtune: Executing actions  0 % Finalizing results                               
+vtune: Executing actions  0 % Finalizing the result                            
+vtune: Executing actions  0 % Clearing the database                            
+vtune: Executing actions  7 % Clearing the database                            
+vtune: Executing actions  7 % Loading raw data to the database                 
+vtune: Executing actions  7 % Loading 'systemcollector-187508-cxl1srv.sc' file 
+vtune: Executing actions 12 % Loading 'systemcollector-187508-cxl1srv.sc' file 
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Loading 'sep7cf1ac2006c0.20250323T182737.649974.t
+vtune: Executing actions 12 % Updating precomputed scalar metrics              
+vtune: Executing actions 14 % Updating precomputed scalar metrics              
+vtune: Executing actions 14 % Processing profile metrics and debug information 
+vtune: Executing actions 19 % Processing profile metrics and debug information 
+vtune: Executing actions 19 % Setting data model parameters                    
+vtune: Executing actions 19 % Resolving module symbols                         
+vtune: Executing actions 19 % Resolving information for dangling locations     
+vtune: Executing actions 19 % Resolving information for `ld-linux-x86-64.so.2' 
+vtune: Executing actions 19 % Resolving information for `libm.so.6'            
+vtune: Executing actions 19 % Resolving information for `libc.so.6'            
+vtune: Warning: Cannot locate file `sep5.ko'.
+
+vtune: Executing actions 19 % Resolving information for `sep5'                 
+vtune: Executing actions 20 % Resolving information for `sep5'                 
+vtune: Executing actions 20 % Resolving information for `libgromacs.so.11.0.0' 
+vtune: Executing actions 21 % Resolving information for `libgromacs.so.11.0.0' 
+vtune: Warning: Cannot locate debugging information for file `/home/steve/CXLMemSim-dev/workloads/gromacs/build/lib/libgromacs.so.11.0.0'.
+
+vtune: Executing actions 21 % Resolving information for `vmlinux'              
+vtune: Warning: Cannot locate debugging information for the Linux kernel. Source-level analysis will not be possible. Function-level analysis will be limited to kernel symbol tables. See the Enabling Linux Kernel Analysis topic in the product online help for instructions.
+
+vtune: Executing actions 22 % Resolving information for `vmlinux'              
+vtune: Executing actions 22 % Resolving bottom user stack information          
+vtune: Executing actions 23 % Resolving bottom user stack information          
+vtune: Executing actions 23 % Resolving thread name information                
+vtune: Executing actions 24 % Resolving thread name information                
+vtune: Executing actions 24 % Resolving call target names for dynamic code     
+vtune: Executing actions 25 % Resolving call target names for dynamic code     
+vtune: Executing actions 25 % Resolving interrupt name information             
+vtune: Executing actions 26 % Resolving interrupt name information             
+vtune: Executing actions 26 % Processing profile metrics and debug information 
+vtune: Executing actions 27 % Processing profile metrics and debug information 
+vtune: Executing actions 28 % Processing profile metrics and debug information 
+vtune: Executing actions 29 % Processing profile metrics and debug information 
+vtune: Executing actions 30 % Processing profile metrics and debug information 
+vtune: Executing actions 31 % Processing profile metrics and debug information 
+vtune: Executing actions 31 % Preparing output tree                            
+vtune: Executing actions 31 % Parsing columns in input tree                    
+vtune: Executing actions 32 % Parsing columns in input tree                    
+vtune: Executing actions 32 % Creating top-level columns                       
+vtune: Executing actions 32 % Creating top-level rows                          
+vtune: Executing actions 33 % Creating top-level rows                          
+vtune: Executing actions 33 % Setting data model parameters                    
+vtune: Executing actions 34 % Setting data model parameters                    
+vtune: Executing actions 34 % Precomputing frequently used data                
+vtune: Executing actions 34 % Precomputing frequently used data                
+vtune: Executing actions 35 % Precomputing frequently used data                
+vtune: Executing actions 36 % Precomputing frequently used data                
+vtune: Executing actions 37 % Precomputing frequently used data                
+vtune: Executing actions 38 % Precomputing frequently used data                
+vtune: Executing actions 39 % Precomputing frequently used data                
+vtune: Executing actions 39 % Updating precomputed scalar metrics              
+vtune: Executing actions 41 % Updating precomputed scalar metrics              
+vtune: Executing actions 41 % Discarding redundant overtime data               
+vtune: Executing actions 42 % Discarding redundant overtime data               
+vtune: Executing actions 42 % Saving the result                                
+vtune: Executing actions 44 % Saving the result                                
+vtune: Executing actions 46 % Saving the result                                
+vtune: Executing actions 50 % Saving the result                                
+vtune: Executing actions 50 % Generating a report                              
+vtune: Executing actions 50 % Setting data model parameters                    
+vtune: Executing actions 75 % Setting data model parameters                    
+vtune: Executing actions 75 % Generating a report                              Elapsed Time: 2.331s
+ | Application execution time is too short. Metrics data may be unreliable.
+ | Consider reducing the sampling interval or increasing your application
+ | execution time.
+ |
+    CPU Time: 2.230s
+    Memory Bound: 13.4% of Pipeline Slots
+        L1 Bound: 14.9% of Clockticks
+        L2 Bound: 0.0% of Clockticks
+        L3 Bound: 0.0% of Clockticks
+        DRAM Bound: 1.3% of Clockticks
+            DRAM Bandwidth Bound: 0.0% of Elapsed Time
+        Store Bound: 0.6% of Clockticks
+        NUMA: % of Remote Accesses: 0.0%
+    Loads: 6,480,194,400
+    Stores: 2,544,076,320
+    LLC Miss Count: 0
+        Local Memory Access Count: 0
+        Remote Memory Access Count: 0
+        Remote Cache Access Count: 0
+    Average Latency (cycles): 10
+    Total Thread Count: 1
+    Paused Time: 0s
+
+Bandwidth Utilization
+Bandwidth Domain  Platform Maximum  Observed Maximum  Average  % of Elapsed Time with High BW Utilization(%)
+----------------  ----------------  ----------------  -------  ---------------------------------------------
+DRAM, GB/sec      58                           8.300    1.167                                           0.0%
+Collection and Platform Info
+    Application Command Line: numactl "--cpunodebind=0" "--membind=1" "../workloads/gromacs/build/bin/gmx" "mdrun" "-s" "../workloads/gromacs/build/topol.tpr" "-nsteps" "4" "-ntomp" "1" "-ntmpi" "1" 
+    User Name: root
+    Operating System: 6.8.0-55-generic DISTRIB_ID=Ubuntu DISTRIB_RELEASE=24.04 DISTRIB_CODENAME=noble DISTRIB_DESCRIPTION="Ubuntu 24.04.2 LTS"
+    Computer Name: cxl1srv
+    Result Size: 11.8 MB 
+    Collection start time: 18:27:38 23/03/2025 UTC
+    Collection stop time: 18:27:40 23/03/2025 UTC
+    Collector Type: Event-based sampling driver
+    CPU
+        Name: Intel(R) Xeon(R) Processor code named Sapphirerapids
+        Frequency: 3.000 GHz
+        Logical CPU Count: 12
+        Max DRAM Single-Package Bandwidth: 58.000 GB/s
+        LLC size: 15.7 MB 
+        Cache Allocation Technology
+            Level 2 capability: available
+            Level 3 capability: available
+
+Recommendations:
+    Increase execution time: 
+     | Application execution time is too short. Metrics data may be unreliable.
+     | Consider reducing the sampling interval or increasing your application
+     | execution time.
+
+If you want to skip descriptions of detected performance issues in the report,
+enter: vtune -report summary -report-knob show-issues=false -r <my_result_dir>.
+Alternatively, you may view the report in the csv format: vtune -report
+<report_name> -format=csv.
+
+vtune: Executing actions 100 % Generating a report                             
+vtune: Executing actions 100 % done                                            

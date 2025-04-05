@@ -1,0 +1,6 @@
+argv[0] = ./microbench/malloc
+allocating 1000 MB
+allocated - press enter to fill/read
+filling
+1.82user 0.63system 0:03.81elapsed 64%CPU (0avgtext+0avgdata 1025280maxresident)k
+40inputs+0outputs (0major+256159minor)pagefaults 0swaps

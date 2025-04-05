@@ -1,0 +1,234 @@
+vtune: Peak bandwidth measurement started.
+vtune: Peak bandwidth measurement finished.
+vtune: Collection started. To stop the collection, either press CTRL-C or enter from another console window: vtune -r /home/steve/CXLMemSim-dev/build/r021macc -command stop.
+/usr/bin/python3: can't open file '/home/steve/CXLMemSim-dev/build/run_algorithm.py': [Errno 2] No such file or directory
+vtune: Collection stopped.
+vtune: Using result path `/home/steve/CXLMemSim-dev/build/r021macc'
+
+vtune: Executing actions  0 %                                                  
+vtune: Executing actions  0 % Finalizing results                               
+vtune: Executing actions  0 % Finalizing the result                            
+vtune: Executing actions  0 % Clearing the database                            
+vtune: Executing actions  7 % Clearing the database                            
+vtune: Executing actions  7 % Loading raw data to the database                 
+vtune: Executing actions  7 % Loading 'systemcollector-187923-cxl1srv.sc' file 
+vtune: Executing actions 12 % Loading 'systemcollector-187923-cxl1srv.sc' file 
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Loading 'sep7c3a1fa006c0.20250323T182802.373981.t
+vtune: Executing actions 12 % Updating precomputed scalar metrics              
+vtune: Executing actions 14 % Updating precomputed scalar metrics              
+vtune: Executing actions 14 % Processing profile metrics and debug information 
+vtune: Executing actions 19 % Processing profile metrics and debug information 
+vtune: Executing actions 19 % Setting data model parameters                    
+vtune: Executing actions 19 % Resolving module symbols                         
+vtune: Executing actions 19 % Resolving information for dangling locations     
+vtune: Executing actions 20 % Resolving information for dangling locations     
+vtune: Executing actions 20 % Resolving information for `libc.so.6'            
+vtune: Executing actions 20 % Resolving information for `ld-linux-x86-64.so.2' 
+vtune: Executing actions 20 % Resolving information for `python3.12'           
+vtune: Warning: Cannot locate debugging information for file `/usr/bin/python3.12'.
+
+vtune: Executing actions 20 % Resolving information for `vmlinux'              
+vtune: Executing actions 21 % Resolving information for `vmlinux'              
+vtune: Warning: Cannot locate debugging information for the Linux kernel. Source-level analysis will not be possible. Function-level analysis will be limited to kernel symbol tables. See the Enabling Linux Kernel Analysis topic in the product online help for instructions.
+
+vtune: Executing actions 22 % Resolving information for `vmlinux'              
+vtune: Executing actions 22 % Resolving bottom user stack information          
+vtune: Executing actions 23 % Resolving bottom user stack information          
+vtune: Executing actions 23 % Resolving thread name information                
+vtune: Executing actions 24 % Resolving thread name information                
+vtune: Executing actions 24 % Resolving call target names for dynamic code     
+vtune: Executing actions 25 % Resolving call target names for dynamic code     
+vtune: Executing actions 25 % Resolving interrupt name information             
+vtune: Executing actions 26 % Resolving interrupt name information             
+vtune: Executing actions 26 % Processing profile metrics and debug information 
+vtune: Executing actions 27 % Processing profile metrics and debug information 
+vtune: Executing actions 28 % Processing profile metrics and debug information 
+vtune: Executing actions 29 % Processing profile metrics and debug information 
+vtune: Executing actions 30 % Processing profile metrics and debug information 
+vtune: Executing actions 31 % Processing profile metrics and debug information 
+vtune: Executing actions 31 % Preparing output tree                            
+vtune: Executing actions 31 % Parsing columns in input tree                    
+vtune: Executing actions 32 % Parsing columns in input tree                    
+vtune: Executing actions 32 % Creating top-level columns                       
+vtune: Executing actions 32 % Creating top-level rows                          
+vtune: Executing actions 33 % Creating top-level rows                          
+vtune: Executing actions 33 % Setting data model parameters                    
+vtune: Executing actions 34 % Setting data model parameters                    
+vtune: Executing actions 34 % Precomputing frequently used data                
+vtune: Executing actions 34 % Precomputing frequently used data                
+vtune: Executing actions 35 % Precomputing frequently used data                
+vtune: Executing actions 36 % Precomputing frequently used data                
+vtune: Executing actions 37 % Precomputing frequently used data                
+vtune: Executing actions 38 % Precomputing frequently used data                
+vtune: Executing actions 39 % Precomputing frequently used data                
+vtune: Executing actions 39 % Updating precomputed scalar metrics              
+vtune: Executing actions 41 % Updating precomputed scalar metrics              
+vtune: Executing actions 41 % Discarding redundant overtime data               
+vtune: Executing actions 42 % Discarding redundant overtime data               
+vtune: Executing actions 42 % Saving the result                                
+vtune: Executing actions 44 % Saving the result                                
+vtune: Executing actions 46 % Saving the result                                
+vtune: Executing actions 50 % Saving the result                                
+vtune: Executing actions 50 % Generating a report                              
+vtune: Executing actions 50 % Setting data model parameters                    
+vtune: Executing actions 75 % Setting data model parameters                    
+vtune: Executing actions 75 % Generating a report                              Elapsed Time: 0.020s
+ | Application execution time is too short. Metrics data may be unreliable.
+ | Consider reducing the sampling interval or increasing your application
+ | execution time.
+ |
+    CPU Time: 0.020s
+    Memory Bound: 22.2% of Pipeline Slots
+     | The metric value is high. This may indicate that a significant fraction
+     | of execution pipeline slots could be stalled due to demand memory load
+     | and stores. Explore the metric breakdown by memory hierarchy, memory
+     | bandwidth information, and correlation by memory objects.
+     |
+        L1 Bound: 0.0% of Clockticks
+        L2 Bound: 0.0% of Clockticks
+        L3 Bound: 0.0% of Clockticks
+        DRAM Bound: 0.0% of Clockticks
+            DRAM Bandwidth Bound: 0.0% of Elapsed Time
+        Store Bound: 0.0% of Clockticks
+        NUMA: % of Remote Accesses: 0.0%
+    Loads: 0
+    Stores: 0
+    LLC Miss Count: 0
+        Local Memory Access Count: 0
+        Remote Memory Access Count: 0
+        Remote Cache Access Count: 0
+    Total Thread Count: 1
+    Paused Time: 0s
+
+Bandwidth Utilization
+Bandwidth Domain  Platform Maximum  Observed Maximum  Average  % of Elapsed Time with High BW Utilization(%)
+----------------  ----------------  ----------------  -------  ---------------------------------------------
+DRAM, GB/sec      59                           0.700    0.000                                           0.0%
+Collection and Platform Info
+    Application Command Line: numactl "--cpunodebind=0" "--membind=1" "/usr/bin/python3" "run_algorithm.py" "--dataset" "random-xs-20-angular" "--algorithm" "vsag" "--module" "ann_benchmarks.algorithms.vsag" "--constructor" "Vsag" "--runs" "2" "--count" "10" "--batch" "[angular, 20, {M: 24, ef_construction: 300, use_int8: 4, rs: 0.5}]" "[10]" "[20]" "[30]" "[40]" "[60]" "[80]" "[120]" "[200]" "[400]" "[600]" "[800]" 
+    User Name: root
+    Operating System: 6.8.0-55-generic DISTRIB_ID=Ubuntu DISTRIB_RELEASE=24.04 DISTRIB_CODENAME=noble DISTRIB_DESCRIPTION="Ubuntu 24.04.2 LTS"
+    Computer Name: cxl1srv
+    Result Size: 4.9 MB 
+    Collection start time: 18:28:02 23/03/2025 UTC
+    Collection stop time: 18:28:02 23/03/2025 UTC
+    Collector Type: Event-based sampling driver
+    CPU
+        Name: Intel(R) Xeon(R) Processor code named Sapphirerapids
+        Frequency: 3.000 GHz
+        Logical CPU Count: 12
+        Max DRAM Single-Package Bandwidth: 59.000 GB/s
+        LLC size: 15.7 MB 
+        Cache Allocation Technology
+            Level 2 capability: available
+            Level 3 capability: available
+
+Recommendations:
+    Increase execution time: 
+     | Application execution time is too short. Metrics data may be unreliable.
+     | Consider reducing the sampling interval or increasing your application
+     | execution time.
+
+If you want to skip descriptions of detected performance issues in the report,
+enter: vtune -report summary -report-knob show-issues=false -r <my_result_dir>.
+Alternatively, you may view the report in the csv format: vtune -report
+<report_name> -format=csv.
+
+vtune: Executing actions 100 % Generating a report                             
+vtune: Executing actions 100 % done                                            

@@ -2,87 +2,27 @@ use cpuid: 0 0
 use cpuid: 1 0
 use cpuid: 2 0
 use cpuid: 3 0
-[2025-03-23 00:37:47.127] [info] [bpftime_shm_internal.cpp:34] Global shm initialized
-[2025-03-23 00:37:47.153] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.155] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.157] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.160] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.162] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.164] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.166] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.178] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.180] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.181] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.183] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.185] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.188] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.189] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.192] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.194] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:47.196] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
-[2025-03-23 00:37:48][info][141979] Global shm initialized
-[2025-03-23 00:37:48][info][141979] Initializing agent..
-[2025-03-23 00:37:48][info][141979] Attach successfully
-pthread_create_probe: pid: 141979 thread_ptr: 7ffea45dacd8
-pthread_create_return_probe: pid: 141979 thread_id: 127859043600064 (0x744980e006c0)
-pthread_create_probe: pid: 141979 thread_ptr: 7ffea45dad58
-pthread_create_return_probe: pid: 141979 thread_id: 127859033114304 (0x7449804006c0)
-pthread_create_probe: pid: 141979 thread_ptr: 7ffea45dadd8
-pthread_create_return_probe: pid: 141979 thread_id: 127859022628544 (0x74497fa006c0)
-Read Time:           0.00057
-Build Time:          0.00039
+[2025-03-31 20:07:59.945] [info] [bpftime_shm_internal.cpp:34] Global shm initialized
+[2025-03-31 20:07:59.948] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.948] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.948] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.949] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.949] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.949] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.949] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.951] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.951] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.951] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.951] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.952] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.952] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.952] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.952] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.952] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+[2025-03-31 20:07:59.952] [info] [bpftime_shm_json.cpp:138] No tracepoint_id found in json
+perf_event_open: Permission denied
+terminate called without an active exception
+ERROR: ld.so: object '/root/.bpftime/libbpftime-agent.so' from LD_PRELOAD cannot be preloaded (cannot open shared object file): ignored.
+Read Time:           0.00033
+Build Time:          0.00024
 Input graph is directed but tc requires undirected
-pthread_create_probe: pid: 141978 thread_ptr: 55e096aa2208
-pthread_create_return_probe: pid: 141978 thread_id: 139682161624768 (0x7f0a49a006c0)
-========== Process 0[tgid=141979, tid=141979] statistics summary ==========
-emulated time =1.538614503
-total delay   =0.085958558
-PEBS sample total 118 2821
-LBR sample total 0
-bpftime sample total 11325
-CXLController:
-Total system memory capacity: 60GB
-  Page Type: PAGE
-  Global Counter:
-    Local: 0
-    Remote: 117
-    HITM: 33102
-Topology:
-Switch:
-  Events:
-    Load: 0
-    Store: 0
-    Conflict: 0
-  Switch:
-    Events:
-      Load: 0
-      Store: 0
-      Conflict: 0
-    Expander:
-      Events:
-        Load: 0
-        Store: 0
-        Migrate in: 0
-        Migrate out: 0
-        Hit Old: 0
-    Expander:
-      Events:
-        Load: 0
-        Store: 0
-        Migrate in: 0
-        Migrate out: 0
-        Hit Old: 0
-  Expander:
-    Events:
-      Load: 0
-      Store: 117
-      Migrate in: 0
-      Migrate out: 0
-      Hit Old: 0
-
-Statistics:
-  Number of Switches: 2
-  Number of Endpoints: 3
-  Number of Threads created: 1
-  Memory Freed: 8538509320 bytes
-
