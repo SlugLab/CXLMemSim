@@ -1,157 +1,101 @@
-import numpy as np
+import os
+import glob
 import matplotlib.pyplot as plt
-import pandas as pd
-import seaborn as sns
 
-# 读取数据
-with open('paste.txt', 'r') as file:
-    lines = file.readlines()
+def read_data(filepath):
+    """
+    读取文件中每行的数值，返回浮点数列表。
+    """
+    data = []
+    with open(filepath, 'r') as f:
+        for line in f:
+            try:
+                data.append(float(line.strip()))
+            except ValueError:
+                continue
+    return data
 
-# 提取延迟值（纳秒）
-latency_values = []
-for line in lines:
-    line = line.strip()
-    if line and line.isdigit():
-        latency_values.append(int(line))
+def compute_average_diff(data):
+    """
+    计算相邻数据的差值平均值。
+    如果数据点不足两个则返回 None。
+    """
+    if len(data) < 2:
+        return None
+    diffs = [data[i+1] - data[i] for i in range(len(data)-1)]
+    return sum(diffs) / len(diffs)
 
-# 将延迟值转换为毫秒以便更易读
-latency_ms = [val / 1000000 for val in latency_values]
-
-# 分组数据 - 假设我们有从FENCE_COUNT=1到FENCE_COUNT=256的数据
-total_groups = 256
-group_size = len(latency_ms) // total_groups
-if group_size == 0:
-    # 如果数据点不足256个，就按照实际数据点数分组
-    total_groups = len(latency_ms)
-    group_size = 1
-
-# 计算每组的平均延迟
-fence_counts = []
-avg_latencies = []
-
-for i in range(total_groups):
-    start_idx = i * group_size
-    end_idx = start_idx + group_size if i < total_groups - 1 else len(latency_ms)
-    group_data = latency_ms[start_idx:end_idx]
+def process_directory(directory):
+    """
+    对于给定目录（如 "microbench/st" 或 "microbench/ld"），
+    遍历后缀为 2^i（i=0,1,...,8，即 1,2,4,...,256）的子目录，
+    在每个子目录下查找 remote_setpci_*.txt 文件，
+    并计算每个文件（即每个 setpci 参数）的差值平均值。
     
-    if group_data:
-        fence_counts.append(i + 1)  # FENCE_COUNT从1开始
-        avg_latencies.append(np.mean(group_data))
+    返回一个字典：
+      key: setpci 参数（如 "0x0001"）
+      value: 包含两个列表的字典 { "fence_counts": [...], "avg_diff": [...] }
+             其中 fence_counts 存放对应的 2^i 值，
+             avg_diff 存放对应计算出的平均差值。
+    """
+    data_dict = {}
+    # 遍历 i=0 到 8，对应 fence count 为 2**i
+    for i in range(0, 9):
+        current_fence = 2**i
+        # 假设子目录命名为如 "st2", "st4", ...（传入的 directory 是 "microbench/st" 或 "microbench/ld"）
+        current_dir = f"{directory}{current_fence}"
+        pattern = os.path.join(current_dir, "remote_setpci_*.txt")
+        files = glob.glob(pattern)
+        for file in files:
+            data = read_data(file)
+            avg_diff = compute_average_diff(data)
+            if avg_diff is None:
+                continue
+            # 从文件名中提取 setpci 参数，如 "remote_setpci_0x0001.txt" 提取 "0x0001"
+            filename = os.path.basename(file)
+            setpci = int(filename.split('_')[-1].split('.')[0], 0)
+            if setpci not in data_dict:
+                data_dict[setpci] = {"fence_counts": [], "avg_diff": []}
+            data_dict[setpci]["fence_counts"].append(current_fence)
+            data_dict[setpci]["avg_diff"].append(avg_diff)
+    return data_dict
 
-# 创建数据框来存储结果
-df = pd.DataFrame({
-    'FENCE_COUNT': fence_counts,
-    'Average Latency (ms)': avg_latencies
-})
+def main():
+    # 基目录设为 "microbench"，下面有 st 和 ld 两个分组
+    base_dir = "microbench"
+    groups = ["st", "ld"]
+    
+    # 创建两个子图，分别对应 st 和 ld
+    fig, axes = plt.subplots(1, 2, figsize=(14, 8))
+    
+    for ax, group in zip(axes, groups):
+        # 例如 group_dir 为 "microbench/st"
+        group_dir = os.path.join(base_dir, group)
+        print("Processing:", group_dir)
+        group_data = process_directory(group_dir)
+        if not group_data:
+            ax.text(0.5, 0.5, f"没有找到 {group} 数据", ha="center", va="center")
+            ax.set_title(group)
+            continue
+        
+        for setpci, values in group_data.items():
+            fence_counts = values["fence_counts"]
+            avg_diffs = values["avg_diff"]
+            # 按 fence_counts 排序（确保点顺序正确）
+            sorted_pairs = sorted(zip(fence_counts, avg_diffs), key=lambda x: x[0])
+            fence_counts_sorted, avg_diffs_sorted = zip(*sorted_pairs)
+            # 对调后：x 轴为 fence count，y 轴为平均延迟差值
+            ax.plot(fence_counts_sorted, avg_diffs_sorted, linewidth=0.8, label=setpci)
+        
+        ax.set_xlabel("Fence Count")
+        ax.set_ylabel("Average delay difference (ns)")
+        ax.set_title(group)
+        ax.legend(title="setpci", loc="upper right")
+        ax.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig("ld_st_result.pdf")
+    plt.show()
 
-# 设置绘图风格
-sns.set(style="whitegrid")
-plt.figure(figsize=(12, 8))
-
-# 绘制平均延迟与FENCE_COUNT的关系
-ax = sns.lineplot(x='FENCE_COUNT', y='Average Latency (ms)', data=df, marker='o', linewidth=2)
-
-# 添加回归线来显示趋势
-sns.regplot(x='FENCE_COUNT', y='Average Latency (ms)', data=df, scatter=False, ax=ax, color='red')
-
-# 设置坐标轴标签和标题
-plt.xlabel('FENCE COUNT', fontsize=14)
-plt.ylabel('平均延迟 (毫秒)', fontsize=14)
-plt.title('不同FENCE COUNT下的内存存储延迟', fontsize=16)
-
-# 添加网格线以提高可读性
-plt.grid(True, linestyle='--', alpha=0.7)
-
-# 如果数据点太多，限制x轴刻度数量
-if len(fence_counts) > 20:
-    plt.xticks(np.linspace(min(fence_counts), max(fence_counts), 20, dtype=int))
-
-# 保存图表
-plt.tight_layout()
-plt.savefig('memory_latency_vs_fence_count.png', dpi=300)
-
-# 根据用户请求，创建多线图表示不同内存延迟
-# 这里我们模拟不同内存延迟条件下的行为
-# 假设我们有原始数据、快速内存（延迟减少25%）和慢速内存（延迟增加25%）
-
-# 创建第二个图表
-plt.figure(figsize=(12, 8))
-
-# 原始数据
-sns.lineplot(x='FENCE_COUNT', y='Average Latency (ms)', data=df, 
-             marker='o', linewidth=2, label='标准内存延迟')
-
-# 模拟快速内存 (延迟减少25%)
-df['Fast Memory Latency (ms)'] = df['Average Latency (ms)'] * 0.75
-sns.lineplot(x='FENCE_COUNT', y='Fast Memory Latency (ms)', data=df, 
-             marker='^', linewidth=2, label='低延迟内存(-25%)')
-
-# 模拟慢速内存 (延迟增加25%)
-df['Slow Memory Latency (ms)'] = df['Average Latency (ms)'] * 1.25
-sns.lineplot(x='FENCE_COUNT', y='Slow Memory Latency (ms)', data=df, 
-             marker='s', linewidth=2, label='高延迟内存(+25%)')
-
-# 添加更慢的内存 (延迟增加50%)
-df['Very Slow Memory Latency (ms)'] = df['Average Latency (ms)'] * 1.5
-sns.lineplot(x='FENCE_COUNT', y='Very Slow Memory Latency (ms)', data=df, 
-             marker='d', linewidth=2, label='超高延迟内存(+50%)')
-
-# 设置坐标轴标签和标题
-plt.xlabel('FENCE COUNT', fontsize=14)
-plt.ylabel('平均延迟 (毫秒)', fontsize=14)
-plt.title('不同内存延迟条件下的FENCE COUNT影响', fontsize=16)
-
-# 添加网格线
-plt.grid(True, linestyle='--', alpha=0.7)
-
-# 如果数据点太多，限制x轴刻度数量
-if len(fence_counts) > 20:
-    plt.xticks(np.linspace(min(fence_counts), max(fence_counts), 20, dtype=int))
-
-# 添加图例并调整位置
-plt.legend(title='内存类型', loc='upper left', fontsize=12)
-
-# 保存图表
-plt.tight_layout()
-plt.savefig('memory_latency_comparison.png', dpi=300)
-
-# 打印统计摘要
-print("延迟统计摘要:")
-print(df.describe())
-
-# 分析增长趋势
-# 计算FENCE_COUNT增加时延迟的增长率
-df['Latency Increase'] = df['Average Latency (ms)'].diff()
-df['Growth Rate'] = df['Latency Increase'] / df['Average Latency (ms)'].shift(1) * 100
-
-# 绘制增长率曲线
-plt.figure(figsize=(12, 6))
-sns.lineplot(x='FENCE_COUNT', y='Growth Rate', data=df.iloc[1:], marker='o', linewidth=2)
-plt.axhline(y=0, color='r', linestyle='--')
-plt.xlabel('FENCE COUNT', fontsize=14)
-plt.ylabel('延迟增长率 (%)', fontsize=14)
-plt.title('FENCE COUNT增加时的延迟增长率', fontsize=16)
-plt.grid(True, linestyle='--', alpha=0.7)
-plt.tight_layout()
-plt.savefig('latency_growth_rate.png', dpi=300)
-
-# 更详细的区域分析 - 仅针对FENCE_COUNT较小的值
-small_fence_df = df[df['FENCE_COUNT'] <= 64].copy()
-
-plt.figure(figsize=(12, 8))
-sns.lineplot(x='FENCE_COUNT', y='Average Latency (ms)', data=small_fence_df, 
-             marker='o', linewidth=2, label='标准内存延迟')
-sns.lineplot(x='FENCE_COUNT', y='Fast Memory Latency (ms)', data=small_fence_df, 
-             marker='^', linewidth=2, label='低延迟内存(-25%)')
-sns.lineplot(x='FENCE_COUNT', y='Slow Memory Latency (ms)', data=small_fence_df, 
-             marker='s', linewidth=2, label='高延迟内存(+25%)')
-
-plt.xlabel('FENCE COUNT', fontsize=14)
-plt.ylabel('平均延迟 (毫秒)', fontsize=14)
-plt.title('低FENCE COUNT值下的内存延迟比较', fontsize=16)
-plt.grid(True, linestyle='--', alpha=0.7)
-plt.legend(title='内存类型', loc='upper left', fontsize=12)
-plt.tight_layout()
-plt.savefig('small_fence_count_comparison.png', dpi=300)
-
-print("分析完成，已生成图表。")
+if __name__ == "__main__":
+    main()

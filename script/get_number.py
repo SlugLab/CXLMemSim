@@ -70,7 +70,7 @@ WORKLOADS = {
     # },
     "microbench": {
         "path": "./microbench",
-        "programs": ["st1","st2","st4","st8","st16","st32","st64","st128","st256","malloc", "writeback"],
+        "programs": ["ld1","ld2","ld4","ld8","ld16","ld32","ld64","ld128","ld256","st1","st2","st4","st8","st16","st32","st64","st128","st256",],
         "args": "",
         "env": {}
     }
