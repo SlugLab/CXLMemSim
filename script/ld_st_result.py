@@ -33,7 +33,7 @@ def process_directory(directory):
     并计算每个文件（即每个 setpci 参数）的差值平均值。
     
     返回一个字典：
-      key: setpci 参数（如 "0x0001"）
+      key: setpci 参数（如 0x0001 转换为整数）
       value: 包含两个列表的字典 { "fence_counts": [...], "avg_diff": [...] }
              其中 fence_counts 存放对应的 2^i 值，
              avg_diff 存放对应计算出的平均差值。
@@ -51,8 +51,8 @@ def process_directory(directory):
             avg_diff = compute_average_diff(data)
             if avg_diff is None:
                 continue
-            # 从文件名中提取 setpci 参数，如 "remote_setpci_0x0001.txt" 提取 "0x0001"
             filename = os.path.basename(file)
+            # 将 setpci 值转换为整数以便排序（支持十六进制）
             setpci = int(filename.split('_')[-1].split('.')[0], 0)
             if setpci not in data_dict:
                 data_dict[setpci] = {"fence_counts": [], "avg_diff": []}
@@ -69,7 +69,6 @@ def main():
     fig, axes = plt.subplots(1, 2, figsize=(14, 8))
     
     for ax, group in zip(axes, groups):
-        # 例如 group_dir 为 "microbench/st"
         group_dir = os.path.join(base_dir, group)
         print("Processing:", group_dir)
         group_data = process_directory(group_dir)
@@ -78,14 +77,16 @@ def main():
             ax.set_title(group)
             continue
         
-        for setpci, values in group_data.items():
+        # 遍历排序后的 setpci 键
+        for setpci in sorted(group_data.keys()):
+            values = group_data[setpci]
             fence_counts = values["fence_counts"]
             avg_diffs = values["avg_diff"]
             # 按 fence_counts 排序（确保点顺序正确）
             sorted_pairs = sorted(zip(fence_counts, avg_diffs), key=lambda x: x[0])
             fence_counts_sorted, avg_diffs_sorted = zip(*sorted_pairs)
             # 对调后：x 轴为 fence count，y 轴为平均延迟差值
-            ax.plot(fence_counts_sorted, avg_diffs_sorted, linewidth=0.8, label=setpci)
+            ax.plot(fence_counts_sorted, avg_diffs_sorted, marker='o', label=f"0x{setpci:04x}")
         
         ax.set_xlabel("Fence Count")
         ax.set_ylabel("Average delay difference (ns)")

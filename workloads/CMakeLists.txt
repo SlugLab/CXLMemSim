@@ -4,6 +4,7 @@ set(LLAMA_CURL ON)
 add_subdirectory(llama.cpp)
 #add_subdirectory(vsag)
 #add_subdirectory(gromacs)
+add_executable(memcached-YCSB memcached-YCSB.c)
 
 macro(memcached_build)
     set(memcached_src ${CMAKE_CURRENT_SOURCE_DIR}/memcached)

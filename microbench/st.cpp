@@ -7,12 +7,13 @@
 #include <cpuid.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <numaif.h>
 #include <sys/mman.h>
 
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 #define MOVE_SIZE 128
-#define MAP_SIZE  (long)(1024* 1024* 1024)
+#define MAP_SIZE  (long)(1024* 1024)
 #define CACHELINE_SIZE  64
 #ifndef FENCE_COUNT
 #define FENCE_COUNT 8
@@ -43,7 +44,14 @@ int main(int argc, char **argv) {
     fprintf(stderr, "oops, you suck %d\n", errno);
     return -1;
   }
+    // 构造 nodemask：例如绑定到节点 1
+    unsigned long nodemask = 1UL << 1; // 仅节点 1 有效
+    int mode = MPOL_BIND;        // 或者 MPOL_BIND，取决于你希望使用的策略
+    unsigned long maxnode = sizeof(nodemask) * 8; // 节点掩码的位数
 
+    if (mbind(base, MAP_SIZE, mode, &nodemask, maxnode, 0) != 0) {
+        perror("mbind");
+    }
   char *addr = NULL;
   intptr_t *iaddr = (intptr_t*) base;
   intptr_t hash = 0;

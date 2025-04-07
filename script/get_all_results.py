@@ -41,7 +41,7 @@ WORKLOADS = {
         "programs": [
             "bc", "bfs", "cc", "pr", "sssp", "tc"  # All algorithms provided by GAPBS
         ],
-        "args": "-f ../workloads/gapbs/test/graphs/4.el -n100000",  # Default arguments
+        "args": "-g 25 -n 10",  # Default arguments
         "env": {}  # Default environment variables
     },
     "memcached": {
@@ -70,7 +70,7 @@ WORKLOADS = {
     },
     "microbench": {
         "path": "./microbench",
-        "programs": ["ld", "st", "ld_serial", "st_serial", "malloc", "writeback"],
+        "programs": ["ld1","ld2","ld4","ld8","ld16","ld32","ld64","ld128","ld256","st1","st2","st4","st8","st16","st32","st64","st128","st256","malloc", "writeback"],
         "args": "",
         "env": {}
     }
@@ -81,7 +81,7 @@ def ensure_directory(path):
     os.makedirs(path, exist_ok=True)
     return path
 
-def run_command(cmd, log_path=None, env=None, timeout=3600, shell=False):
+def run_command(cmd, log_path=None, env=None, timeout=360000, shell=False):
     """
     Run command and capture output
 
@@ -149,6 +149,27 @@ def run_original(workload, program, args, base_dir):
 
     # Execute command
     return run_command(cmd, log_path, WORKLOADS[workload].get("env"), shell=True)
+def run_vtune(workload, program, args, base_dir):
+    """Run vtune program"""
+    program_path = os.path.join(WORKLOADS[workload]["path"], program)
+    log_path = os.path.join(base_dir, "vtune.txt")
+
+    # Build command
+    cmd = f"sudo `which vtune` -collect memory-access -- numactl --cpunodebind=0 --membind=0 {program_path} {args}" if args else f"sudo `which vtune` -collect memory-access -- numactl --cpunodebind=0 --membind=0 {program_path}"
+
+    # Execute command
+    return run_command(cmd, log_path, WORKLOADS[workload].get("env"), shell=True)
+def run_vtune_remote(workload, program, args, base_dir):
+    """Run vtune program on remote node"""
+    program_path = os.path.join(WORKLOADS[workload]["path"], program)
+    log_path = os.path.join(base_dir, "vtune_remote.txt")
+
+    # Build command
+    cmd = f"sudo `which vtune` -collect memory-access -- numactl --cpunodebind=0 --membind=1 {program_path} {args}" if args else f"sudo `which vtune` -collect memory-access -- numactl --cpunodebind=0 --membind=1 {program_path}"
+
+    # Execute command
+    return run_command(cmd, log_path, WORKLOADS[workload].get("env"), shell=True)
+
 def run_remote(workload, program, args, base_dir):
     """Run original program"""
     program_path = os.path.join(WORKLOADS[workload]["path"], program)
@@ -243,13 +264,13 @@ def run_all_workloads(args):
             # Run original program if required
             if args.run_original:
                 logger.info(f"Running original program: {program}")
-                returncode, _ = run_original(
-                    workload_name,
-                    program,
-                    workload_config["args"],
-                    program_dir
-                )
-                returncode, _ = run_remote(
+                # returncode, _ = run_vtune(
+                #     workload_name,
+                #     program,
+                #     workload_config["args"],
+                #     program_dir
+                # )
+                returncode, _ = run_vtune_remote(
                     workload_name,
                     program,
                     workload_config["args"],
@@ -270,16 +291,16 @@ def run_all_workloads(args):
                     else:
                         logger.info(f"Running CXLMemSim with default policy: {program}")
 
-                    returncode, _ = run_cxl_mem_sim(
-                        workload_name,
-                        program,
-                        workload_config["args"],
-                        program_dir,
-                        policy_combo,
-                        args.pebs_period,
-                        args.latency,
-                        args.bandwidth
-                    )
+                    # returncode, _ = run_cxl_mem_sim(
+                    #     workload_name,
+                    #     program,
+                    #     workload_config["args"],
+                    #     program_dir,
+                    #     policy_combo,
+                    #     args.pebs_period,
+                    #     args.latency,
+                    #     args.bandwidth
+                    # )
                     if returncode != 0 and not args.ignore_errors:
                         logger.error(f"CXLMemSim failed: {program}, return code: {returncode}")
                         if args.stop_on_error:
