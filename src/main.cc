@@ -353,7 +353,7 @@ int main(int argc, char *argv[]) {
                                     (wb_cnt * target_llcmiss / (all_llcmiss + all_prefetch + 1) /
                                      (target_llchits + avg_weight * target_llcmiss + 1));
                 uint64_t emul_delay =
-                    (controller->latency_lat + controller->bandwidth_lat + writeback_latency) * 1000000;
+                    std::max(controller->latency_lat + controller->bandwidth_lat + writeback_latency,1.) * 1000000;
 
                 SPDLOG_DEBUG("[{}:{}:{}] pebs: total={}, ", i, mon.tgid, mon.tid, mon.after->pebs.total);
 

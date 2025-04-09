@@ -25,7 +25,7 @@ std::vector<pid_t> get_thread_ids(pid_t pid) {
 
     DIR *dir = opendir(task_dir.c_str());
     if (dir == nullptr) {
-        std::cerr << "无法打开目录: " << task_dir << " - " << strerror(errno) << std::endl;
+        std::cerr << "Could not open the folder: " << task_dir << " - " << strerror(errno) << std::endl;
         return thread_ids;
     }
 
@@ -137,27 +137,28 @@ int Monitors::enable(uint32_t tgid, uint32_t tid, bool is_process, uint64_t pebs
     CPU_ZERO(&cpuset);
     CPU_SET(mon[target].cpu_core, &cpuset);
     s = sched_setaffinity(tid, sizeof(cpu_set_t), &cpuset);
-    if (s != 0) {
-        if (errno == ESRCH) {
-            if (tid != tgid) {
-                static auto thread_ids = get_thread_ids(tgid);
-                tid = thread_ids.back();
-                if (tid) {
-                    thread_ids.pop_back();
-                    std::cout << "set affinity for thread " << tid << std::endl;
-                    s = sched_setaffinity(tid, sizeof(cpu_set_t), &cpuset);
-                    if (s != 0) {
-                        std::cout << "Failed to setaffinity for thread " << tid << std::endl;
-                        return -2;
+    if (!is_process)
+        if (s != 0) {
+            if (errno == ESRCH) {
+                if (tid != tgid) {
+                    static auto thread_ids = get_thread_ids(tgid);
+                    tid = thread_ids.back();
+                    if (tid) {
+                        thread_ids.pop_back();
+                        std::cout << "set affinity for thread " << tid << std::endl;
+                        s = sched_setaffinity(tid, sizeof(cpu_set_t), &cpuset);
+                        if (s != 0) {
+                            std::cout << "Failed to setaffinity for thread " << tid << std::endl;
+                            return -2;
+                        }
                     }
+                } else {
+                    return -2;
                 }
             } else {
-                return -2;
+                std::cout << "Failed to setaffinity" << std::endl;
             }
-        } else {
-            std::cout << "Failed to setaffinity" << std::endl;
         }
-    }
 
     /* init */
     disable(target);

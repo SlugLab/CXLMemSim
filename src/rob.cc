@@ -1,5 +1,17 @@
+/*
+ * CXLMemSim rob file
+ *
+ *  By: Andrew Quinn
+ *      Yiwei Yang
+ *      Brian Zhao
+ *  SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
+ *  Copyright 2025 Regents of the University of California
+ *  UC Santa Cruz Sluglab.
+ */
+
 #include "rob.h"
 #include "policy.h"
+#include <algorithm> // For std::transform
 #include <atomic>
 #include <cxxopts.hpp>
 #include <fstream>
@@ -218,6 +230,64 @@ void parseInParallel(std::ifstream &file, std::vector<InstructionGroup> &instruc
               [](InstructionGroup &a, InstructionGroup &b) { return a.cycleCount < b.cycleCount; });
 }
 
+// Generate delayed trace output similar to input
+void generateDelayedTrace(const std::vector<InstructionGroup> &instructions, Rob &rob, const std::string &outputFile) {
+    std::ofstream outFile(outputFile);
+    if (!outFile) {
+        std::cerr << "Failed to open output file " << outputFile << std::endl;
+        return;
+    }
+
+    SPDLOG_INFO("Generating trace with {} instructions", instructions.size());
+
+    // For each instruction, use the updated timestamps from the simulation
+    for (const auto &ins : instructions) {
+        // Base timestamps from the original fetch timestamp
+        long long fetchTS = ins.fetchTimestamp;
+        long long decodeTS = fetchTS + 500; // typically +500 cycles from fetch
+        long long renameTS = fetchTS + 1000; // typically +1000 cycles from fetch
+        long long dispatchTS = fetchTS + 1500; // typically +1500 cycles from fetch
+        long long issueTS = fetchTS + 1500; // typically same as dispatch
+        long long completeTS = ins.retireTimestamp - 500; // typically completes 500 cycles before retire
+        long long retireTS = ins.retireTimestamp;
+
+        // No need to recalculate retire time, as it's been updated during simulation
+        // Just need to format the output correctly
+
+        // Write out the trace in the same format as input
+        outFile << "O3PipeView:fetch:" << fetchTS << ":" << std::hex << "0x" << ins.address << std::dec
+                << ":0:" << ins.cycleCount << ":  " << ins.instruction << std::endl;
+        outFile << "O3PipeView:decode:" << decodeTS << std::endl;
+        outFile << "O3PipeView:rename:" << renameTS << std::endl;
+        outFile << "O3PipeView:dispatch:" << dispatchTS << std::endl;
+        outFile << "O3PipeView:issue:" << issueTS << std::endl;
+        outFile << "O3PipeView:complete:" << completeTS << std::endl;
+
+        // For memory instructions, include store/load indicator and timestamp
+        if (ins.address != 0) {
+            // Determine if it's a load or store based on instruction text (more accurate detection)
+            std::string memOpType = "store";
+            std::string instrLower = ins.instruction;
+            std::transform(instrLower.begin(), instrLower.end(), instrLower.begin(), ::tolower);
+
+            if (instrLower.find("ld") != std::string::npos || instrLower.find("load") != std::string::npos ||
+                instrLower.find("mov_r_m") != std::string::npos) {
+                memOpType = "load";
+            }
+
+            // Include access timestamp - using the adjusted retireTS from simulation
+            outFile << "O3PipeView:retire:" << retireTS << ":" << memOpType << ":" << (retireTS + 1000)
+                    << std::endl; // additional timestamp parameter
+            outFile << "O3PipeView:address:" << ins.address << std::endl;
+        } else {
+            outFile << "O3PipeView:retire:" << retireTS << ":store:0" << std::endl;
+        }
+    }
+
+    outFile.close();
+    SPDLOG_INFO("Trace generation complete: {}", outputFile);
+}
+
 int main(int argc, char *argv[]) {
     spdlog::cfg::load_env_levels();
     cxxopts::Options options("CXLMemSim", "For simulation of CXL.mem Type 3 on Xeon 6");
@@ -232,9 +302,12 @@ int main(int argc, char *argv[]) {
         "m,mode", "Page mode or cacheline mode", cxxopts::value<std::string>()->default_value("cacheline"))(
         "f,frequency", "The frequency for the running thread", cxxopts::value<double>()->default_value("4000"))(
         "l,latency", "The simulated latency by epoch based calculation for injected latency",
-        cxxopts::value<std::vector<int>>()->default_value("100,150,100,150,100,150"))(
+        cxxopts::value<std::vector<int>>()->default_value("100,100,100,100,100,100"))(
         "b,bandwidth", "The simulated bandwidth by linear regression",
-        cxxopts::value<std::vector<int>>()->default_value("50,50,50,50,50,50"));
+        cxxopts::value<std::vector<int>>()->default_value("50,50,50,50,50,50"))(
+        "output", "Output trace file with RoB delays",
+        cxxopts::value<std::string>()->default_value("delayed_trace.out"))(
+        "interim-save", "Save interim trace results every N instructions", cxxopts::value<int>()->default_value("0"));
 
     auto result = options.parse(argc, argv);
     if (result["help"].as<bool>()) {
@@ -247,6 +320,8 @@ int main(int argc, char *argv[]) {
     auto bandwidth = result["bandwidth"].as<std::vector<int>>();
     auto topology = result["topology"].as<std::string>();
     auto dramlatency = result["dramlatency"].as<double>();
+    auto outputTraceFile = result["output"].as<std::string>();
+    auto interimSaveInterval = result["interim-save"].as<int>();
     page_type mode;
     if (result["mode"].as<std::string>() == "hugepage_2M") {
         mode = HUGEPAGE_2M;
@@ -258,9 +333,9 @@ int main(int argc, char *argv[]) {
         mode = PAGE;
     }
     auto *policy1 = new InterleavePolicy();
-    auto *policy2 = new HeatAwareMigrationPolicy();
-    auto *policy3 = new HugePagePolicy();
-    auto *policy4 = new FIFOPolicy();
+    auto *policy2 = new MigrationPolicy();
+    auto *policy3 = new PagingPolicy();
+    auto *policy4 = new CachingPolicy();
 
     for (auto const &[idx, value] : capacity | std::views::enumerate) {
         if (idx == 0) {
@@ -279,7 +354,7 @@ int main(int argc, char *argv[]) {
         }
     }
     controller->construct_topo(topology);
-    Rob rob(controller, 512);
+    Rob rob(controller, 128);
 
     // read from file
     std::ifstream file(target);
@@ -290,10 +365,16 @@ int main(int argc, char *argv[]) {
     // std::vector<std::string> groupLines;
     std::vector<InstructionGroup> instructions;
     parseInParallel(file, instructions);
-    // rob.processInstructions(instructions);
-    // Now simulate issuing them into the ROB
     SPDLOG_INFO("{} instructions to process", instructions.size());
-    for (const auto &[idx, instruction] : instructions|std::views::enumerate) {
+
+    // Delete any existing output file before starting
+    if (interimSaveInterval > 0) {
+        std::ofstream clearFile(outputTraceFile, std::ios::trunc);
+        clearFile.close();
+    }
+
+    // Now simulate issuing them into the ROB
+    for (const auto &[idx, instruction] : instructions | std::views::enumerate) {
         bool issued = false;
         while (!issued) {
             issued = rob.issue(instruction);
@@ -304,6 +385,13 @@ int main(int argc, char *argv[]) {
         }
         rob.tick(); // 正常推进时钟
                     // Normal clock advancement
+
+        // Save interim results if requested
+        if (interimSaveInterval > 0 && idx > 0 && idx % interimSaveInterval == 0) {
+            SPDLOG_INFO("Saving interim trace at instruction {}", idx);
+            rob.saveInstructionTrace(instructions, outputTraceFile, true);
+        }
+
         if (idx % 10000 == 0) {
             SPDLOG_INFO("Processing instruction {}", idx);
         }
@@ -313,14 +401,27 @@ int main(int argc, char *argv[]) {
     while (!rob.queue_.empty()) {
         rob.tick();
     }
-    // After processing all groups, call your ROB method.
+
+    // After processing all groups, call the trace generation using the updated instructions
+    SPDLOG_INFO("ROB processing complete, generating final trace");
+
+    // Decide whether to append or create a new file based on whether we did interim saves
+    if (interimSaveInterval > 0) {
+        rob.saveInstructionTrace(instructions, outputTraceFile, true);
+    } else {
+        // Use the existing function since it's already updated
+        generateDelayedTrace(instructions, rob, outputTraceFile);
+    }
+
+    // Log statistics
     int nonMemInstr = std::count_if(instructions.begin(), instructions.end(),
                                     [](const InstructionGroup &ins) { return ins.address == 0; });
     SPDLOG_INFO("Non-memory instructions: {}", nonMemInstr);
 
     std::cout << "Stalls: " << rob.getStallCount() << std::endl;
     std::cout << "ROB Events: " << rob.getStallEventCount() << std::endl;
+    std::cout << "Generated delayed trace to: " << outputTraceFile << std::endl;
 
-    std::cout << std::format("{}",*controller)  << std::endl;
+    std::cout << std::format("{}", *controller) << std::endl;
     return 0;
 }

@@ -1,0 +1,4 @@
+The following materials are defined as "Redistributables" and are subject
+to the terms and conditions of the End User License Agreement
+
+mlc_internal

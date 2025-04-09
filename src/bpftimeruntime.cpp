@@ -53,17 +53,12 @@ int BpfTimeRuntime::read(CXLController *controller, BPFTimeRuntimeElem *elem) {
             SPDLOG_DEBUG("Process map key: {} {} thread_id:{}", key1, key,
                          std::this_thread::get_id()); // 使用std::this_thread获取当前线程ID
 
-            if (i == 8 && item2 != nullptr) {
+            if (i == 7 && item2 != nullptr) {
                 stats = *((mem_stats *)item2);
                 controller->set_stats(stats);
                 elem->total++;
             }
-            if (i == 6 && item2 != nullptr) {
-                proc_info1 = *((proc_info *)item2);
-                controller->set_process_info(proc_info1);
-                elem->total++;
-            }
-            if (i == 7 && item2 != nullptr) {
+            if (i == 9 && item2 != nullptr) {
                 thread_info1 = *((proc_info *)item2);
                 controller->set_thread_info(thread_info1);
                 elem->total++;
