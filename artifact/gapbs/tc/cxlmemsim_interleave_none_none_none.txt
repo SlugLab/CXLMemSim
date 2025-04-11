@@ -1,0 +1,14 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+[*** LOG ERROR #0001 ***] [2025-04-11 10:07:15] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim-dev/lib/bpftime/runtime/src/bpftime_shm_internal.cpp(672)]
+pthread_create_probe: pid: 1381249 thread_ptr: 7fff9b72fde8
+pthread_create_return_probe: pid: 1381249 thread_id: 128734023640768 (0x751539bfe6c0)
+pthread_create_probe: pid: 1381249 thread_ptr: 7fff9b72fe68
+pthread_create_return_probe: pid: 1381249 thread_id: 128734015248064 (0x7515393fd6c0)
+pthread_create_probe: pid: 1381249 thread_ptr: 7fff9b72fee8
+pthread_create_return_probe: pid: 1381249 thread_id: 128734006855360 (0x751538bfc6c0)
+Generate Time:       1.67772
+Build Time:          0.45679
+Graph has 1048576 nodes and 15699687 undirected edges for degree: 14

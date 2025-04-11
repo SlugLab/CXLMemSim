@@ -1,0 +1,89 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+[*** LOG ERROR #0001 ***] [2025-04-11 09:45:36] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim-dev/lib/bpftime/runtime/src/bpftime_shm_internal.cpp(672)]
+pthread_create_probe: pid: 1372227 thread_ptr: 7fff7ac26d88
+pthread_create_return_probe: pid: 1372227 thread_id: 131888926680768 (0x77f3c89fe6c0)
+pthread_create_probe: pid: 1372227 thread_ptr: 7fff7ac26e08
+pthread_create_return_probe: pid: 1372227 thread_id: 131888918288064 (0x77f3c81fd6c0)
+pthread_create_probe: pid: 1372227 thread_ptr: 7fff7ac26e88
+pthread_create_return_probe: pid: 1372227 thread_id: 131888909895360 (0x77f3c79fc6c0)
+Generate Time:       1.68243
+Build Time:          0.45811
+Graph has 1048576 nodes and 15699687 undirected edges for degree: 14
+Skipping largest intermediate component (ID: 0, approx. 63% of the graph)
+Trial Time:          0.03521
+Skipping largest intermediate component (ID: 0, approx. 63% of the graph)
+Trial Time:          0.03347
+Skipping largest intermediate component (ID: 0, approx. 63% of the graph)
+Trial Time:          0.03366
+Skipping largest intermediate component (ID: 0, approx. 63% of the graph)
+Trial Time:          0.03292
+Skipping largest intermediate component (ID: 0, approx. 63% of the graph)
+Trial Time:          0.03265
+Skipping largest intermediate component (ID: 0, approx. 63% of the graph)
+Trial Time:          0.03309
+Skipping largest intermediate component (ID: 0, approx. 63% of the graph)
+Trial Time:          0.03261
+Skipping largest intermediate component (ID: 0, approx. 63% of the graph)
+Trial Time:          0.03340
+Skipping largest intermediate component (ID: 0, approx. 63% of the graph)
+Trial Time:          0.03299
+Skipping largest intermediate component (ID: 0, approx. 63% of the graph)
+Trial Time:          0.03654
+Average Time:        0.03365
+pthread_create_probe: pid: 1372226 thread_ptr: 607408dd2538
+pthread_create_return_probe: pid: 1372226 thread_id: 136053377726144 (0x7bbd653ff6c0)
+========== Process 0[tgid=1372227, tid=1372227] statistics summary ==========
+emulated time =4.333152583
+total delay   =0
+PEBS sample total 176 176330
+LBR sample total 14
+bpftime sample total 439313
+CXLController:
+Total system memory capacity: 60GB
+  Page Type: PAGE
+  Global Counter:
+    Local: 0
+    Remote: 174
+    HITM: 176156
+Topology:
+Switch:
+  Events:
+    Load: 0
+    Store: 0
+    Conflict: 0
+  Switch:
+    Events:
+      Load: 0
+      Store: 0
+      Conflict: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+  Expander:
+    Events:
+      Load: 0
+      Store: 174
+      Migrate in: 0
+      Migrate out: 0
+      Hit Old: 0
+
+Statistics:
+  Number of Switches: 2
+  Number of Endpoints: 3
+  Number of Threads created: 1
+  Memory Freed: 936105146218690 bytes
+

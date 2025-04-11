@@ -20,7 +20,6 @@
 #include <time.h>
 #include <atomic>
 #include <string.h>
-#include <numaif.h>
 
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
@@ -66,14 +65,6 @@ int main(int argc, char **argv) {
     fprintf(stderr, "oops, you suck %d\n", errno);
     return -1;
   }
-      // 构造 nodemask：例如绑定到节点 1
-    unsigned long nodemask = 1UL << 1; // 仅节点 1 有效
-    int mode = MPOL_BIND;        // 或者 MPOL_BIND，取决于你希望使用的策略
-    unsigned long maxnode = sizeof(nodemask) * 8; // 节点掩码的位数
-
-    if (mbind(base, MAP_SIZE, mode, &nodemask, maxnode, 0) != 0) {
-        perror("mbind");
-    }
   char *addr = NULL;
 
   intptr_t *iaddr = (intptr_t*) base;

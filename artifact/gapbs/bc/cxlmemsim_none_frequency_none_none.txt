@@ -1,0 +1,126 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+[*** LOG ERROR #0001 ***] [2025-04-11 09:41:49] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim-dev/lib/bpftime/runtime/src/bpftime_shm_internal.cpp(672)]
+[*** LOG ERROR #0015 ***] [2025-04-11 09:41:50] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0017 ***] [2025-04-11 09:41:51] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0020 ***] [2025-04-11 09:41:52] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0023 ***] [2025-04-11 09:41:54] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0026 ***] [2025-04-11 09:41:55] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0029 ***] [2025-04-11 09:41:56] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0033 ***] [2025-04-11 09:41:58] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+pthread_create_probe: pid: 1368736 thread_ptr: 7fff212a9c68
+pthread_create_return_probe: pid: 1368736 thread_id: 137629007865536 (0x7d2c401fe6c0)
+pthread_create_probe: pid: 1368736 thread_ptr: 7fff212a9ce8
+pthread_create_return_probe: pid: 1368736 thread_id: 137628999472832 (0x7d2c3f9fd6c0)
+pthread_create_probe: pid: 1368736 thread_ptr: 7fff212a9d68
+pthread_create_return_probe: pid: 1368736 thread_id: 137628991080128 (0x7d2c3f1fc6c0)
+Generate Time:       1.68610
+Build Time:          0.44008
+Graph has 1048576 nodes and 15699687 undirected edges for degree: 14
+    a                0.00912
+source: 18265
+    b                0.15344
+    p                0.08553
+Trial Time:          0.25173
+    a                0.00704
+source: 283905
+    b                0.16762
+    p                0.08661
+Trial Time:          0.26456
+    a                0.00460
+source: 290555
+    b                0.13783
+    p                0.08806
+Trial Time:          0.23477
+    a                0.00550
+source: 972240
+    b                0.18187
+    p                0.08263
+Trial Time:          0.27366
+    a                0.00603
+source: 892103
+    b                0.20689
+    p                0.09432
+Trial Time:          0.31035
+    a                0.00483
+source: 184304
+    b                0.13960
+    p                0.08742
+Trial Time:          0.23647
+    a                0.00308
+source: 116889
+    b                0.18627
+    p                0.09552
+Trial Time:          0.28948
+    a                0.00800
+source: 965164
+    b                0.16662
+    p                0.07860
+Trial Time:          0.25617
+    a                0.00433
+source: 849771
+    b                0.17257
+    p                0.09333
+Trial Time:          0.27426
+    a                0.00416
+source: 103169
+    b                0.19415
+    p                0.09728
+Trial Time:          0.29975
+Average Time:        0.26912
+pthread_create_probe: pid: 1368714 thread_ptr: 59bae6aafc18
+pthread_create_return_probe: pid: 1368714 thread_id: 129415692416704 (0x75b3f05ff6c0)
+========== Process 0[tgid=1368736, tid=1368736] statistics summary ==========
+emulated time =20.953753014
+total delay   =0
+PEBS sample total 82 1623000
+LBR sample total 3
+bpftime sample total 5226
+CXLController:
+Total system memory capacity: 60GB
+  Page Type: PAGE
+  Global Counter:
+    Local: 0
+    Remote: 81
+    HITM: 1622919
+Topology:
+Switch:
+  Events:
+    Load: 0
+    Store: 0
+    Conflict: 0
+  Switch:
+    Events:
+      Load: 0
+      Store: 0
+      Conflict: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+  Expander:
+    Events:
+      Load: 0
+      Store: 81
+      Migrate in: 0
+      Migrate out: 0
+      Hit Old: 0
+
+Statistics:
+  Number of Switches: 2
+  Number of Endpoints: 3
+  Number of Threads created: 1
+  Memory Freed: 935876615624767 bytes
+

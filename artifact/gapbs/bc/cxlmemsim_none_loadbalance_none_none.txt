@@ -1,0 +1,67 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+terminate called after throwing an instance of 'boost::interprocess::interprocess_exception'
+  what():  No such file or directory
+[*** LOG ERROR #0001 ***] [2025-04-11 09:42:10] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim-dev/lib/bpftime/runtime/src/bpftime_shm_internal.cpp(672)]
+pthread_create_probe: pid: 1368994 thread_ptr: 7fff020f9668
+pthread_create_return_probe: pid: 1368994 thread_id: 132470588565184 (0x787b365fe6c0)
+pthread_create_probe: pid: 1368994 thread_ptr: 7fff020f96e8
+pthread_create_return_probe: pid: 1368994 thread_id: 132470580172480 (0x787b35dfd6c0)
+pthread_create_probe: pid: 1368994 thread_ptr: 7fff020f9768
+pthread_create_return_probe: pid: 1368994 thread_id: 132470571779776 (0x787b355fc6c0)
+Generate Time:       1.66306
+Build Time:          0.42844
+Graph has 1048576 nodes and 15699687 undirected edges for degree: 14
+    a                0.00024
+source: 18265
+    b                0.13141
+    p                0.08451
+Trial Time:          0.21728
+    a                0.00009
+source: 283905
+    b                0.15227
+    p                0.08844
+Trial Time:          0.24193
+    a                0.00009
+source: 290555
+    b                0.12783
+    p                0.08438
+Trial Time:          0.21343
+    a                0.00010
+source: 972240
+    b                0.17077
+    p                0.08601
+Trial Time:          0.25803
+    a                0.00009
+source: 892103
+    b                0.19420
+    p                0.09971
+Trial Time:          0.29518
+    a                0.00011
+source: 184304
+    b                0.16771
+    p                0.10972
+Trial Time:          0.27872
+    a                0.00011
+source: 116889
+    b                0.19867
+    p                0.10666
+Trial Time:          0.30662
+    a                0.00010
+source: 965164
+    b                0.17112
+    p                0.09245
+Trial Time:          0.26484
+    a                0.00011
+source: 849771
+    b                0.18406
+    p                0.09266
+Trial Time:          0.27797
+    a                0.00009
+source: 103169
+    b                0.17398
+    p                0.09384
+Trial Time:          0.26907
+Average Time:        0.26231

@@ -1,0 +1,152 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+[*** LOG ERROR #0001 ***] [2025-04-11 09:46:44] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim-dev/lib/bpftime/runtime/src/bpftime_shm_internal.cpp(672)]
+pthread_create_probe: pid: 1373124 thread_ptr: 7ffe5d350708
+pthread_create_return_probe: pid: 1373124 thread_id: 138230057920192 (0x7db8317fe6c0)
+pthread_create_probe: pid: 1373124 thread_ptr: 7ffe5d350788
+pthread_create_return_probe: pid: 1373124 thread_id: 138230049527488 (0x7db830ffd6c0)
+pthread_create_probe: pid: 1373124 thread_ptr: 7ffe5d350808
+pthread_create_return_probe: pid: 1373124 thread_id: 138230041134784 (0x7db8307fc6c0)
+Generate Time:       1.68379
+Build Time:          0.45928
+Graph has 1048576 nodes and 15699687 undirected edges for degree: 14
+  0    1.095973
+  1    0.073226
+  2    0.003912
+  3    0.000391
+  4    0.000187
+  5    0.000136
+  6    0.000100
+Trial Time:          0.17623
+  0    1.096179
+  1    0.073252
+  2    0.003961
+  3    0.000370
+  4    0.000156
+  5    0.000114
+  6    0.000083
+Trial Time:          0.18151
+  0    1.096091
+  1    0.073214
+  2    0.003901
+  3    0.000349
+  4    0.000143
+  5    0.000105
+  6    0.000076
+Trial Time:          0.18552
+  0    1.096537
+  1    0.073183
+  2    0.003858
+  3    0.000448
+  4    0.000254
+  5    0.000186
+  6    0.000136
+  7    0.000099
+Trial Time:          0.21291
+  0    1.096200
+  1    0.073196
+  2    0.003830
+  3    0.000378
+  4    0.000175
+  5    0.000127
+  6    0.000094
+Trial Time:          0.18757
+  0    1.096034
+  1    0.073079
+  2    0.003882
+  3    0.000369
+  4    0.000160
+  5    0.000117
+  6    0.000086
+Trial Time:          0.18145
+  0    1.096290
+  1    0.073203
+  2    0.003868
+  3    0.000380
+  4    0.000172
+  5    0.000125
+  6    0.000091
+Trial Time:          0.18295
+  0    1.096132
+  1    0.073237
+  2    0.003879
+  3    0.000366
+  4    0.000162
+  5    0.000118
+  6    0.000087
+Trial Time:          0.18050
+  0    1.096378
+  1    0.073194
+  2    0.003872
+  3    0.000429
+  4    0.000234
+  5    0.000170
+  6    0.000124
+  7    0.000091
+Trial Time:          0.20635
+  0    1.096261
+  1    0.073233
+  2    0.003897
+  3    0.000393
+  4    0.000194
+  5    0.000142
+  6    0.000104
+  7    0.000077
+Trial Time:          0.20992
+Average Time:        0.19049
+pthread_create_probe: pid: 1373123 thread_ptr: 6291c0f243e8
+pthread_create_return_probe: pid: 1373123 thread_id: 136284272064192 (0x7bf3279ff6c0)
+========== Process 0[tgid=1373124, tid=1373124] statistics summary ==========
+emulated time =6.29259646
+total delay   =0.0010997819999999999
+PEBS sample total 320 321031
+LBR sample total 280
+bpftime sample total 943215
+CXLController:
+Total system memory capacity: 60GB
+  Page Type: PAGE
+  Global Counter:
+    Local: 0
+    Remote: 316
+    HITM: 580789
+Topology:
+Switch:
+  Events:
+    Load: 0
+    Store: 0
+    Conflict: 0
+  Switch:
+    Events:
+      Load: 0
+      Store: 0
+      Conflict: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+  Expander:
+    Events:
+      Load: 0
+      Store: 316
+      Migrate in: 0
+      Migrate out: 0
+      Hit Old: 0
+
+Statistics:
+  Number of Switches: 2
+  Number of Endpoints: 3
+  Number of Threads created: 1
+  Memory Freed: 936173356312662 bytes
+

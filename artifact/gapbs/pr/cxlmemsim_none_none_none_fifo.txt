@@ -1,0 +1,157 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+[*** LOG ERROR #0001 ***] [2025-04-11 09:48:32] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim-dev/lib/bpftime/runtime/src/bpftime_shm_internal.cpp(672)]
+[*** LOG ERROR #0020 ***] [2025-04-11 09:48:33] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0027 ***] [2025-04-11 09:48:34] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0034 ***] [2025-04-11 09:48:35] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/runtime/agent/agent.cpp(177)]
+pthread_create_probe: pid: 1374217 thread_ptr: 7ffe0250c8c8
+pthread_create_return_probe: pid: 1374217 thread_id: 140280711866048 (0x7f95a5ffe6c0)
+pthread_create_probe: pid: 1374217 thread_ptr: 7ffe0250c948
+pthread_create_return_probe: pid: 1374217 thread_id: 140280703473344 (0x7f95a57fd6c0)
+pthread_create_probe: pid: 1374217 thread_ptr: 7ffe0250c9c8
+pthread_create_return_probe: pid: 1374217 thread_id: 140280695080640 (0x7f95a4ffc6c0)
+Generate Time:       1.69111
+Build Time:          0.46871
+Graph has 1048576 nodes and 15699687 undirected edges for degree: 14
+  0    1.096608
+  1    0.073178
+  2    0.003830
+  3    0.000437
+  4    0.000249
+  5    0.000181
+  6    0.000132
+  7    0.000097
+Trial Time:          0.20093
+  0    1.096138
+  1    0.073147
+  2    0.003884
+  3    0.000388
+  4    0.000192
+  5    0.000139
+  6    0.000102
+  7    0.000074
+Trial Time:          0.20476
+  0    1.095599
+  1    0.073189
+  2    0.003938
+  3    0.000355
+  4    0.000060
+Trial Time:          0.12728
+  0    1.096130
+  1    0.073257
+  2    0.003900
+  3    0.000383
+  4    0.000186
+  5    0.000135
+  6    0.000099
+Trial Time:          0.17847
+  0    1.096272
+  1    0.073251
+  2    0.003962
+  3    0.000426
+  4    0.000235
+  5    0.000174
+  6    0.000127
+  7    0.000093
+Trial Time:          0.19972
+  0    1.096320
+  1    0.073214
+  2    0.003753
+  3    0.000408
+  4    0.000223
+  5    0.000161
+  6    0.000119
+  7    0.000087
+Trial Time:          0.20246
+  0    1.096267
+  1    0.073153
+  2    0.003946
+  3    0.000378
+  4    0.000170
+  5    0.000123
+  6    0.000090
+Trial Time:          0.17745
+  0    1.095827
+  1    0.073265
+  2    0.003875
+  3    0.000340
+  4    0.000115
+  5    0.000083
+Trial Time:          0.15160
+  0    1.096742
+  1    0.073172
+  2    0.003828
+  3    0.000473
+  4    0.000292
+  5    0.000213
+  6    0.000156
+  7    0.000114
+  8    0.000083
+Trial Time:          0.22791
+  0    1.096509
+  1    0.073073
+  2    0.003882
+  3    0.000448
+  4    0.000258
+  5    0.000190
+  6    0.000139
+  7    0.000102
+  8    0.000074
+Trial Time:          0.22768
+Average Time:        0.18983
+pthread_create_probe: pid: 1374216 thread_ptr: 606be6cfd3e8
+pthread_create_return_probe: pid: 1374216 thread_id: 134930973587136 (0x7ab810bff6c0)
+========== Process 0[tgid=1374217, tid=1374217] statistics summary ==========
+emulated time =10.144238126
+total delay   =0
+PEBS sample total 294 296002
+LBR sample total 256
+bpftime sample total 728995
+CXLController:
+Total system memory capacity: 60GB
+  Page Type: PAGE
+  Global Counter:
+    Local: 0
+    Remote: 556236
+    HITM: 0
+Topology:
+Switch:
+  Events:
+    Load: 0
+    Store: 0
+    Conflict: 0
+  Switch:
+    Events:
+      Load: 0
+      Store: 0
+      Conflict: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+  Expander:
+    Events:
+      Load: 555946
+      Store: 290
+      Migrate in: 0
+      Migrate out: 0
+      Hit Old: 0
+
+Statistics:
+  Number of Switches: 2
+  Number of Endpoints: 3
+  Number of Threads created: 1
+  Memory Freed: 936284028220966 bytes
+

@@ -149,7 +149,7 @@ void ParallelRob::processInstructions(const std::vector<InstructionGroup> &instr
 
     // 第二步：并行处理每个分区的指令
     std::vector<std::thread> threads;
-    std::atomic<uint64_t> globalMaxCycle{currentCycle_.load()};
+    std::atomic<uint64_t> globalMaxCycle{static_cast<uint64_t>(currentCycle_.load())};
     std::atomic<bool> allPartitionsProcessed{false};
 
     SPDLOG_INFO("Starting parallel processing phase...");

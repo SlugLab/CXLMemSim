@@ -39,9 +39,9 @@ WORKLOADS = {
     "gapbs": {
         "path": "../workloads/gapbs",
         "programs": [
-            "bc", "bfs", "cc", "pr", "sssp", "tc"  # All algorithms provided by GAPBS
+           "bc", "bfs", "cc", "pr", "sssp", "tc"  # All algorithms provided by GAPBS
         ],
-        "args": "-g 25 -n 10",  # Default arguments
+        "args": "-g 20 -n 10",  # Default arguments
         "env": {}  # Default environment variables
     },
     "memcached": {
@@ -68,12 +68,36 @@ WORKLOADS = {
         "args": "run_algorithm.py --dataset random-xs-20-angular --algorithm vsag --module ann_benchmarks.algorithms.vsag --constructor Vsag --runs 2 --count 10 --batch '[\'angular\', 20, {\'M\': 24, \'ef_construction\': 300, \'use_int8\': 4, \'rs\': 0.5}]' '[10]' '[20]' '[30]' '[40]' '[60]' '[80]' '[120]' '[200]' '[400]' '[600]' '[800]'",
         "env": {}
     },
-    "microbench": {
-        "path": "./microbench",
-        "programs": ["ld1","ld2","ld4","ld8","ld16","ld32","ld64","ld128","ld256","st1","st2","st4","st8","st16","st32","st64","st128","st256","malloc", "writeback"],
+    "mlc": {
+        "path": "../workloads/MLC",
+        "programs": ["mlc"],
         "args": "",
         "env": {}
-    }
+    },
+    "mcf": {
+        "path": "../workloads/mcf",
+        "programs": ["mcf_r_base.base-m64"],
+        "args": "../workloads/mcf/inp.in",
+        "env": {}
+    },
+    "wrf": {
+        "path": "./",
+        "programs": ["wrf.exe"],
+        "args": "",
+        "env": {"PWD": "../workloads/wrf"}
+    },
+    "memcached": {
+        "path": "./",
+        "programs": ["memcached-ycsb"],
+        "args": "",
+        "env": {}
+    },
+    # "microbench": {
+    #     "path": "./microbench",
+    #     "programs": ["ld1","ld2","ld4","ld8","ld16","ld32","ld64","ld128","ld256","st1","st2","st4","st8","st16","st32","st64","st128","st256","malloc", "writeback"],
+    #     "args": "",
+    #     "env": {}
+    # }
 }
 
 def ensure_directory(path):
@@ -181,7 +205,7 @@ def run_remote(workload, program, args, base_dir):
     # Execute command
     return run_command(cmd, log_path, WORKLOADS[workload].get("env"), shell=True)
 
-def run_cxl_mem_sim(workload, program, args, base_dir, policy_combo=None, pebs_period=10,
+def run_cxl_mem_sim(workload, program, args, base_dir, policy_combo=None, pebs_period=1000,
                     latency="100,100,100,100,100,100", bandwidth="100,100,100,100,100,100"):
     """Run program with CXLMemSim"""
     program_path = os.path.join(WORKLOADS[workload]["path"], program)
@@ -213,15 +237,30 @@ def run_cxl_mem_sim(workload, program, args, base_dir, policy_combo=None, pebs_p
     return run_command(cmd, log_path, WORKLOADS[workload].get("env"))
 
 def generate_policy_combinations(args):
-    """Generate policy combinations"""
-    # Use specified policies or defaults
-    allocation_policies = args.allocation_policies if args.allocation_policies else ["none"]
-    migration_policies = args.migration_policies if args.migration_policies else ["none"]
-    paging_policies = args.paging_policies if args.paging_policies else ["none"]
-    caching_policies = args.caching_policies if args.caching_policies else ["none"]
+    """Generate one-at-a-time policy combinations with only one policy active"""
+    combinations = []
 
-    # Generate all combinations
-    return list(itertools.product(allocation_policies, migration_policies, paging_policies, caching_policies))
+    # Allocation policies
+    for alloc in args.allocation_policies:
+        if alloc != "none":
+            combinations.append((alloc, "none", "none", "none"))
+
+    # Migration policies
+    for mig in args.migration_policies:
+        if mig != "none":
+            combinations.append(("none", mig, "none", "none"))
+
+    # Paging policies
+    for page in args.paging_policies:
+        if page != "none":
+            combinations.append(("none", "none", page, "none"))
+
+    # Caching policies
+    for cache in args.caching_policies:
+        if cache != "none":
+            combinations.append(("none", "none", "none", cache))
+
+    return combinations
 
 def run_all_workloads(args):
     """Run all workloads"""
@@ -270,16 +309,16 @@ def run_all_workloads(args):
                 #     workload_config["args"],
                 #     program_dir
                 # )
-                returncode, _ = run_vtune_remote(
-                    workload_name,
-                    program,
-                    workload_config["args"],
-                    program_dir
-                )
-                if returncode != 0 and not args.ignore_errors:
-                    logger.error(f"Original program failed: {program}, return code: {returncode}")
-                    if args.stop_on_error:
-                        return
+                # returncode, _ = run_vtune_remote(
+                #     workload_name,
+                #     program,
+                #     workload_config["args"],
+                #     program_dir
+                # )
+                # if returncode != 0 and not args.ignore_errors:
+                #     logger.error(f"Original program failed: {program}, return code: {returncode}")
+                #     if args.stop_on_error:
+                #         return
 
             # Run CXLMemSim if required
             if args.run_cxlmemsim:
@@ -291,16 +330,16 @@ def run_all_workloads(args):
                     else:
                         logger.info(f"Running CXLMemSim with default policy: {program}")
 
-                    # returncode, _ = run_cxl_mem_sim(
-                    #     workload_name,
-                    #     program,
-                    #     workload_config["args"],
-                    #     program_dir,
-                    #     policy_combo,
-                    #     args.pebs_period,
-                    #     args.latency,
-                    #     args.bandwidth
-                    # )
+                    returncode, _ = run_cxl_mem_sim(
+                        workload_name,
+                        program,
+                        workload_config["args"],
+                        program_dir,
+                        policy_combo,
+                        args.pebs_period,
+                        args.latency,
+                        args.bandwidth
+                    )
                     if returncode != 0 and not args.ignore_errors:
                         logger.error(f"CXLMemSim failed: {program}, return code: {returncode}")
                         if args.stop_on_error:
@@ -327,7 +366,7 @@ def main():
     parser.add_argument("--collect-system-info", action="store_true", help="Collect system information")
 
     # CXLMemSim parameters
-    parser.add_argument("--pebs-period", type=int, default=10, help="PEBS sampling period")
+    parser.add_argument("--pebs-period", type=int, default=1000, help="PEBS sampling period")
     parser.add_argument("--latency", default="200,250,200,250,200,250", help="CXLMemSim latency settings")
     parser.add_argument("--bandwidth", default="50,50,50,50,50,50", help="CXLMemSim bandwidth settings")
 

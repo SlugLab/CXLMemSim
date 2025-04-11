@@ -1,0 +1,181 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+[*** LOG ERROR #0001 ***] [2025-04-11 09:44:24] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim-dev/lib/bpftime/runtime/src/bpftime_shm_internal.cpp(672)]
+Generate Time:       1.67809
+Build Time:          0.42821
+Graph has 1048576 nodes and 15699687 undirected edges for degree: 14
+Source:                18265
+    i                0.00558
+   td          2     0.00005
+   td        457     0.00001
+   td     243329     0.00344
+    e                0.00100
+   bu     394582     0.01037
+   bu       6870     0.00283
+    c                0.00032
+   td         28     0.00007
+   td          0     0.00001
+Trial Time:          0.02402
+Source:               283905
+    i                0.00239
+   td         11     0.00001
+   td      80764     0.00045
+    e                0.00044
+   bu     533135     0.00760
+   bu      31243     0.00373
+    c                0.00051
+   td        114     0.00071
+   td          1     0.00001
+   td          0     0.00001
+Trial Time:          0.01627
+Source:               290555
+    i                0.00251
+   td          3     0.00001
+   td       1313     0.00002
+    e                0.00001
+   bu     338576     0.01474
+   bu     302183     0.00591
+   bu       3183     0.00497
+    c                0.00029
+   td         10     0.00006
+   td          0     0.00001
+Trial Time:          0.02887
+Source:               972240
+    i                0.00246
+   td          2     0.00001
+   td      13537     0.00009
+    e                0.00008
+   bu     513287     0.01323
+   bu     117860     0.00699
+   bu        578     0.00272
+    c                0.00028
+   td          4     0.00002
+   td          0     0.00001
+Trial Time:          0.02628
+Source:               892103
+    i                0.00247
+   td         11     0.00001
+   td      28035     0.00020
+    e                0.00013
+   bu     542414     0.00977
+   bu      74491     0.00427
+   bu        315     0.00697
+    c                0.00027
+   td          2     0.00001
+   td          0     0.00001
+Trial Time:          0.02445
+Source:               184304
+    i                0.00242
+   td          3     0.00001
+   td       1378     0.00002
+    e                0.00001
+   bu     343553     0.01265
+   bu     297264     0.00571
+   bu       3059     0.00276
+    c                0.00029
+   td         11     0.00003
+   td          0     0.00001
+Trial Time:          0.02418
+Source:               116889
+    i                0.00236
+   td         50     0.00001
+   td      54032     0.00048
+    e                0.00024
+   bu     546016     0.00821
+   bu      44985     0.00364
+    c                0.00061
+   td        184     0.00051
+   td          1     0.00001
+   td          0     0.00001
+Trial Time:          0.01635
+Source:               965164
+    i                0.00975
+   td          8     0.00001
+   td       7494     0.00005
+    e                0.00004
+   bu     481045     0.01120
+   bu     155855     0.00456
+   bu        862     0.00261
+    c                0.00026
+   td          4     0.00002
+   td          0     0.00001
+Trial Time:          0.02884
+Source:               849771
+    i                0.00237
+   td         47     0.00001
+   td      77995     0.00075
+    e                0.00035
+   bu     534985     0.00738
+   bu      32114     0.00339
+    c                0.00052
+   td        126     0.00045
+   td          1     0.00001
+   td          0     0.00001
+Trial Time:          0.01557
+Source:               103169
+    i                0.00241
+   td         54     0.00001
+   td      49929     0.00046
+    e                0.00021
+   bu     547045     0.00805
+   bu      48057     0.00340
+    c                0.00067
+   td        181     0.00048
+   td          2     0.00001
+   td          0     0.00001
+Trial Time:          0.01598
+Average Time:        0.02208
+========== Process 0[tgid=1370338, tid=1370338] statistics summary ==========
+emulated time =4.140410368
+total delay   =0.04961400500000002
+PEBS sample total 115 115709
+LBR sample total 26
+bpftime sample total 0
+CXLController:
+Total system memory capacity: 60GB
+  Page Type: PAGE
+  Global Counter:
+    Local: 0
+    Remote: 114
+    HITM: 115595
+Topology:
+Switch:
+  Events:
+    Load: 0
+    Store: 0
+    Conflict: 0
+  Switch:
+    Events:
+      Load: 0
+      Store: 76
+      Conflict: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 39
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 37
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+  Expander:
+    Events:
+      Load: 0
+      Store: 38
+      Migrate in: 0
+      Migrate out: 0
+      Hit Old: 0
+
+Statistics:
+  Number of Switches: 2
+  Number of Endpoints: 3
+  Number of Threads created: 1
+  Memory Freed: 0 bytes
+

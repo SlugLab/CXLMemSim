@@ -1,0 +1,189 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+[*** LOG ERROR #0001 ***] [2025-04-11 09:45:06] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim-dev/lib/bpftime/runtime/src/bpftime_shm_internal.cpp(672)]
+pthread_create_probe: pid: 1371251 thread_ptr: 7fffa67d19f8
+pthread_create_return_probe: pid: 1371251 thread_id: 123166343030464 (0x7004e61fe6c0)
+pthread_create_probe: pid: 1371251 thread_ptr: 7fffa67d1a78
+pthread_create_return_probe: pid: 1371251 thread_id: 123166334637760 (0x7004e59fd6c0)
+pthread_create_probe: pid: 1371251 thread_ptr: 7fffa67d1af8
+pthread_create_return_probe: pid: 1371251 thread_id: 123166326245056 (0x7004e51fc6c0)
+Generate Time:       1.66569
+Build Time:          0.45803
+Graph has 1048576 nodes and 15699687 undirected edges for degree: 14
+Source:                18265
+    i                0.00258
+   td          2     0.00011
+   td        457     0.00002
+   td     243329     0.00350
+    e                0.00100
+   bu     394582     0.01131
+   bu       6870     0.00296
+    c                0.00036
+   td         28     0.00014
+   td          0     0.00002
+Trial Time:          0.02239
+Source:               283905
+    i                0.00247
+   td         11     0.00002
+   td      80764     0.00047
+    e                0.00153
+   bu     533135     0.00744
+   bu      31243     0.00363
+    c                0.00056
+   td        114     0.00048
+   td          1     0.00002
+   td          0     0.00002
+Trial Time:          0.01703
+Source:               290555
+    i                0.00246
+   td          3     0.00002
+   td       1313     0.00002
+    e                0.00001
+   bu     338576     0.01139
+   bu     302183     0.00660
+   bu       3183     0.00273
+    c                0.00032
+   td         10     0.00006
+   td          0     0.00002
+Trial Time:          0.02398
+Source:               972240
+    i                0.00244
+   td          2     0.00002
+   td      13537     0.00009
+    e                0.00007
+   bu     513287     0.01137
+   bu     117860     0.00508
+   bu        578     0.00268
+    c                0.00039
+   td          4     0.00002
+   td          0     0.00002
+Trial Time:          0.02252
+Source:               892103
+    i                0.00242
+   td         11     0.00002
+   td      28035     0.00022
+    e                0.00013
+   bu     542414     0.00959
+   bu      74491     0.00404
+   bu        315     0.00262
+    c                0.00028
+   td          2     0.00002
+   td          0     0.00002
+Trial Time:          0.01971
+Source:               184304
+    i                0.00241
+   td          3     0.00002
+   td       1378     0.00003
+    e                0.00001
+   bu     343553     0.01155
+   bu     297264     0.00553
+   bu       3059     0.00275
+    c                0.00031
+   td         11     0.00006
+   td          0     0.00002
+Trial Time:          0.02301
+Source:               116889
+    i                0.00242
+   td         50     0.00002
+   td      54032     0.00049
+    e                0.00025
+   bu     546016     0.00808
+   bu      44985     0.00481
+    c                0.00065
+   td        184     0.00063
+   td          1     0.00002
+   td          0     0.00002
+Trial Time:          0.01773
+Source:               965164
+    i                0.00241
+   td          8     0.00002
+   td       7494     0.00006
+    e                0.00004
+   bu     481045     0.01108
+   bu     155855     0.00472
+   bu        862     0.00266
+    c                0.00028
+   td          4     0.00002
+   td          0     0.00002
+Trial Time:          0.02159
+Source:               849771
+    i                0.00235
+   td         47     0.00002
+   td      77995     0.00070
+    e                0.00036
+   bu     534985     0.00741
+   bu      32114     0.00333
+    c                0.00054
+   td        126     0.00046
+   td          1     0.00002
+   td          0     0.00002
+Trial Time:          0.01555
+Source:               103169
+    i                0.00244
+   td         54     0.00002
+   td      49929     0.00047
+    e                0.00021
+   bu     547045     0.00817
+   bu      48057     0.00579
+    c                0.00071
+   td        181     0.00057
+   td          2     0.00002
+   td          0     0.00002
+Trial Time:          0.01872
+Average Time:        0.02022
+pthread_create_probe: pid: 1371250 thread_ptr: 608dbfec73e8
+pthread_create_return_probe: pid: 1371250 thread_id: 136471361091264 (0x7c1eb6fff6c0)
+========== Process 0[tgid=1371251, tid=1371251] statistics summary ==========
+emulated time =4.174368706
+total delay   =0.005221943000000001
+PEBS sample total 162 162000
+LBR sample total 66
+bpftime sample total 274090
+CXLController:
+Total system memory capacity: 60GB
+  Page Type: PAGE
+  Global Counter:
+    Local: 0
+    Remote: 162000
+    HITM: 0
+Topology:
+Switch:
+  Events:
+    Load: 0
+    Store: 0
+    Conflict: 0
+  Switch:
+    Events:
+      Load: 0
+      Store: 0
+      Conflict: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+  Expander:
+    Events:
+      Load: 161839
+      Store: 161
+      Migrate in: 0
+      Migrate out: 0
+      Hit Old: 0
+
+Statistics:
+  Number of Switches: 2
+  Number of Endpoints: 3
+  Number of Threads created: 1
+  Memory Freed: 936074865881949 bytes
+

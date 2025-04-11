@@ -11,13 +11,13 @@
 #ifndef CXLMEMSIM_CXLCOUNTER_H
 #define CXLMEMSIM_CXLCOUNTER_H
 
-#include <cstdint>
 #include <atomic>
 #include <concepts>
-#include <source_location>
+#include <cstdint>
 #include <expected>
-#include <string>
 #include <format>
+#include <source_location>
+#include <string>
 /** TODO: Whether to using the pebs to record the state. add back invalidation migrate huge/ page and prefetch*/
 const char loadName[] = "load";
 const char storeName[] = "store";
@@ -41,15 +41,15 @@ const char tlbmisses1gName[] = "tlbmisses1g";
 const char ptwcountName[] = "ptwcount";
 
 // 基础计数器模板类 (Basic counter template class)
-template<const char* Name>
-class AtomicCounter {
+template <const char *Name> class AtomicCounter {
 public:
     std::atomic<uint64_t> value = 0;
     constexpr AtomicCounter() noexcept = default;
-    constexpr AtomicCounter(const AtomicCounter& other) noexcept : value(other.value.load()) { // 复制构造函数 (Copy constructor)
+    constexpr AtomicCounter(const AtomicCounter &other) noexcept
+        : value(other.value.load()) { // 复制构造函数 (Copy constructor)
 
-    };
-    AtomicCounter& operator=(const AtomicCounter&other) {
+          };
+    AtomicCounter &operator=(const AtomicCounter &other) {
         if (this != &other) {
             value.store(other.value.load());
         }
@@ -57,17 +57,11 @@ public:
     };
 
     // C++26允许constexpr修饰原子操作 (C++26 allows constexpr to modify atomic operations)
-    constexpr void increment() noexcept {
-        value.fetch_add(1, std::memory_order_relaxed);
-    }
+    constexpr void increment() noexcept { value.fetch_add(1, std::memory_order_relaxed); }
 
-    constexpr uint64_t get() const noexcept {
-        return value.load(std::memory_order_relaxed);
-    }
+    constexpr uint64_t get() const noexcept { return value.load(std::memory_order_relaxed); }
 
-    constexpr operator uint64_t() const noexcept {
-        return get();
-    }
+    constexpr operator uint64_t() const noexcept { return get(); }
 
     // 用于可能需要记录的事件日志 (For event logs that may need to be recorded)
     void log_increment(std::source_location loc = std::source_location::current()) const {
@@ -75,38 +69,25 @@ public:
     }
 };
 // 确保AtomicCounter满足Counter概念 (Ensure AtomicCounter meets the Counter concept)
-template<const char* Name>
+template <const char *Name>
 inline constexpr bool implements_counter_concept = requires(AtomicCounter<Name> t) {
     { t.value } -> std::convertible_to<uint64_t>;
     { t.increment() } -> std::same_as<void>;
 };
 
-
-template <const char* Name>
-struct std::formatter<AtomicCounter<Name>> {
-    constexpr auto parse(std::format_parse_context& ctx) -> decltype(ctx.begin()) {
-        return ctx.end();
-    }
+template <const char *Name> struct std::formatter<AtomicCounter<Name>> {
+    constexpr auto parse(std::format_parse_context &ctx) -> decltype(ctx.begin()) { return ctx.end(); }
 
     template <typename FormatContext>
-    auto format(const AtomicCounter<Name>& counter, FormatContext& ctx) const -> decltype(ctx.out()) {
-        // 简化formatter实现，避免嵌套std::format调用 (Simplify formatter implementation, avoid nested std::format calls)
+    auto format(const AtomicCounter<Name> &counter, FormatContext &ctx) const -> decltype(ctx.out()) {
+        // 简化formatter实现，避免嵌套std::format调用 (Simplify formatter implementation, avoid nested std::format
+        // calls)
         return format_to(ctx.out(), "{}", counter.get());
     }
 };
 
 // 使用C++20的enum class和强类型枚举 (Use C++20 enum class and strong-typed enumerations)
-enum class EventType {
-    Load,
-    Store,
-    Conflict,
-    MigrateIn,
-    MigrateOut,
-    HitOld,
-    Local,
-    Remote,
-    Hitm
-};
+enum class EventType { Load, Store, Conflict, MigrateIn, MigrateOut, HitOld, Local, Remote, Hitm };
 
 // 开关事件计数器 (Switch event counter)
 class CXLSwitchEvent {
@@ -117,9 +98,9 @@ public:
 
     constexpr CXLSwitchEvent() noexcept = default;
 
-    // 使用C++20的模板元编程和编译期字符串实现更灵活的接口 (Use C++20 template metaprogramming and compile-time strings to implement more flexible interfaces)
-    template<EventType Type>
-    constexpr void increment() noexcept {
+    // 使用C++20的模板元编程和编译期字符串实现更灵活的接口 (Use C++20 template metaprogramming and compile-time strings
+    // to implement more flexible interfaces)
+    template <EventType Type> constexpr void increment() noexcept {
         if constexpr (Type == EventType::Load) {
             load.increment();
         } else if constexpr (Type == EventType::Store) {
@@ -134,8 +115,7 @@ public:
     constexpr void inc_conflict() noexcept { conflict.increment(); }
 
     // 使用C++23的auto模板参数实现更灵活的统计功能
-    template<auto Field>
-    constexpr uint64_t get() const noexcept {
+    template <auto Field> constexpr uint64_t get() const noexcept {
         if constexpr (Field == &CXLSwitchEvent::load) {
             return load;
         } else if constexpr (Field == &CXLSwitchEvent::store) {
@@ -157,8 +137,7 @@ public:
 
     constexpr CXLMemExpanderEvent() noexcept = default;
 
-    template<EventType Type>
-    constexpr void increment() noexcept {
+    template <EventType Type> constexpr void increment() noexcept {
         if constexpr (Type == EventType::Load) {
             load.increment();
         } else if constexpr (Type == EventType::Store) {
@@ -179,19 +158,23 @@ public:
     constexpr void inc_hit_old() noexcept { hit_old.increment(); }
 
     // 统计方法
-    constexpr uint64_t total_operations() const noexcept {
-        return load + store + migrate_in + migrate_out + hit_old;
-    }
+    constexpr uint64_t total_operations() const noexcept { return load + store + migrate_in + migrate_out + hit_old; }
 
     // 使用C++23的expected获取操作结果
     std::expected<uint64_t, std::string> safe_get(EventType type) const noexcept {
         switch (type) {
-            case EventType::Load: return load;
-            case EventType::Store: return store;
-            case EventType::MigrateIn: return migrate_in;
-            case EventType::MigrateOut: return migrate_out;
-            case EventType::HitOld: return hit_old;
-            default: return std::unexpected(std::string("Invalid event type for CXLMemExpanderEvent"));
+        case EventType::Load:
+            return load;
+        case EventType::Store:
+            return store;
+        case EventType::MigrateIn:
+            return migrate_in;
+        case EventType::MigrateOut:
+            return migrate_out;
+        case EventType::HitOld:
+            return hit_old;
+        default:
+            return std::unexpected(std::string("Invalid event type for CXLMemExpanderEvent"));
         }
     }
 };
@@ -206,8 +189,7 @@ public:
 
     constexpr CXLCounter() noexcept = default;
 
-    template<EventType Type>
-    constexpr void increment() noexcept {
+    template <EventType Type> constexpr void increment() noexcept {
         if constexpr (Type == EventType::Local) {
             local.increment();
         } else if constexpr (Type == EventType::Remote) {
@@ -252,7 +234,6 @@ public:
 
 class CXLHugePageEvent {
 public:
-
     AtomicCounter<tlbhits4kName> tlb_hits_4k;
     AtomicCounter<tlbmisses4kName> tlb_misses_4k;
     AtomicCounter<tlbhits2mName> tlb_hits_2m;
