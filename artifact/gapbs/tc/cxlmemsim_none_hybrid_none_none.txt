@@ -1,0 +1,42 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+[*** LOG ERROR #0001 ***] [2025-04-11 11:21:13] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim-dev/lib/bpftime/runtime/src/bpftime_shm_internal.cpp(672)]
+[*** LOG ERROR #0015 ***] [2025-04-11 11:21:14] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0018 ***] [2025-04-11 11:21:15] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0021 ***] [2025-04-11 11:21:16] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0024 ***] [2025-04-11 11:21:18] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0027 ***] [2025-04-11 11:21:19] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0030 ***] [2025-04-11 11:21:21] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0033 ***] [2025-04-11 11:21:22] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+pthread_create_probe: pid: 1404856 thread_ptr: 7ffd5ccee588
+pthread_create_return_probe: pid: 1404856 thread_id: 135797755864768 (0x7b81e0ffe6c0)
+pthread_create_probe: pid: 1404856 thread_ptr: 7ffd5ccee608
+pthread_create_return_probe: pid: 1404856 thread_id: 135797747472064 (0x7b81e07fd6c0)
+pthread_create_probe: pid: 1404856 thread_ptr: 7ffd5ccee688
+pthread_create_return_probe: pid: 1404856 thread_id: 135797739079360 (0x7b81dfffc6c0)
+Generate Time:       1.70036
+Build Time:          0.44048
+Graph has 1048576 nodes and 15699687 undirected edges for degree: 14
+Relabel:             305.22725
+Trial Time:          314.68470
+Relabel:             307.63682
+Trial Time:          317.07655
+Relabel:             312.11753
+Trial Time:          321.55269
+Relabel:             310.22375
+Trial Time:          319.66484
+Relabel:             301.92080
+Trial Time:          311.35054
+Relabel:             296.57301
+Trial Time:          306.00852
+Relabel:             291.88280
+Trial Time:          301.27501
+Relabel:             294.34474
+Trial Time:          303.65944
+Relabel:             293.97178
+Trial Time:          303.33007
+Relabel:             302.21646
+Trial Time:          311.61086
+Average Time:        311.02132

@@ -1,0 +1,58 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+pthread_create_probe: pid: 1446071 thread_ptr: 5d520a32f3e8
+pthread_create_return_probe: pid: 1446071 thread_id: 126336035190464 (0x72e6e67ff6c0)
+========== Process 0[tgid=1446072, tid=1446072] statistics summary ==========
+emulated time =1.769116004
+total delay   =0
+PEBS sample total 3 2000
+LBR sample total 3
+bpftime sample total 28768
+CXLController:
+Total system memory capacity: 60GB
+  Page Type: PAGE
+  Global Counter:
+    Local: 0
+    Remote: 3
+    HITM: 1997
+Topology:
+Switch:
+  Events:
+    Load: 0
+    Store: 0
+    Conflict: 0
+  Switch:
+    Events:
+      Load: 0
+      Store: 2
+      Conflict: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 1
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 1
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+  Expander:
+    Events:
+      Load: 0
+      Store: 1
+      Migrate in: 0
+      Migrate out: 0
+      Hit Old: 0
+
+Statistics:
+  Number of Switches: 2
+  Number of Endpoints: 3
+  Number of Threads created: 1
+  Memory Freed: 958386453832666 bytes
+

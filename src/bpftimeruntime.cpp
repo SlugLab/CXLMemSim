@@ -8,6 +8,7 @@
  *  Copyright 2025 Regents of the University of California
  *  UC Santa Cruz Sluglab.
  */
+#include "bpftimeruntime.h"
 #include <cerrno>
 #include <csignal>
 #include <cstdlib>
@@ -19,17 +20,19 @@
 #include <string>
 #include <string_view>
 #include <sys/wait.h>
+#include <thread>
 #include <tuple>
 #include <unistd.h>
 #include <utility>
 #include <vector>
-#include <thread>
-#include "bpftimeruntime.h"
 
 BpfTimeRuntime::BpfTimeRuntime(pid_t tid, std::string program_location)
     : tid(tid), updater(new BPFUpdater<uint64_t, uint64_t>(10)) {
-    bpftime_initialize_global_shm(bpftime::shm_open_type::SHM_OPEN_ONLY);
+    bpftime_initialize_global_shm(bpftime::shm_open_type::SHM_REMOVE_AND_CREATE);
     SPDLOG_INFO("GLOBAL memory initialized ");
+    // load json program to shm
+    bpftime_import_global_shm_from_json(program_location.c_str());
+    SPDLOG_INFO("Program loaded to shm");
 }
 
 BpfTimeRuntime::~BpfTimeRuntime() {}

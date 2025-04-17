@@ -1,0 +1,96 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+[*** LOG ERROR #0001 ***] [2025-04-11 14:30:09] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim-dev/lib/bpftime/runtime/src/bpftime_shm_internal.cpp(672)]
+[*** LOG ERROR #0015 ***] [2025-04-11 14:30:10] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0018 ***] [2025-04-11 14:30:11] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0021 ***] [2025-04-11 14:30:13] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0024 ***] [2025-04-11 14:30:14] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0027 ***] [2025-04-11 14:30:15] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0030 ***] [2025-04-11 14:30:17] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+[*** LOG ERROR #0033 ***] [2025-04-11 14:30:18] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim/lib/bpftime/attach/frida_uprobe_attach_impl/src/frida_attach_utils.cpp(19)]
+pthread_create_probe: pid: 1434439 thread_ptr: 7fff494de8b8
+pthread_create_return_probe: pid: 1434439 thread_id: 135301695530688 (0x7b0e617fe6c0)
+pthread_create_probe: pid: 1434439 thread_ptr: 7fff494de938
+pthread_create_return_probe: pid: 1434439 thread_id: 135301687137984 (0x7b0e60ffd6c0)
+pthread_create_probe: pid: 1434439 thread_ptr: 7fff494de9b8
+pthread_create_return_probe: pid: 1434439 thread_id: 135301678745280 (0x7b0e607fc6c0)
+Generate Time:       1.69613
+Build Time:          0.44128
+Graph has 1048576 nodes and 15699687 undirected edges for degree: 14
+Relabel:             162.13577
+Trial Time:          171.47174
+Relabel:             170.32658
+Trial Time:          179.67887
+Relabel:             172.28168
+Trial Time:          181.51067
+Relabel:             181.20900
+Trial Time:          190.45376
+Relabel:             172.89473
+Trial Time:          182.13154
+Relabel:             162.38903
+Trial Time:          171.57894
+Relabel:             157.72507
+Trial Time:          166.87738
+Relabel:             163.66112
+Trial Time:          172.80492
+Relabel:             160.33164
+Trial Time:          169.51629
+Relabel:             164.82602
+Trial Time:          173.98044
+Average Time:        176.00046
+pthread_create_probe: pid: 1434428 thread_ptr: 5b08b18cdc18
+pthread_create_return_probe: pid: 1434428 thread_id: 136916802467520 (0x7c866d5ff6c0)
+========== Process 0[tgid=1434439, tid=1434439] statistics summary ==========
+emulated time =5054.136359541
+total delay   =0
+PEBS sample total 211 8561638
+LBR sample total 6
+bpftime sample total 9351
+CXLController:
+Total system memory capacity: 60GB
+  Page Type: PAGE
+  Global Counter:
+    Local: 0
+    Remote: 208
+    HITM: 8561430
+Topology:
+Switch:
+  Events:
+    Load: 0
+    Store: 0
+    Conflict: 0
+  Switch:
+    Events:
+      Load: 0
+      Store: 0
+      Conflict: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+  Expander:
+    Events:
+      Load: 0
+      Store: 208
+      Migrate in: 0
+      Migrate out: 0
+      Hit Old: 0
+
+Statistics:
+  Number of Switches: 2
+  Number of Endpoints: 3
+  Number of Threads created: 1
+  Memory Freed: 953187497080621 bytes
+

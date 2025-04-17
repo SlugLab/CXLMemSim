@@ -17,7 +17,7 @@
 #define LBR_DATA_SHIFT 0
 // 8 bits
 #define LBR_INS_MASK 0xfffffff0000
-#define LBR_INS_SHIFT  16
+#define LBR_INS_SHIFT 16
 
 #include "cxlcontroller.h"
 #include "helper.h"
@@ -52,6 +52,7 @@ public:
     uint32_t seq{};
     size_t rdlen{};
     size_t mplen{};
+    bool use_pe2 = false;
     perf_event_mmap_page *mp;
     explicit LBR(pid_t, uint64_t);
     ~LBR();

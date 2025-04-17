@@ -1,0 +1,35 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+[*** LOG ERROR #0001 ***] [2025-04-11 10:27:34] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim-dev/lib/bpftime/runtime/src/bpftime_shm_internal.cpp(672)]
+pthread_create_probe: pid: 1390444 thread_ptr: 7ffc006885b8
+pthread_create_return_probe: pid: 1390444 thread_id: 139341173089984 (0x7ebae51fe6c0)
+pthread_create_probe: pid: 1390444 thread_ptr: 7ffc00688638
+pthread_create_return_probe: pid: 1390444 thread_id: 139341164697280 (0x7ebae49fd6c0)
+pthread_create_probe: pid: 1390444 thread_ptr: 7ffc006886b8
+pthread_create_return_probe: pid: 1390444 thread_id: 139341156304576 (0x7ebae41fc6c0)
+Generate Time:       1.68028
+Build Time:          0.45859
+Graph has 1048576 nodes and 15699687 undirected edges for degree: 14
+Relabel:             0.91339
+Trial Time:          10.31382
+Relabel:             0.93341
+Trial Time:          10.14328
+Relabel:             0.94971
+Trial Time:          10.24191
+Relabel:             0.99185
+Trial Time:          10.13880
+Relabel:             219.66635
+Trial Time:          229.01694
+Relabel:             203.18755
+Trial Time:          212.46703
+Relabel:             243.08064
+Trial Time:          252.33199
+Relabel:             257.87214
+Trial Time:          267.21356
+Relabel:             252.69825
+Trial Time:          262.00798
+Relabel:             253.11635
+Trial Time:          262.38890
+Average Time:        152.62642

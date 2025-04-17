@@ -1,0 +1,89 @@
+use cpuid: 0 0
+use cpuid: 1 0
+use cpuid: 2 0
+use cpuid: 3 0
+[*** LOG ERROR #0001 ***] [2025-04-11 13:43:17] [stderr] std::bad_alloc [/home/try/Documents/CXLMemSim-dev/lib/bpftime/runtime/src/bpftime_shm_internal.cpp(672)]
+pthread_create_probe: pid: 1415337 thread_ptr: 7ffd358a20e8
+pthread_create_return_probe: pid: 1415337 thread_id: 129154106255040 (0x7577089fe6c0)
+pthread_create_probe: pid: 1415337 thread_ptr: 7ffd358a2168
+pthread_create_return_probe: pid: 1415337 thread_id: 129154097862336 (0x7577081fd6c0)
+pthread_create_probe: pid: 1415337 thread_ptr: 7ffd358a21e8
+pthread_create_return_probe: pid: 1415337 thread_id: 129154089469632 (0x7577079fc6c0)
+Generate Time:       1.66703
+Build Time:          0.45858
+Graph has 1048576 nodes and 15699687 undirected edges for degree: 14
+Relabel:             0.94277
+Trial Time:          10.33083
+Relabel:             0.94274
+Trial Time:          10.27970
+Relabel:             1.00818
+Trial Time:          10.21086
+Relabel:             1.00994
+Trial Time:          10.21598
+Relabel:             1.52649
+Trial Time:          10.58646
+Relabel:             216.52355
+Trial Time:          225.78073
+Relabel:             201.77002
+Trial Time:          210.96320
+Relabel:             200.70012
+Trial Time:          209.91691
+Relabel:             127.69983
+Trial Time:          136.94981
+Relabel:             132.08203
+Trial Time:          141.20875
+Average Time:        97.64432
+pthread_create_probe: pid: 1415336 thread_ptr: 569cfb83bc18
+pthread_create_return_probe: pid: 1415336 thread_id: 134235845293760 (0x7a1637dff6c0)
+========== Process 0[tgid=1415337, tid=1415337] statistics summary ==========
+emulated time =1080.019200276
+total delay   =0.008724183
+PEBS sample total 1823 7680003
+LBR sample total 13
+bpftime sample total 161743
+CXLController:
+Total system memory capacity: 60GB
+  Page Type: PAGE
+  Global Counter:
+    Local: 0
+    Remote: 1783
+    HITM: 16238577
+Topology:
+Switch:
+  Events:
+    Load: 0
+    Store: 0
+    Conflict: 0
+  Switch:
+    Events:
+      Load: 0
+      Store: 0
+      Conflict: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+    Expander:
+      Events:
+        Load: 0
+        Store: 0
+        Migrate in: 0
+        Migrate out: 0
+        Hit Old: 0
+  Expander:
+    Events:
+      Load: 0
+      Store: 1783
+      Migrate in: 0
+      Migrate out: 0
+      Hit Old: 0
+
+Statistics:
+  Number of Switches: 2
+  Number of Endpoints: 3
+  Number of Threads created: 1
+  Memory Freed: 950366166770716 bytes
+

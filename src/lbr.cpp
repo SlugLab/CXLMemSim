@@ -63,22 +63,6 @@
 
 LBR::LBR(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_period) {
     // Configure perf_event_attr struct
-    /*perf_event_attr pe = {
-        .type = PERF_TYPE_RAW,
-        .size = sizeof(perf_event_attr),
-        .config = 0x00D3, // mem_load_retired.l3_miss
-        .sample_period = sample_period,
-        .sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_CPU | PERF_SAMPLE_TIME | PERF_SAMPLE_BRANCH_STACK,
-
-        .read_format = PERF_FORMAT_TOTAL_TIME_ENABLED,
-        .disabled = 1, // Event is initially disabled
-        .exclude_user = 0,
-        .exclude_kernel = 1,
-        .exclude_hv = 1,
-        .precise_ip = 1,
-        .branch_sample_type = PERF_SAMPLE_BRANCH_USER | PERF_SAMPLE_BRANCH_ANY |PERF_SAMPLE_BRANCH_COUNTERS,
-        //.config1 = 3,
-    };*/
     perf_event_attr pe = {
         .type = PERF_TYPE_RAW,
         .size = sizeof(perf_event_attr),
@@ -95,14 +79,46 @@ LBR::LBR(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_per
         .branch_sample_type = PERF_SAMPLE_BRANCH_USER | PERF_SAMPLE_BRANCH_ANY | (1 << 19),
     };
 
+    perf_event_attr pe2 = {
+        .type = PERF_TYPE_RAW,
+        .size = sizeof(perf_event_attr),
+        .config = 0x20d1, // mem_load_retired.l3_miss
+        .sample_freq = sample_period,
+        .sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_CPU | PERF_SAMPLE_TIME | PERF_SAMPLE_BRANCH_STACK,
+        .read_format = PERF_FORMAT_TOTAL_TIME_ENABLED,
+        .disabled = 1, // Event is initially disabled
+        .exclude_user = 0,
+        .exclude_kernel = 1,
+        .exclude_hv = 1,
+        .precise_ip = 3,
+        .config1 = 3,
+        .branch_sample_type = PERF_SAMPLE_BRANCH_USER | PERF_SAMPLE_BRANCH_ANY,
+    };
+
     int cpu = -1; // measure on any cpu
     int group_fd = -1;
     unsigned long flags = 0;
 
     this->fd = perf_event_open(&pe, pid, cpu, group_fd, flags);
     if (this->fd == -1) {
-        perror("perf_event_open");
-        exit(EXIT_FAILURE);
+        // Print more specific error info and try fallback options
+        fprintf(stderr, "perf_event_open error: %s\n", strerror(errno));
+
+        // Try fallback with even more basic settings
+        if (errno == EINVAL) {
+            pe.precise_ip = 0;
+            pe.config1 = 0;
+            pe.branch_sample_type = PERF_SAMPLE_BRANCH_USER;
+            this->fd = perf_event_open(&pe2, pid, cpu, group_fd, flags);
+
+            if (this->fd == -1) {
+                perror("perf_event_open fallback also failed");
+                exit(EXIT_FAILURE);
+            }
+            use_pe2 = true;
+        } else {
+            exit(EXIT_FAILURE);
+        }
     }
     this->mplen = MMAP_SIZE;
     this->mp = (perf_event_mmap_page *)mmap(nullptr, MMAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd, 0);
@@ -155,9 +171,9 @@ int LBR::read(CXLController *controller, LBRElem *elem) {
                 if (this->pid == data->pid) {
                     SPDLOG_DEBUG("pid:{} tid:{} size:{} nr2:{} data-size:{} cpu:{} timestamp:{} hw_idx: lbrs:{} "
                                  "counters:{} {} {}",
-                                 data->pid, data->tid, header->size, data->nr2, sizeof(*data),
-                                 data->cpu, data->timestamp, data->lbrs[0].from,
-                                 data->counters[0].counters, data->counters[1].counters, data->counters[2].counters);
+                                 data->pid, data->tid, header->size, data->nr2, sizeof(*data), data->cpu,
+                                 data->timestamp, data->lbrs[0].from, data->counters[0].counters,
+                                 data->counters[1].counters, data->counters[2].counters);
 
                     memcpy(&elem->branch_stack,
                            (char *)&data->counters + (32 * 8), // Cast to char* before arithmetic
