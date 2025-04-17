@@ -34,6 +34,7 @@ enum {
     CPU_MDL_SKX = 85,
     CPU_MDL_SPR = 143,
     CPU_MDL_ADL = 151,
+    CPU_MDL_CFL = 158, //coffee lake in laptop. 
     CPU_MDL_GNR = 173,
     CPU_MDL_SRF = 175,
     CPU_MDL_LNL = 189,

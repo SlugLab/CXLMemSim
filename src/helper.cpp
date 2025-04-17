@@ -41,6 +41,10 @@ ModelContext model_ctx[] = {{CPU_MDL_BDX,
                              {
                                  "/sys/bus/event_source/devices/uncore_cbo_%u/type",
                              }},
+                            {CPU_MDL_CFL,
+                             {
+                                 "/sys/bus/event_source/devices/uncore_cbox_%u/type",
+                             }},
                             {CPU_MDL_LNL,
                              {
                                  "/sys/bus/event_source/devices/uncore_cbox_%u/type",
