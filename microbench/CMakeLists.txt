@@ -11,6 +11,8 @@ add_executable(cache-miss cache-miss.c)
 add_executable(thread thread.cpp)
 add_executable(dot_product dot_product.c)
 add_executable(write_back write_back.c)
+add_executable(simple-loop simple-loop.c)
+add_executable(simple-loop-no-dep simple-loop-no-dep.c)
 
 add_executable(ld1 ld.cpp)
 target_compile_definitions(ld1 PRIVATE -DFENCE_COUNT=1)
