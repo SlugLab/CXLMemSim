@@ -11,6 +11,100 @@
 
 #include "rob.h"
 #include <fstream>
+
+std::unordered_map<std::string, int> instructionLatencyMap = {
+    // 基本整数ALU操作 (IntAlu) - 1周期
+    {"mov", 1}, // MOV_R_R: 寄存器间移动
+    {"add", 1}, // ADD_R_R, ADD_R_I: 加法操作
+    {"sub", 1}, // SUB_R_I: 减法操作
+    {"and", 1}, // TEST_R_R: 位与操作
+    {"or", 1}, // 位或操作
+    {"xor", 1}, // 位异或操作
+    {"cmp", 1}, // CMP_M_I: 比较操作 (ALU部分)
+    {"limm", 1}, // 立即数加载
+    {"rdip", 1}, // 读取指令指针
+    {"wrip", 1}, // 写入指令指针 (控制转移)
+
+    // 整数乘法 (IntMult) - 3周期
+    {"mul", 3}, // 整数乘法
+    {"imul", 3}, // 有符号整数乘法
+
+    // 整数除法 (IntDiv) - x86特殊优化为1周期
+    {"div", 1}, // x86除法微操作已优化
+    {"idiv", 1}, // x86有符号除法微操作已优化
+
+    // 内存访问操作 - 延迟主要由缓存决定，这里是基础延迟
+    {"ld", 1}, // 内存加载基础延迟 (不包括缓存miss)
+    {"st", 1}, // 内存存储基础延迟
+
+    // 分支操作 - 主要是条件码设置
+    {"jz", 1}, // JZ_I: 零标志跳转的准备工作
+    {"jnz", 1}, // JNZ_I: 非零标志跳转的准备工作
+    {"jmp", 1}, // 无条件跳转
+    {"je", 1}, // 相等跳转
+    {"jne", 1}, // 不等跳转
+    {"jl", 1}, // 小于跳转
+    {"jg", 1}, // 大于跳转
+    {"jle", 1}, // 小于等于跳转
+    {"jge", 1}, // 大于等于跳转
+
+    // 浮点运算 (FP_ALU) - 2周期
+    {"fadd", 2}, // FloatAdd: 浮点加法
+    {"fsub", 2}, // FloatAdd: 浮点减法
+    {"fcmp", 2}, // FloatCmp: 浮点比较
+    {"fcvt", 2}, // FloatCvt: 浮点转换
+
+    // 浮点乘除法 (FP_MultDiv)
+    {"fmul", 4}, // FloatMult: 浮点乘法 - 4周期
+    {"fmadd", 5}, // FloatMultAcc: 浮点累乘 - 5周期
+    {"fdiv", 12}, // FloatDiv: 浮点除法 - 12周期，非流水线
+    {"fsqrt", 24}, // FloatSqrt: 浮点开方 - 24周期，非流水线
+    {"fmisc", 3}, // FloatMisc: 其他浮点操作 - 3周期
+
+    // SIMD操作 - 多数为1周期
+    {"simd_add", 1}, // SIMD加法
+    {"simd_mul", 1}, // SIMD乘法
+    {"simd_cmp", 1}, // SIMD比较
+    {"simd_cvt", 1}, // SIMD转换
+    {"simd_misc", 1}, // SIMD杂项操作
+
+    // x86特有微操作
+    {"lea", 1}, // 有效地址计算
+    {"nop", 1}, // 空操作
+    {"push", 1}, // 压栈 (不包括内存访问延迟)
+    {"pop", 1}, // 出栈 (不包括内存访问延迟)
+    {"call", 1}, // 函数调用 (不包括内存访问延迟)
+    {"ret", 1}, // 函数返回 (不包括内存访问延迟)
+
+    // 位操作
+    {"shl", 1}, // 逻辑左移
+    {"shr", 1}, // 逻辑右移
+    {"sar", 1}, // 算术右移
+    {"rol", 1}, // 循环左移
+    {"ror", 1}, // 循环右移
+
+    // 其他常见x86指令
+    {"inc", 1}, // 自增
+    {"dec", 1}, // 自减
+    {"neg", 1}, // 取负
+    {"not", 1}, // 位取反
+    {"test", 1}, // 测试 (设置标志位)
+    {"cmov", 1}, // 条件移动
+
+    // 字符串操作 (简化)
+    {"movs", 1}, // 字符串移动
+    {"stos", 1}, // 字符串存储
+    {"lods", 1}, // 字符串加载
+    {"scas", 1}, // 字符串扫描
+    {"cmps", 1}, // 字符串比较
+
+    // 特殊指令
+    {"cpuid", 20}, // CPU信息查询 - 较高延迟
+    {"rdtsc", 3}, // 读取时间戳计数器
+    {"mfence", 1}, // 内存栅栏
+    {"sfence", 1}, // 存储栅栏
+    {"lfence", 1} // 加载栅栏
+};
 // 发射指令到ROB
 // 修改issue函数，调整发射逻辑
 bool Rob::issue(const InstructionGroup &ins) {
@@ -46,6 +140,7 @@ bool Rob::issue(const InstructionGroup &ins) {
 
 // 修改canRetire函数，确保内存指令有足够的延迟
 bool Rob::canRetire(const InstructionGroup &ins) {
+    // 非内存指令可以立即退休，不需要等待
     if (ins.address == 0) {
         return true;
     }
@@ -57,19 +152,38 @@ bool Rob::canRetire(const InstructionGroup &ins) {
         double baseLatency = controller_->calculate_latency(allAccess, 80.);
         // 关键：设置最小延迟阈值
         cur_latency = std::max(10L, static_cast<long>(baseLatency));
-        totalLatency_ += cur_latency;
+        for (const auto &[instr, latency] : instructionLatencyMap) {
+            if (ins.instruction.find(instr) != std::string::npos) {
+                cur_latency += latency;
+                break;
+            }
+        }
+
+        // 关键修改：为内存访问延迟的每个周期增加一次stall计数
+        // 这模拟了传统意义上的ROB停顿
+        stallCount_ += cur_latency;
+        stallEventCount_ += 1; // 事件计数略少于实际停顿
+
+        currentCycle_ += cur_latency;
 
         // Update the retire timestamp directly to reflect the calculated latency
         const_cast<InstructionGroup &>(ins).retireTimestamp += cur_latency;
+    } else {
+        for (const auto &[instr, latency] : instructionLatencyMap) {
+            if (ins.instruction.find(instr) != std::string::npos) {
+                cur_latency += latency;
+                break;
+            }
+        }
+
+        currentCycle_ += cur_latency;
     }
 
     uint64_t waitTime = currentCycle_ - ins.cycleCount;
 
-    // 延迟期间增加停顿计数
+    // 延迟期间增加停顿计数 - 只有在特殊情况下才会触发
     if (waitTime < cur_latency) {
         stallCount_++;
-
-        // ROB事件与停顿计数差异化
         stallEventCount_++;
         return false;
     }
@@ -82,8 +196,8 @@ bool Rob::canRetire(const InstructionGroup &ins) {
 void Rob::tick() {
     currentCycle_++;
 
-    // 打印队列状态
-    if (currentCycle_ % 10000 == 0) {
+    // 打印队列状态，更频繁地显示
+    if (currentCycle_ % 5000 == 0) {
         SPDLOG_INFO("Cycle {}: Queue size {}, Stalls {}, ROB Events {}", currentCycle_, queue_.size(), stallCount_,
                     stallEventCount_);
     }
@@ -100,11 +214,14 @@ void Rob::tick() {
         queue_.pop_front();
     }
 
-    // 关键：周期性放慢退休速度，模拟处理器后端压力
-    if (currentCycle_ % 64 == 0 && !queue_.empty()) {
-        stallCount_++; // 额外停顿增加积压
-        if (stallCount_ % 10 == 0)
-            stallEventCount_++;
+    // 周期性放慢退休速度，更频繁地模拟处理器后端压力
+    // 当队列积累超过8条指令时，开始增加额外停顿
+    if (currentCycle_ % 32 == 0 && queue_.size() > 8) {
+        stallCount_ += 2; // 额外停顿增加积压
+        stallEventCount_++;
+        if (currentCycle_ % 1000 == 0) {
+            SPDLOG_INFO("Added periodic stall at cycle {}, queue size {}", currentCycle_, queue_.size());
+        }
     }
 }
 
@@ -124,342 +241,6 @@ bool Rob::tryAlternativeRetire() {
     // 如果找不到可以退休的指令，记录一次停顿
     stallCount_++;
     stallEventCount_++;
-    return false;
-}
-
-// 并行处理所有指令
-void ParallelRob::processInstructions(const std::vector<InstructionGroup> &instructions) {
-    SPDLOG_INFO("Starting to process {} instructions across {} partitions", instructions.size(), NUM_PARTITIONS);
-
-    // 第一步：预处理 - 将指令分配到不同分区
-    std::vector<std::vector<InstructionGroup>> partitionedInstructions(NUM_PARTITIONS);
-    for (const auto &ins : instructions) {
-        size_t partIndex = getPartitionIndex(ins);
-        partitionedInstructions[partIndex].push_back(ins);
-    }
-
-    SPDLOG_INFO("Instruction partitioning complete. Partition sizes:");
-    for (int p = 0; p < NUM_PARTITIONS; p++) {
-        SPDLOG_INFO("  Partition {}: {} instructions", p, partitionedInstructions[p].size());
-    }
-
-    // 为了跟踪处理进度
-    std::atomic<uint64_t> globalProcessedCount{0};
-    std::atomic<uint64_t> globalRetiredCount{0};
-
-    // 第二步：并行处理每个分区的指令
-    std::vector<std::thread> threads;
-    std::atomic<uint64_t> globalMaxCycle{static_cast<uint64_t>(currentCycle_.load())};
-    std::atomic<bool> allPartitionsProcessed{false};
-
-    SPDLOG_INFO("Starting parallel processing phase...");
-
-    for (int p = 0; p < NUM_PARTITIONS; p++) {
-        threads.emplace_back([this, p, &partitionedInstructions, &globalMaxCycle, &allPartitionsProcessed,
-                              &globalProcessedCount, &globalRetiredCount,
-                              &instructions]() { // 添加instructions到捕获列表
-            auto &partition = this->partitions_[p];
-            auto &insForPartition = partitionedInstructions[p];
-            const size_t totalInPartition = insForPartition.size();
-
-            SPDLOG_INFO("Thread {} started processing {} instructions", p, totalInPartition);
-
-            // 按照循环计数排序，确保正确的处理顺序
-            std::sort(insForPartition.begin(), insForPartition.end(),
-                      [](const InstructionGroup &a, const InstructionGroup &b) { return a.cycleCount < b.cycleCount; });
-
-            uint64_t localCycle = this->currentCycle_.load();
-            uint64_t localProcessed = 0;
-
-            for (const auto &ins : insForPartition) {
-                // 处理这条指令
-                const int MAX_RETRIES = 100;
-                int retries = 0;
-                bool instructionQueued = false;
-
-                while (!instructionQueued && retries < MAX_RETRIES) {
-                    // 获取锁前先短暂等待，如果失败多次
-                    if (retries > 10) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    }
-
-                    // 尝试获取锁
-                    bool lockAcquired = partition.mutex.try_lock();
-                    if (!lockAcquired) {
-                        retries++;
-                        if (retries % 20 == 0) {
-                            SPDLOG_DEBUG("Thread {} waiting for lock, retry {}/{}", p, retries, MAX_RETRIES);
-                        }
-                        continue;
-                    }
-                    // 尝试加锁成功后的代码
-                    std::unique_lock<std::mutex> lock(partition.mutex, std::adopt_lock);
-
-                    // 检查队列是否有空间
-                    if (partition.queue.size() < this->maxSize_ / NUM_PARTITIONS) {
-                        // 发射指令
-                        partition.queue.push_back(ins);
-                        instructionQueued = true;
-
-                        // 对于内存访问指令，通知控制器
-                        if (ins.address != 0) {
-                            int currentCounter = this->counter.fetch_add(1) + 1;
-                            this->controller_->insert(ins.retireTimestamp, 0, ins.address, 0, currentCounter * 10);
-                        }
-
-                        // 尝试退休已完成的指令
-                        auto it = partition.queue.begin();
-                        while (it != partition.queue.end()) {
-                            if (this->processRetirement(*it, partition)) {
-                                it = partition.queue.erase(it);
-                            } else {
-                                ++it;
-                            }
-                        }
-
-                        // 推进本地周期
-                        localCycle++;
-                        // 处理完一条指令，更新进度计数
-                        localProcessed++;
-                        uint64_t totalProcessed = globalProcessedCount.fetch_add(1) + 1;
-                        if (totalProcessed % 10000 == 0) {
-                            SPDLOG_INFO("Processed {} instructions ({:.1f}% of total)", totalProcessed,
-                                        (totalProcessed * 100.0) / instructions.size());
-                        }
-                    } else {
-                        // 队列已满，尝试退休一些指令
-                        this->stallCount_++;
-                        bool retired = false;
-                        auto it = partition.queue.begin();
-                        while (it != partition.queue.end()) {
-                            if (this->processRetirement(*it, partition)) {
-                                it = partition.queue.erase(it);
-                                retired = true;
-                            } else {
-                                ++it;
-                            }
-                        }
-
-                        // 如果没有能退休的指令，临时释放锁，允许其他线程工作
-                        if (!retired) {
-                            lock.unlock();
-                            std::this_thread::yield(); // 让出CPU时间片
-                            localCycle++; // 仍然推进本地周期
-                        }
-                    }
-
-                    // 处理完一条指令
-                    localProcessed++;
-                    uint64_t totalProcessed = globalProcessedCount.fetch_add(1) + 1;
-
-                    if (totalProcessed % 10000 == 0) {
-                        SPDLOG_INFO("Processed {} instructions ({:.1f}% of total)", totalProcessed,
-                                    (totalProcessed * 100.0) / instructions.size());
-                    }
-                }
-
-                // 每处理1000条指令报告一次局部进度
-                if (localProcessed % 1000 == 0) {
-                    SPDLOG_INFO("Thread {} processed {}/{} instructions ({:.1f}%)", p, localProcessed, totalInPartition,
-                                (localProcessed * 100.0) / totalInPartition);
-                }
-            }
-
-            SPDLOG_INFO("Thread {} completed instruction processing phase", p);
-
-            // 更新全局最大周期
-            // 使用正确类型的变量
-            auto current = globalMaxCycle.load();
-            do {
-                current = globalMaxCycle.load();
-            } while (localCycle > current && !globalMaxCycle.compare_exchange_weak(current, localCycle));
-        });
-    }
-
-    // 等待所有线程完成
-    for (auto &thread : threads) {
-        thread.join();
-    }
-
-    SPDLOG_INFO("All processing threads completed. Total processed: {}", globalProcessedCount.load());
-
-    allPartitionsProcessed = true;
-
-    // 更新全局周期
-    currentCycle_.store(globalMaxCycle.load());
-    SPDLOG_INFO("Global cycle updated to {}", currentCycle_.load());
-
-    // 最后阶段：清空所有分区队列中的剩余指令
-    SPDLOG_INFO("Starting cleanup phase...");
-
-    threads.clear();
-
-    // 设置超时机制检测清理阶段
-    std::atomic<bool> cleanupComplete{false};
-    std::thread timeoutThread([&cleanupComplete]() {
-        for (int i = 0; i < 50; i++) { // 5秒超时，每100ms检查一次
-            if (cleanupComplete) {
-                return;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-        if (!cleanupComplete) {
-            SPDLOG_ERROR("WARNING: Cleanup phase timeout after 5 seconds, possible deadlock detected");
-        }
-    });
-
-    for (int p = 0; p < NUM_PARTITIONS; p++) {
-        threads.emplace_back([this, p, &globalRetiredCount]() {
-            auto &partition = this->partitions_[p];
-            uint64_t localCycle = this->currentCycle_.load();
-            const int MAX_ITERATIONS = 1000;
-            int iterations = 0;
-            size_t initialQueueSize = 0;
-
-            {
-                std::lock_guard<std::mutex> lock(partition.mutex);
-                initialQueueSize = partition.queue.size();
-            }
-
-            SPDLOG_INFO("Cleanup thread {} started, initial queue size: {}", p, initialQueueSize);
-            uint64_t localRetired = 0;
-
-            while (iterations < MAX_ITERATIONS) {
-                bool allEmpty = true;
-                bool lockAcquired = partition.mutex.try_lock();
-
-                if (!lockAcquired) {
-                    if (iterations % 100 == 0) {
-                        SPDLOG_DEBUG("Cleanup thread {} waiting for lock, iteration {}", p, iterations);
-                    }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    iterations++;
-                    continue;
-                }
-
-                {
-                    std::unique_lock<std::mutex> lock(partition.mutex, std::adopt_lock);
-
-                    size_t queueSizeBefore = partition.queue.size();
-                    if (!partition.queue.empty()) {
-                        allEmpty = false;
-                        int retiredInThisIteration = 0;
-
-                        auto it = partition.queue.begin();
-                        while (it != partition.queue.end()) {
-                            if (this->processRetirement(*it, partition)) {
-                                it = partition.queue.erase(it);
-                                retiredInThisIteration++;
-                                localRetired++;
-                                globalRetiredCount.fetch_add(1);
-                            } else {
-                                ++it;
-                            }
-                        }
-
-                        if (retiredInThisIteration > 0 && localRetired % 1000 == 0) {
-                            SPDLOG_INFO("Cleanup thread {} retired {} instructions, queue size: {}->{}", p,
-                                        localRetired, queueSizeBefore, partition.queue.size());
-                        }
-
-                        // 没有退休指令时，强制推进周期
-                        if (retiredInThisIteration == 0) {
-                            localCycle += 5;
-                            if (iterations % 50 == 0) {
-                                SPDLOG_INFO("Cleanup thread {} forced cycle advancement to {}, queue size: {}", p,
-                                            localCycle, partition.queue.size());
-                            }
-                        } else {
-                            localCycle++;
-                        }
-                    }
-                } // 锁在这里自动释放
-
-                if (allEmpty) {
-                    SPDLOG_INFO("Cleanup thread {} completed, all instructions retired ({} total)", p, localRetired);
-                    break;
-                }
-
-                // 定期报告进度
-                if (iterations % 100 == 99) {
-                    std::lock_guard<std::mutex> lock(partition.mutex);
-                    SPDLOG_INFO("Cleanup progress: thread {}, iterations {}, remaining instructions: {}", p, iterations,
-                                partition.queue.size());
-
-                    // 更新全局周期
-                    // 使用正确类型的变量
-                    typename decltype(this->currentCycle_)::value_type current = this->currentCycle_.load();
-                    if (localCycle > current) {
-                        this->currentCycle_.compare_exchange_strong(current, localCycle);
-                        SPDLOG_INFO("Updated global cycle to {}", localCycle);
-                    }
-                }
-
-                iterations++;
-            }
-
-            // 达到最大迭代次数时强制清空
-            if (iterations >= MAX_ITERATIONS) {
-                std::lock_guard<std::mutex> lock(partition.mutex);
-                size_t remainingCount = partition.queue.size();
-                if (remainingCount > 0) {
-                    SPDLOG_WARN("Forced queue cleanup after max iterations, discarding {} instructions",
-                                remainingCount);
-                    partition.queue.clear();
-                }
-            }
-
-            // 最终更新全局周期
-            // 使用正确类型的变量
-            typename decltype(this->currentCycle_)::value_type current = this->currentCycle_.load();
-            if (localCycle > current) {
-                this->currentCycle_.compare_exchange_strong(current, localCycle);
-                SPDLOG_INFO("Final global cycle update to {}", localCycle);
-            }
-        });
-    }
-
-    // 等待所有清理线程完成
-    for (auto &thread : threads) {
-        thread.join();
-    }
-
-    cleanupComplete = true;
-    timeoutThread.join(); // 等待超时监控线程结束
-
-    SPDLOG_INFO("Instruction processing complete. Final stats:");
-    SPDLOG_INFO("  - Total processed: {}", globalProcessedCount.load());
-    SPDLOG_INFO("  - Total retired: {}", globalRetiredCount.load());
-    SPDLOG_INFO("  - Final cycle: {}", currentCycle_.load());
-    SPDLOG_INFO("  - Stall count: {}", stallCount_.load());
-}
-// 处理指令退休
-bool ParallelRob::processRetirement(InstructionGroup &ins, RobPartition &partition) {
-    if (ins.address == 0) {
-        return true; // 非内存指令可以直接提交
-    }
-
-    // 检查内存访问是否完成
-    if (partition.cur_latency == 0) {
-        auto allAccess = controller_->get_access(ins.retireTimestamp);
-        partition.cur_latency = controller_->calculate_latency(allAccess, 80.);
-
-        // Directly update the retire timestamp to include the calculated latency
-        ins.retireTimestamp += static_cast<long long>(partition.cur_latency);
-    }
-
-    if (currentCycle_.load() - ins.cycleCount >= partition.cur_latency) {
-        // 计算实际延迟
-        robCount_++;
-        auto allAccess = controller_->get_access(currentCycle_.load());
-        uint64_t latency = controller_->calculate_latency(allAccess, 80.);
-        totalLatency_ += latency;
-
-        partition.cur_latency = 0;
-        return true;
-    }
-
-    stallCount_++; // 无法提交，增加停顿
     return false;
 }
 

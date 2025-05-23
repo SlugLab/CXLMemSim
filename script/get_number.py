@@ -16,6 +16,7 @@ import itertools
 from pathlib import Path
 from datetime import datetime
 import math
+import statistics
 # Configure logging format
 logging.basicConfig(
     level=logging.INFO,
@@ -138,33 +139,58 @@ def run_command(cmd, log_path=None, env=None, timeout=360000, shell=False):
             with open(log_path, 'w') as f:
                 f.write(f"ERROR: {str(e)}\n")
         return -2, f"ERROR: {str(e)}"
+
 def run_with_setpci_loop(workload, program, args, base_dir):
-    """Run workload with setpci permutations"""
+    """Run workload with just 0x0000 and 0xffff, 10 runs each, compute avg & std-dev."""
     pci_device = "17:00.1"
     pci_offset = "0xe08.l"
-    max_value = 0x10000  # 0xFFFF + 1
+    # Only the two values you want:
+    pci_values = [0x0000, 0xffff]
 
-    for val in range(0, int(math.log(max_value, 2))-1):
-        val = 2 ** val
+    for val in pci_values:
         hex_val = f"0x{val:04x}"
-        setpci_cmd = ["setpci", "-v", "-s", pci_device, f"{pci_offset}={hex_val}"]
+        # First, set the PCI register once
+        setpci_cmd = ["setpci", "-s", pci_device, f"{pci_offset}={hex_val}"]
         ret, output = run_command(setpci_cmd, log_path=None, shell=False)
         if ret != 0:
-            logger.warning(f"Failed to set PCI value {hex_val} for {pci_device}")
+            logger.warning(f"Failed to set PCI value {hex_val} for {pci_device}, skipping")
             continue
 
-        # Prepare log path for this iteration
-        log_filename = f"remote_setpci_{hex_val}.txt"
-        log_path = os.path.join(base_dir, log_filename)
+        # Prepare to collect timings
+        runtimes = []
+        for i in range(10):
+            # Build the actual command to time (we'll time in Python)
+            program_path = os.path.join(WORKLOADS[workload]["path"], program)
+            cmd = (
+                f"{program_path} {args}"
+                if args else
+                program_path
+            )
+            start = time.time()
+            ret, _ = run_command(cmd, log_path=None,
+                                 env=WORKLOADS[workload].get("env"),
+                                 shell=True)
+            elapsed = time.time() - start
 
-        # Run the remote workload
-        program_path = os.path.join(WORKLOADS[workload]["path"], program)
-        cmd = f"time numactl --cpunodebind=0 --membind=1 {program_path} {args}" if args else f"time numactl --cpunodebind=0 --membind=1 {program_path}"
+            if ret != 0:
+                logger.warning(f"Run {i+1}/10 failed for PCI {hex_val}")
+            runtimes.append(elapsed)
+            logger.info(f"PCI {hex_val} run {i+1}: {elapsed:.4f}s")
 
-        ret, _ = run_command(cmd, log_path, WORKLOADS[workload].get("env"), shell=True)
-        if ret != 0:
-            logger.warning(f"Remote run failed for PCI value {hex_val}")
+        # Compute statistics
+        avg = statistics.mean(runtimes)
+        std = statistics.stdev(runtimes)
+        logger.info(f"PCI {hex_val}: avg={avg:.4f}s, std={std:.4f}s")
 
+        # Save detailed and summary logs
+        summary_path = os.path.join(base_dir, f"summary_{hex_val}.txt")
+        with open(summary_path, "w") as f:
+            f.write(f"Runtimes (s): {', '.join(f'{t:.4f}' for t in runtimes)}\n")
+            f.write(f"Average (s): {avg:.4f}\n")
+            f.write(f"StdDev (s): {std:.4f}\n")
+
+        # (Optional) If you still want per‐run logs, you could reopen run_command
+        # with a log_path inside the inner loop instead of log_path=None.
 def run_cxl_mem_sim(workload, program, args, base_dir, policy_combo=None, pebs_period=10,
                     latency="100,100,100,100,100,100", bandwidth="100,100,100,100,100,100"):
     """Run program with CXLMemSim"""

@@ -46,6 +46,9 @@ int InterleavePolicy::compute_once(CXLController *controller) {
             this->all_size = std::accumulate(this->percentage.begin(), this->percentage.end(), 0);
         }
     next:
+        if (all_size == 0) {
+            return -1;
+        }
         last_remote = (last_remote + 1) % all_size;
         int sum, index;
         for (index = 0, sum = 0; sum <= last_remote; index++) { // 5 2 2 to get the next

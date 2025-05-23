@@ -1,102 +1,75 @@
 import os
+import re
 import glob
 import matplotlib.pyplot as plt
 
-def read_data(filepath):
+def parse_summary(filepath):
+    """从 summary_*.txt 提取 mean、stddev"""
+    text = open(filepath).read()
+    runtimes_str = re.search(r"Runtimes \(s\):\s*([\d\.,\s]+)", text).group(1)
+    mean = float(re.search(r"Average \(s\):\s*([\d\.]+)", text).group(1))
+    stddev = float(re.search(r"StdDev \(s\):\s*([\d\.]+)", text).group(1))
+    return mean, stddev
+
+def collect_group_data(artifact_base, group, pci_values):
     """
-    读取文件中每行的数值，返回浮点数列表。
+    对于给定的 group ("ld" or "st") 和 pci_values 列表，
+    返回字典 { pci_int: ([fence_counts], [means], [stddevs]) }
     """
-    data = []
-    with open(filepath, 'r') as f:
-        for line in f:
-            try:
-                data.append(float(line.strip()))
-            except ValueError:
+    data = {pci: ([], [], []) for pci in pci_values}
+    for i in range(0, 9):
+        fence = 2**i
+        prog_dir = os.path.join(artifact_base, "microbench", f"{group}{fence}")
+        for pci in pci_values:
+            hexstr = f"0x{pci:04x}"
+            summary = os.path.join(prog_dir, f"summary_{hexstr}.txt")
+            if not os.path.isfile(summary):
                 continue
+            mean, std = parse_summary(summary)
+            lst_f, lst_m, lst_s = data[pci]
+            lst_f.append(fence)
+            if group == "ld" and pci == 0xffff:
+                lst_m.append(mean/10)
+            else:
+                lst_m.append(mean/30)
+            lst_s.append(std)
     return data
 
-def compute_average_diff(data):
-    """
-    计算相邻数据的差值平均值。
-    如果数据点不足两个则返回 None。
-    """
-    if len(data) < 2:
-        return None
-    diffs = [data[i+1] - data[i] for i in range(len(data)-1)]
-    return sum(diffs) / len(diffs)
+def plot_two_subplots(results_ld, results_st, pci_values):
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
 
-def process_directory(directory):
-    """
-    对于给定目录（如 "microbench/st" 或 "microbench/ld"），
-    遍历后缀为 2^i（i=0,1,...,8，即 1,2,4,...,256）的子目录，
-    在每个子目录下查找 remote_setpci_*.txt 文件，
-    并计算每个文件（即每个 setpci 参数）的差值平均值。
-    
-    返回一个字典：
-      key: setpci 参数（如 0x0001 转换为整数）
-      value: 包含两个列表的字典 { "fence_counts": [...], "avg_diff": [...] }
-             其中 fence_counts 存放对应的 2^i 值，
-             avg_diff 存放对应计算出的平均差值。
-    """
-    data_dict = {}
-    # 遍历 i=0 到 8，对应 fence count 为 2**i
-    for i in range(0, 9):
-        current_fence = 2**i
-        # 假设子目录命名为如 "st2", "st4", ...（传入的 directory 是 "microbench/st" 或 "microbench/ld"）
-        current_dir = f"{directory}{current_fence}"
-        pattern = os.path.join(current_dir, "remote_setpci_*.txt")
-        files = glob.glob(pattern)
-        for file in files:
-            data = read_data(file)
-            avg_diff = compute_average_diff(data)
-            if avg_diff is None:
-                continue
-            filename = os.path.basename(file)
-            # 将 setpci 值转换为整数以便排序（支持十六进制）
-            setpci = int(filename.split('_')[-1].split('.')[0], 0)
-            if setpci not in data_dict:
-                data_dict[setpci] = {"fence_counts": [], "avg_diff": []}
-            data_dict[setpci]["fence_counts"].append(current_fence)
-            data_dict[setpci]["avg_diff"].append(avg_diff)
-    return data_dict
-
-def main():
-    # 基目录设为 "microbench"，下面有 st 和 ld 两个分组
-    base_dir = "microbench"
-    groups = ["st", "ld"]
-    
-    # 创建两个子图，分别对应 st 和 ld
-    fig, axes = plt.subplots(1, 2, figsize=(14, 8))
-    
-    for ax, group in zip(axes, groups):
-        group_dir = os.path.join(base_dir, group)
-        print("Processing:", group_dir)
-        group_data = process_directory(group_dir)
-        if not group_data:
-            ax.text(0.5, 0.5, f"没有找到 {group} 数据", ha="center", va="center")
-            ax.set_title(group)
-            continue
-        
-        # 遍历排序后的 setpci 键
-        for setpci in sorted(group_data.keys()):
-            values = group_data[setpci]
-            fence_counts = values["fence_counts"]
-            avg_diffs = values["avg_diff"]
-            # 按 fence_counts 排序（确保点顺序正确）
-            sorted_pairs = sorted(zip(fence_counts, avg_diffs), key=lambda x: x[0])
-            fence_counts_sorted, avg_diffs_sorted = zip(*sorted_pairs)
-            # 对调后：x 轴为 fence count，y 轴为平均延迟差值
-            ax.plot(fence_counts_sorted, avg_diffs_sorted, marker='o', label=f"0x{setpci:04x}")
-        
+    for ax, (group, results) in zip(axes, [("ld", results_ld), ("st", results_st)]):
+        for pci in pci_values:
+            fences, means, stds = results[pci]
+            # 按 fence 排序
+            pairs = sorted(zip(fences, means, stds), key=lambda x: x[0])
+            fences_s, means_s, stds_s = zip(*pairs)
+            ax.errorbar(
+                fences_s,
+                means_s,
+                yerr=stds_s,
+                fmt="o-",
+                capsize=4,
+                label=f"setpci=0x{pci:04x}"
+            )
+        ax.set_xticks([2**i for i in range(0,9)])
+        ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
         ax.set_xlabel("Fence Count")
-        ax.set_ylabel("Average delay difference (ns)")
         ax.set_title(group)
-        ax.legend(title="setpci", loc="upper right")
         ax.grid(True)
-    
-    plt.tight_layout()
+        ax.legend()
+
+    axes[0].set_ylabel("Latency (us)")
+    plt.suptitle("ld vs st: 0x0000 and 0xffff")
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.savefig("ld_st_result.pdf")
-    plt.show()
 
 if __name__ == "__main__":
-    main()
+    # 请根据实际路径调整 artifact_base
+    artifact_base = "../artifact"
+    pci_values = [0x0000, 0xffff]
+
+    results_ld = collect_group_data(artifact_base, "ld", pci_values)
+    results_st = collect_group_data(artifact_base, "st", pci_values)
+
+    plot_two_subplots(results_ld, results_st, pci_values)

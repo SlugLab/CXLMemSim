@@ -354,7 +354,7 @@ int main(int argc, char *argv[]) {
         }
     }
     controller->construct_topo(topology);
-    Rob rob(controller, 128);
+    Rob rob(controller, 512);
 
     // read from file
     std::ifstream file(target);

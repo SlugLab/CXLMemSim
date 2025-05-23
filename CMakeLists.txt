@@ -12,7 +12,7 @@ set(LINUX_SOURCE /lib/modules/${arch}/build/)
 set(CMAKE_CXX_STANDARD 26)
 add_subdirectory(lib/bpftime)
 add_subdirectory(microbench)
-#add_subdirectory(workloads)
+# add_subdirectory(workloads)
 
 list(APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR})
 
@@ -30,9 +30,16 @@ include_directories(CXLMemSim include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DI
 target_link_libraries(CXLMemSim cxxopts::cxxopts bpftime_vm bpftime-object bpftime_base_attach_impl bpftime-agent )
 
 add_executable(CXLMemSimRoB ${SOURCE_FILES} src/rob.cc)
-
 include_directories(CXLMemSimRoB include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR} ${runtime_SOURCE_DIR}/include)
 target_link_libraries(CXLMemSimRoB cxxopts::cxxopts bpftime_vm bpftime-object bpftime_base_attach_impl bpftime-agent)
+
+add_executable(CXLMemSimTest ${SOURCE_FILES} src/test_rob.cc)
+include_directories(CXLMemSimTest include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR} ${runtime_SOURCE_DIR}/include)
+target_link_libraries(CXLMemSimTest cxxopts::cxxopts bpftime_vm bpftime-object bpftime_base_attach_impl bpftime-agent)
+
+add_executable(CXLMemSimTest2 ${SOURCE_FILES} src/test_mem_stall.cc)
+include_directories(CXLMemSimTest2 include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR} ${runtime_SOURCE_DIR}/include)
+target_link_libraries(CXLMemSimTest2 cxxopts::cxxopts bpftime_vm bpftime-object bpftime_base_attach_impl bpftime-agent)
 
 
 function(bpf prefix)
