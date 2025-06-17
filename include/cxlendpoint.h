@@ -20,6 +20,8 @@
 #include <tuple>
 #include <unordered_set>
 #include <vector>
+#include <mutex>
+#include <atomic>
 #define ROB_SIZE 512
 
 struct occupation_info {
@@ -54,6 +56,23 @@ private:
     virtual std::vector<std::tuple<uint64_t, uint64_t>> get_access(uint64_t timestamp) = 0;
 };
 
+// CXL Protocol constants
+constexpr size_t MAX_QUEUE_SIZE = 64;
+constexpr size_t FLIT_SIZE = 66;  // 528/8 = 66 bytes per flit
+constexpr size_t DATA_FLIT = 65;  // Data flit overhead in bytes
+constexpr size_t INITIAL_CREDITS = 2;  // ResCrd[2] for response credits
+
+// Request structure for queue management
+struct CXLRequest {
+    uint64_t timestamp;
+    uint64_t address;
+    uint64_t tid;
+    bool is_read;
+    bool is_write;
+    uint64_t issue_time;
+    uint64_t complete_time;
+};
+
 class CXLMemExpander : public CXLEndPoint {
 public:
     EmuCXLBandwidth bandwidth{};
@@ -66,6 +85,23 @@ public:
     CXLMemExpanderEvent counter{};
     CXLMemExpanderEvent last_counter{};
     mutable std::shared_mutex occupationMutex_; // 使用共享互斥锁允许多个读取者
+    
+    // Queue management for CXL requests
+    std::deque<CXLRequest> request_queue_;
+    mutable std::mutex queue_mutex_;
+    
+    // Credit-based flow control
+    std::atomic<size_t> read_credits_{INITIAL_CREDITS};
+    std::atomic<size_t> write_credits_{INITIAL_CREDITS};
+    
+    // Pipeline state tracking
+    std::map<uint64_t, CXLRequest> in_flight_requests_;
+    
+    // Latency components
+    double frontend_latency_ = 10.0;  // Frontend processing latency
+    double forward_latency_ = 15.0;   // Forward path latency
+    double response_latency_ = 20.0;  // Response path latency
+    
     // LRUCache lru_cache;
     // tlb map and paging map -> invalidate
     int last_read = 0;
@@ -145,6 +181,16 @@ public:
             return true;
         return false;
     }
+    
+    // New methods for enhanced CXL simulation
+    bool can_accept_request() const;
+    bool has_credits(bool is_read) const;
+    void consume_credit(bool is_read);
+    void release_credit(bool is_read);
+    double calculate_pipeline_latency(const CXLRequest& req);
+    void process_queued_requests(uint64_t current_time);
+    double calculate_congestion_delay(uint64_t timestamp);
+    double calculate_protocol_overhead(size_t data_size);
 };
 class CXLSwitch : public CXLEndPoint {
 public:

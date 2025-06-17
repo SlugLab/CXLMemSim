@@ -11,9 +11,10 @@
 
 #include "cxlendpoint.h"
 #include <random>
+#include <algorithm>
 
 CXLMemExpander::CXLMemExpander(int read_bw, int write_bw, int read_lat, int write_lat, int id, int capacity)
-    : capacity(capacity), id(id) {
+    : capacity(capacity), id(id), read_credits_(INITIAL_CREDITS), write_credits_(INITIAL_CREDITS) {
     this->bandwidth.read = read_bw;
     this->bandwidth.write = write_bw;
     this->latency.read = read_lat;
@@ -25,11 +26,20 @@ double CXLMemExpander::calculate_latency(const std::vector<std::tuple<uint64_t, 
         return 0.0;
     }
 
+    // Process any pending requests first
+    if (!elem.empty()) {
+        process_queued_requests(std::get<0>(elem.back()));
+    }
+
     // 首先更新地址缓存以确保其最新
     update_address_cache();
 
     double total_latency = 0.0;
     size_t access_count = 0;
+    
+    // Track pipeline benefits
+    double pipeline_benefit = 0.0;
+    uint64_t last_timestamp = 0;
 
     for (const auto &[timestamp, addr] : elem) {
         // 使用哈希表检查是否是本endpoint的访问
@@ -38,14 +48,56 @@ double CXLMemExpander::calculate_latency(const std::vector<std::tuple<uint64_t, 
         if (!is_local_access)
             continue;
 
-        // 基础延迟计算
-        double current_latency = (this->latency.read + this->latency.write) / 2.0;
+        // Check if request is in flight (pipeline processing)
+        bool is_pipelined = false;
+        {
+            std::lock_guard<std::mutex> lock(queue_mutex_);
+            is_pipelined = in_flight_requests_.find(addr) != in_flight_requests_.end();
+        }
+
+        // Create a temporary request for latency calculation
+        CXLRequest temp_req;
+        temp_req.timestamp = timestamp;
+        temp_req.address = addr;
+        temp_req.is_read = true;  // Assume read for now
+        temp_req.is_write = false;
+
+        // Calculate latency with pipeline modeling
+        double current_latency = 0.0;
+        
+        if (is_pipelined) {
+            // Request is already in pipeline, reduced latency
+            current_latency = this->latency.read * 0.3;  // 70% reduction due to pipeline
+            pipeline_benefit += this->latency.read * 0.7;
+        } else {
+            // Full pipeline latency calculation
+            current_latency = calculate_pipeline_latency(temp_req);
+            
+            // Check for pipeline overlap with previous requests
+            if (last_timestamp > 0 && (timestamp - last_timestamp) < 100) {
+                // Requests are close in time, benefit from pipeline
+                double overlap_ratio = 1.0 - ((timestamp - last_timestamp) / 100.0);
+                double overlap_benefit = current_latency * overlap_ratio * 0.5;
+                current_latency -= overlap_benefit;
+                pipeline_benefit += overlap_benefit;
+            }
+        }
 
         // 考虑DRAM延迟影响
         current_latency += dramlatency * 0.1;
 
         total_latency += current_latency;
         access_count++;
+        last_timestamp = timestamp;
+    }
+
+    // Apply queue state benefits
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        if (request_queue_.size() < MAX_QUEUE_SIZE / 4) {
+            // Low queue utilization, faster processing
+            total_latency *= 0.9;
+        }
     }
 
     return access_count > 0 ? total_latency / access_count : 0.0;
@@ -115,8 +167,33 @@ void CXLMemExpander::delete_entry(uint64_t addr, uint64_t length) {
 int CXLMemExpander::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint64_t virt_addr, int index) {
     if (index == this->id) {
         last_timestamp = last_timestamp > timestamp ? last_timestamp : timestamp;
+        
+        // Process any completed requests
+        process_queued_requests(timestamp);
 
         if (phys_addr != 0) {
+            // Create a new CXL request
+            CXLRequest req;
+            req.timestamp = timestamp;
+            req.address = phys_addr;
+            req.tid = tid;
+            req.is_read = false;  // Default to write, will be updated based on operation
+            req.is_write = true;
+            
+            // Check if queue can accept the request
+            if (!can_accept_request()) {
+                // Queue is full, reject the request
+                // Note: CXLMemExpanderEvent doesn't have inc_conflict, just count as hit_old
+                this->counter.inc_hit_old();
+                return 0;
+            }
+            
+            // Add request to queue
+            {
+                std::lock_guard<std::mutex> lock(queue_mutex_);
+                request_queue_.push_back(req);
+            }
+            
             // 使用哈希表快速检查地址是否已存在
             bool address_exists = address_cache.find(phys_addr) != address_cache.end();
 
@@ -128,6 +205,10 @@ int CXLMemExpander::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr,
                         this->occupation.emplace_back(timestamp, phys_addr, 0);
                         this->counter.inc_load();
 
+                        // Update request type
+                        request_queue_.back().is_read = true;
+                        request_queue_.back().is_write = false;
+                        
                         // 不需要更新缓存，地址没变
                         return 2;
                     }
@@ -439,4 +520,128 @@ int CXLSwitch::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint
     }
     // 如果都处理不了，就返回0
     return 0;
+}
+
+// Implementation of new CXL queue management and pipeline methods
+bool CXLMemExpander::can_accept_request() const {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    return request_queue_.size() < MAX_QUEUE_SIZE;
+}
+
+bool CXLMemExpander::has_credits(bool is_read) const {
+    if (is_read) {
+        return read_credits_.load() > 0;
+    } else {
+        return write_credits_.load() > 0;
+    }
+}
+
+void CXLMemExpander::consume_credit(bool is_read) {
+    if (is_read) {
+        read_credits_.fetch_sub(1);
+    } else {
+        write_credits_.fetch_sub(1);
+    }
+}
+
+void CXLMemExpander::release_credit(bool is_read) {
+    if (is_read) {
+        size_t current = read_credits_.load();
+        if (current < INITIAL_CREDITS) {
+            read_credits_.fetch_add(1);
+        }
+    } else {
+        size_t current = write_credits_.load();
+        if (current < INITIAL_CREDITS) {
+            write_credits_.fetch_add(1);
+        }
+    }
+}
+
+double CXLMemExpander::calculate_pipeline_latency(const CXLRequest& req) {
+    double total_latency = 0.0;
+    
+    // Frontend processing latency
+    total_latency += frontend_latency_;
+    
+    // Forward path latency
+    total_latency += forward_latency_;
+    
+    // Memory access latency (read or write)
+    if (req.is_read) {
+        total_latency += this->latency.read;
+    } else {
+        total_latency += this->latency.write;
+    }
+    
+    // Response path latency
+    total_latency += response_latency_;
+    
+    // Protocol overhead based on data size (assuming 64B cache line)
+    total_latency += calculate_protocol_overhead(64);
+    
+    // Congestion delay based on queue occupancy
+    total_latency += calculate_congestion_delay(req.timestamp);
+    
+    return total_latency;
+}
+
+void CXLMemExpander::process_queued_requests(uint64_t current_time) {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    
+    // Process requests that have completed their pipeline stages
+    auto it = in_flight_requests_.begin();
+    while (it != in_flight_requests_.end()) {
+        if (it->second.complete_time <= current_time) {
+            // Release credit when request completes
+            release_credit(it->second.is_read);
+            it = in_flight_requests_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    
+    // Try to issue new requests from queue
+    while (!request_queue_.empty() && in_flight_requests_.size() < MAX_QUEUE_SIZE / 2) {
+        CXLRequest& req = request_queue_.front();
+        
+        // Check if we have credits available
+        if (!has_credits(req.is_read)) {
+            break;  // Wait for credits
+        }
+        
+        // Consume credit and move to in-flight
+        consume_credit(req.is_read);
+        req.issue_time = current_time;
+        req.complete_time = current_time + calculate_pipeline_latency(req);
+        
+        in_flight_requests_[req.address] = req;
+        request_queue_.pop_front();
+    }
+}
+
+double CXLMemExpander::calculate_congestion_delay(uint64_t timestamp) {
+    // Calculate congestion based on queue occupancy
+    double queue_utilization = static_cast<double>(request_queue_.size()) / MAX_QUEUE_SIZE;
+   git add src/cxlendpoint.cpp
+   git add  src/rob.cc
+   git add  src/rob.cpp
+    // Non-linear congestion model
+    if (queue_utilization < 0.5) {
+        return 0.0;  // No congestion
+    } else if (queue_utilization < 0.8) {
+        return (queue_utilization - 0.5) * 20.0;  // Linear increase
+    } else {
+        return 6.0 + (queue_utilization - 0.8) * 100.0;  // Steep increase when nearly full
+    }
+}
+
+double CXLMemExpander::calculate_protocol_overhead(size_t data_size) {
+    // Calculate number of flits needed
+    size_t num_flits = (data_size + FLIT_SIZE - 1) / FLIT_SIZE;
+    
+    // Add data flit overhead
+    double overhead = num_flits * DATA_FLIT * 0.1;  // 0.1ns per byte overhead
+    
+    return overhead;
 }

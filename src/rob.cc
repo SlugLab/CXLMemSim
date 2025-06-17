@@ -379,12 +379,10 @@ int main(int argc, char *argv[]) {
         while (!issued) {
             issued = rob.issue(instruction);
             if (!issued) {
-                rob.tick(); // 如果无法发射,推进时钟直到有空间
-                            // If unable to issue, advance clock until space is available
+                rob.tick(); // If unable to issue, advance clock until space is available
             }
         }
-        rob.tick(); // 正常推进时钟
-                    // Normal clock advancement
+        rob.tick();  // Normal clock advancement
 
         // Save interim results if requested
         if (interimSaveInterval > 0 && idx > 0 && idx % interimSaveInterval == 0) {
