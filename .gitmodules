@@ -28,3 +28,6 @@
 [submodule "workloads/YCSB"]
 	path = workloads/YCSB
 	url = https://github.com/brianfrankcooper/YCSB/
+[submodule "lib/qemu"]
+	path = lib/qemu
+	url = https://github.com/vickiegpt/qemu
