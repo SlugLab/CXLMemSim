@@ -1,0 +1,121 @@
+# Hardware Procurement Analysis Configuration
+
+workloads:
+  - name: "database_workload"
+    binary: "./microbench/ld"
+    args: []
+    interval: 5
+    metric_weights:
+      execution_time: 0.5
+      throughput: 0.3
+      latency: 0.2
+      
+  - name: "analytics_workload"
+    binary: "./workloads/gapbs/pr"
+    args: ["-f", "test.gr"]
+    interval: 10
+    metric_weights:
+      execution_time: 0.3
+      throughput: 0.5
+      latency: 0.2
+      
+  - name: "web_server"
+    binary: "./microbench/random_access"
+    args: []
+    interval: 5
+    metric_weights:
+      execution_time: 0.2
+      throughput: 0.4
+      latency: 0.4
+
+hardware_configurations:
+  - name: "all_dram_baseline"
+    local_memory_gb: 512
+    cxl_memory_gb: 0
+    local_dram_latency: 85
+    base_system_cost: 8000
+    dram_cost_per_gb: 8
+    base_power: 250
+    topology: "(1)"
+    memory_distribution: [100]
+    
+  - name: "cxl_type3_direct"
+    local_memory_gb: 256
+    cxl_memory_gb: 256
+    local_dram_latency: 85
+    cxl_latency_ns: 150
+    cxl_write_latency_ns: 180
+    cxl_bandwidth_gbps: 64
+    cxl_write_bandwidth_gbps: 50
+    base_system_cost: 8000
+    dram_cost_per_gb: 8
+    cxl_cost_per_gb: 4
+    cxl_device_cost: 800
+    base_power: 250
+    topology: "(1,(2))"
+    memory_distribution: [50, 50]
+    
+  - name: "cxl_switched_4device"
+    local_memory_gb: 128
+    cxl_memory_gb: 512
+    local_dram_latency: 85
+    cxl_latency_ns: 200
+    cxl_write_latency_ns: 250
+    cxl_bandwidth_gbps: 32
+    cxl_write_bandwidth_gbps: 25
+    base_system_cost: 8000
+    dram_cost_per_gb: 8
+    cxl_cost_per_gb: 3.5
+    cxl_device_cost: 600
+    cxl_switch_cost: 2500
+    base_power: 250
+    topology: "(1,(2,3,4,5))"
+    memory_distribution: [20, 20, 20, 20, 20]
+    
+  - name: "hybrid_tiered"
+    local_memory_gb: 256
+    cxl_memory_gb: 768
+    local_dram_latency: 85
+    cxl_latency_ns: 180
+    cxl_write_latency_ns: 220
+    cxl_bandwidth_gbps: 48
+    cxl_write_bandwidth_gbps: 38
+    base_system_cost: 8000
+    dram_cost_per_gb: 8
+    cxl_cost_per_gb: 4.5
+    cxl_device_cost: 700
+    cxl_switch_cost: 1500
+    base_power: 250
+    topology: "(1,(2,(3,4)))"
+    memory_distribution: [25, 25, 25, 25]
+    
+  - name: "high_capacity_cxl"
+    local_memory_gb: 128
+    cxl_memory_gb: 1024
+    local_dram_latency: 85
+    cxl_latency_ns: 250
+    cxl_write_latency_ns: 300
+    cxl_bandwidth_gbps: 24
+    cxl_write_bandwidth_gbps: 20
+    base_system_cost: 8000
+    dram_cost_per_gb: 8
+    cxl_cost_per_gb: 3
+    cxl_device_cost: 500
+    cxl_switch_cost: 3000
+    base_power: 250
+    topology: "(1,(2,3,4,5,6,7,8))"
+    memory_distribution: [12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5]
+
+requirements:
+  max_budget: 25000  # Maximum total hardware cost
+  min_performance: 5.0  # Minimum performance score
+  max_power: 400  # Maximum power consumption in watts
+  optimization_weights:
+    performance: 0.4
+    cost: 0.4
+    power: 0.2
+
+tco_parameters:
+  years: 3
+  electricity_cost_per_kwh: 0.12
+  maintenance_rate: 0.02  # 2% of hardware cost annually

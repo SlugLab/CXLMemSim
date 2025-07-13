@@ -1,0 +1,54 @@
+# Example Production Profiling Suite Configuration
+parallel_jobs: 4
+
+workloads:
+  - name: "redis_benchmark"
+    binary: "/usr/bin/redis-benchmark"
+    args: ["-n", "100000", "-c", "50"]
+    interval: 5
+    timeout: 300
+    
+  - name: "mysql_sysbench"
+    binary: "/usr/bin/sysbench"
+    args: ["--test=oltp_read_write", "--mysql-db=test", "--mysql-user=root", "run"]
+    interval: 10
+    timeout: 600
+    
+  - name: "nginx_stress"
+    binary: "/usr/sbin/nginx"
+    args: ["-g", "daemon off;"]
+    interval: 5
+    timeout: 300
+    
+  - name: "custom_app"
+    binary: "./microbench/ld"
+    args: []
+    interval: 5
+    timeout: 120
+
+cxl_configurations:
+  - name: "baseline_dram"
+    dram_latency: 85
+    capacity: [100, 0]  # All local memory
+    topology: "(1)"
+    
+  - name: "cxl_direct_attached"
+    dram_latency: 85
+    latency: [150, 180]  # Read, Write latencies for CXL
+    bandwidth: [30000, 20000]  # Read, Write bandwidth in MB/s
+    capacity: [50, 50]  # 50% local, 50% CXL
+    topology: "(1,(2))"
+    
+  - name: "cxl_switch_based"
+    dram_latency: 85
+    latency: [200, 250]
+    bandwidth: [20000, 15000]
+    capacity: [30, 70]  # 30% local, 70% CXL
+    topology: "(1,(2,3,4))"
+    
+  - name: "cxl_tiered"
+    dram_latency: 85
+    latency: [150, 180, 300, 350]  # Multiple tiers
+    bandwidth: [30000, 20000, 10000, 8000]
+    capacity: [25, 25, 25, 25]  # Distributed across tiers
+    topology: "(1,(2,(3,4)))"

@@ -1,0 +1,6 @@
+,Avg Performance,Avg Performance,Performance Std
+,mean,std,mean
+Policy,,,
+hotness_based,0.0,,0.0
+static_balanced,0.0,,0.0
+static_local_heavy,0.0,,0.0

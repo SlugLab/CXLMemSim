@@ -1,189 +1,867 @@
-2025-03-22 23:02:14,291 - INFO - Starting all workloads
-2025-03-22 23:02:14,291 - INFO - Running tests with 1 policy combinations
-2025-03-22 23:02:14,291 - INFO - Processing workload: gapbs
-2025-03-22 23:02:14,291 - INFO - Processing program: bc
-2025-03-22 23:02:14,291 - INFO - Running original program: bc
-2025-03-22 23:02:14,292 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ../workloads/gapbs/bc -f ../workloads/gapbs/test/graphs/4.el -n1000
-2025-03-22 23:02:14,370 - INFO - Output saved to: ../artifact/gapbs/bc/orig.txt
-2025-03-22 23:02:14,370 - INFO - Running CXLMemSim with default policy: bc
-2025-03-22 23:02:14,370 - INFO - Running command: ./CXLMemSim -t ../workloads/gapbs/bc -f ../workloads/gapbs/test/graphs/4.el -n1000 -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-22 23:05:10,007 - INFO - Starting all workloads
-2025-03-22 23:05:10,007 - INFO - Running tests with 1 policy combinations
-2025-03-22 23:05:10,007 - INFO - Processing workload: gapbs
-2025-03-22 23:05:10,007 - INFO - Processing program: bc
-2025-03-22 23:05:10,007 - INFO - Running original program: bc
-2025-03-22 23:05:10,007 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ../workloads/gapbs/bc -f ../workloads/gapbs/test/graphs/4.el -n100000
-2025-03-22 23:05:12,186 - INFO - Output saved to: ../artifact/gapbs/bc/orig.txt
-2025-03-22 23:05:12,187 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ../workloads/gapbs/bc -f ../workloads/gapbs/test/graphs/4.el -n100000
-2025-03-22 23:05:14,160 - INFO - Output saved to: ../artifact/gapbs/bc/orig.txt
-2025-03-22 23:05:14,160 - INFO - Running CXLMemSim with default policy: bc
-2025-03-22 23:05:14,160 - INFO - Running command: ./CXLMemSim -t ../workloads/gapbs/bc -f ../workloads/gapbs/test/graphs/4.el -n100000 -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:32:13,236 - INFO - Starting all workloads
-2025-03-23 00:32:13,236 - INFO - Running tests with 1 policy combinations
-2025-03-23 00:32:13,236 - INFO - Processing workload: gapbs
-2025-03-23 00:32:13,236 - INFO - Processing program: bc
-2025-03-23 00:32:13,236 - INFO - Running original program: bc
-2025-03-23 00:32:13,236 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ../workloads/gapbs/bc -f ../workloads/gapbs/test/graphs/4.el -n100000
-2025-03-23 00:32:15,761 - INFO - Output saved to: ../artifact/gapbs/bc/orig.txt
-2025-03-23 00:32:15,761 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ../workloads/gapbs/bc -f ../workloads/gapbs/test/graphs/4.el -n100000
-2025-03-23 00:32:19,090 - INFO - Output saved to: ../artifact/gapbs/bc/remote.txt
-2025-03-23 00:32:19,091 - INFO - Running CXLMemSim with default policy: bc
-2025-03-23 00:32:19,091 - INFO - Running command: ./CXLMemSim -t ../workloads/gapbs/bc -f ../workloads/gapbs/test/graphs/4.el -n100000 -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:32:49,509 - INFO - Output saved to: ../artifact/gapbs/bc/cxlmemsim.txt
-2025-03-23 00:32:49,510 - ERROR - CXLMemSim failed: bc, return code: -6
-2025-03-23 00:32:49,510 - INFO - Processing program: bfs
-2025-03-23 00:32:49,510 - INFO - Running original program: bfs
-2025-03-23 00:32:49,510 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ../workloads/gapbs/bfs -f ../workloads/gapbs/test/graphs/4.el -n100000
-2025-03-23 00:32:51,768 - INFO - Output saved to: ../artifact/gapbs/bfs/orig.txt
-2025-03-23 00:32:51,769 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ../workloads/gapbs/bfs -f ../workloads/gapbs/test/graphs/4.el -n100000
-2025-03-23 00:32:52,688 - INFO - Output saved to: ../artifact/gapbs/bfs/remote.txt
-2025-03-23 00:32:52,688 - INFO - Running CXLMemSim with default policy: bfs
-2025-03-23 00:32:52,688 - INFO - Running command: ./CXLMemSim -t ../workloads/gapbs/bfs -f ../workloads/gapbs/test/graphs/4.el -n100000 -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:33:07,895 - INFO - Output saved to: ../artifact/gapbs/bfs/cxlmemsim.txt
-2025-03-23 00:33:07,898 - ERROR - CXLMemSim failed: bfs, return code: -6
-2025-03-23 00:33:07,898 - INFO - Processing program: cc
-2025-03-23 00:33:07,898 - INFO - Running original program: cc
-2025-03-23 00:33:07,898 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ../workloads/gapbs/cc -f ../workloads/gapbs/test/graphs/4.el -n100000
-2025-03-23 00:33:09,657 - INFO - Output saved to: ../artifact/gapbs/cc/orig.txt
-2025-03-23 00:33:09,658 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ../workloads/gapbs/cc -f ../workloads/gapbs/test/graphs/4.el -n100000
-2025-03-23 00:33:11,386 - INFO - Output saved to: ../artifact/gapbs/cc/remote.txt
-2025-03-23 00:33:11,386 - INFO - Running CXLMemSim with default policy: cc
-2025-03-23 00:33:11,386 - INFO - Running command: ./CXLMemSim -t ../workloads/gapbs/cc -f ../workloads/gapbs/test/graphs/4.el -n100000 -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:33:31,412 - INFO - Output saved to: ../artifact/gapbs/cc/cxlmemsim.txt
-2025-03-23 00:33:31,412 - ERROR - CXLMemSim failed: cc, return code: -6
-2025-03-23 00:33:31,412 - INFO - Processing program: pr
-2025-03-23 00:33:31,412 - INFO - Running original program: pr
-2025-03-23 00:33:31,412 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ../workloads/gapbs/pr -f ../workloads/gapbs/test/graphs/4.el -n100000
-2025-03-23 00:33:32,553 - INFO - Output saved to: ../artifact/gapbs/pr/orig.txt
-2025-03-23 00:33:32,553 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ../workloads/gapbs/pr -f ../workloads/gapbs/test/graphs/4.el -n100000
-2025-03-23 00:33:33,634 - INFO - Output saved to: ../artifact/gapbs/pr/remote.txt
-2025-03-23 00:33:33,634 - INFO - Running CXLMemSim with default policy: pr
-2025-03-23 00:33:33,634 - INFO - Running command: ./CXLMemSim -t ../workloads/gapbs/pr -f ../workloads/gapbs/test/graphs/4.el -n100000 -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:33:55,192 - INFO - Output saved to: ../artifact/gapbs/pr/cxlmemsim.txt
-2025-03-23 00:33:55,192 - ERROR - CXLMemSim failed: pr, return code: -6
-2025-03-23 00:33:55,192 - INFO - Processing program: sssp
-2025-03-23 00:33:55,193 - INFO - Running original program: sssp
-2025-03-23 00:33:55,193 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ../workloads/gapbs/sssp -f ../workloads/gapbs/test/graphs/4.el -n100000
-2025-03-23 00:33:58,602 - INFO - Output saved to: ../artifact/gapbs/sssp/orig.txt
-2025-03-23 00:33:58,602 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ../workloads/gapbs/sssp -f ../workloads/gapbs/test/graphs/4.el -n100000
-2025-03-23 00:34:00,593 - INFO - Output saved to: ../artifact/gapbs/sssp/remote.txt
-2025-03-23 00:34:00,595 - INFO - Running CXLMemSim with default policy: sssp
-2025-03-23 00:34:00,595 - INFO - Running command: ./CXLMemSim -t ../workloads/gapbs/sssp -f ../workloads/gapbs/test/graphs/4.el -n100000 -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:37:47,034 - INFO - Output saved to: ../artifact/gapbs/sssp/cxlmemsim.txt
-2025-03-23 00:37:47,037 - ERROR - CXLMemSim failed: sssp, return code: -6
-2025-03-23 00:37:47,037 - INFO - Processing program: tc
-2025-03-23 00:37:47,037 - INFO - Running original program: tc
-2025-03-23 00:37:47,037 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ../workloads/gapbs/tc -f ../workloads/gapbs/test/graphs/4.el -n100000
-2025-03-23 00:37:47,041 - INFO - Output saved to: ../artifact/gapbs/tc/orig.txt
-2025-03-23 00:37:47,041 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ../workloads/gapbs/tc -f ../workloads/gapbs/test/graphs/4.el -n100000
-2025-03-23 00:37:47,045 - INFO - Output saved to: ../artifact/gapbs/tc/remote.txt
-2025-03-23 00:37:47,045 - ERROR - Original program failed: tc, return code: 254
-2025-03-23 00:37:47,045 - INFO - Running CXLMemSim with default policy: tc
-2025-03-23 00:37:47,045 - INFO - Running command: ./CXLMemSim -t ../workloads/gapbs/tc -f ../workloads/gapbs/test/graphs/4.el -n100000 -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:37:48,747 - INFO - Output saved to: ../artifact/gapbs/tc/cxlmemsim.txt
-2025-03-23 00:37:48,747 - INFO - Processing workload: memcached
-2025-03-23 00:37:48,747 - INFO - Processing program: memcached
-2025-03-23 00:37:48,747 - INFO - Running original program: memcached
-2025-03-23 00:37:48,747 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ./workloads/memcached/memcached -u steve
-2025-03-23 00:37:48,750 - INFO - Output saved to: ../artifact/memcached/memcached/orig.txt
-2025-03-23 00:37:48,751 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ./workloads/memcached/memcached -u steve
-2025-03-23 00:37:48,756 - INFO - Output saved to: ../artifact/memcached/memcached/remote.txt
-2025-03-23 00:37:48,756 - ERROR - Original program failed: memcached, return code: 1
-2025-03-23 00:37:48,756 - INFO - Running CXLMemSim with default policy: memcached
-2025-03-23 00:37:48,756 - INFO - Running command: ./CXLMemSim -t ./workloads/memcached/memcached -u steve -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:37:50,540 - INFO - Output saved to: ../artifact/memcached/memcached/cxlmemsim.txt
-2025-03-23 00:37:50,541 - INFO - Processing workload: llama
-2025-03-23 00:37:50,541 - INFO - Processing program: llama-cli
-2025-03-23 00:37:50,541 - INFO - Running original program: llama-cli
-2025-03-23 00:37:50,541 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ../workloads/llama.cpp/build/bin/llama-cli --model /storage/deepseek/DeepSeek-R1-Distill-Qwen-32B-IQ2_XXS.gguf --cache-type-k q2_0 --threads 12 --prompt '</think>Generate a poem about a cat in 200 words</think>' -no-cnv
-2025-03-23 00:37:50,554 - INFO - Output saved to: ../artifact/llama/llama-cli/orig.txt
-2025-03-23 00:37:50,554 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ../workloads/llama.cpp/build/bin/llama-cli --model /storage/deepseek/DeepSeek-R1-Distill-Qwen-32B-IQ2_XXS.gguf --cache-type-k q2_0 --threads 12 --prompt '</think>Generate a poem about a cat in 200 words</think>' -no-cnv
-2025-03-23 00:37:50,568 - INFO - Output saved to: ../artifact/llama/llama-cli/remote.txt
-2025-03-23 00:37:50,568 - ERROR - Original program failed: llama-cli, return code: 1
-2025-03-23 00:37:50,568 - INFO - Running CXLMemSim with default policy: llama-cli
-2025-03-23 00:37:50,568 - INFO - Running command: ./CXLMemSim -t ../workloads/llama.cpp/build/bin/llama-cli --model /storage/deepseek/DeepSeek-R1-Distill-Qwen-32B-IQ2_XXS.gguf --cache-type-k q2_0 --threads 12 --prompt '</think>Generate a poem about a cat in 200 words</think>' -no-cnv -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:37:55,426 - INFO - Output saved to: ../artifact/llama/llama-cli/cxlmemsim.txt
-2025-03-23 00:37:55,426 - INFO - Processing workload: gromacs
-2025-03-23 00:37:55,426 - INFO - Processing program: gmx
-2025-03-23 00:37:55,426 - INFO - Running original program: gmx
-2025-03-23 00:37:55,426 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ../workloads/gromacs/build/bin/gmx mdrun -s ../workloads/gromacs/build/topol.tpr -nsteps 1 -ntomp 1 -ntmpi 1
-2025-03-23 00:37:55,446 - INFO - Output saved to: ../artifact/gromacs/gmx/orig.txt
-2025-03-23 00:37:55,447 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ../workloads/gromacs/build/bin/gmx mdrun -s ../workloads/gromacs/build/topol.tpr -nsteps 1 -ntomp 1 -ntmpi 1
-2025-03-23 00:37:55,472 - INFO - Output saved to: ../artifact/gromacs/gmx/remote.txt
-2025-03-23 00:37:55,472 - ERROR - Original program failed: gmx, return code: 1
-2025-03-23 00:37:55,472 - INFO - Running CXLMemSim with default policy: gmx
-2025-03-23 00:37:55,472 - INFO - Running command: ./CXLMemSim -t ../workloads/gromacs/build/bin/gmx mdrun -s ../workloads/gromacs/build/topol.tpr -nsteps 1 -ntomp 1 -ntmpi 1 -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:37:56,687 - INFO - Output saved to: ../artifact/gromacs/gmx/cxlmemsim.txt
-2025-03-23 00:37:56,687 - INFO - Processing workload: vsag
-2025-03-23 00:37:56,687 - INFO - Processing program: python3
-2025-03-23 00:37:56,687 - INFO - Running original program: python3
-2025-03-23 00:37:56,688 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 /usr/bin/python3 run_algorithm.py --dataset random-xs-20-angular --algorithm vsag --module ann_benchmarks.algorithms.vsag --constructor Vsag --runs 2 --count 10 --batch '['angular', 20, {'M': 24, 'ef_construction': 300, 'use_int8': 4, 'rs': 0.5}]' '[10]' '[20]' '[30]' '[40]' '[60]' '[80]' '[120]' '[200]' '[400]' '[600]' '[800]'
-2025-03-23 00:37:56,707 - INFO - Output saved to: ../artifact/vsag/python3/orig.txt
-2025-03-23 00:37:56,707 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 /usr/bin/python3 run_algorithm.py --dataset random-xs-20-angular --algorithm vsag --module ann_benchmarks.algorithms.vsag --constructor Vsag --runs 2 --count 10 --batch '['angular', 20, {'M': 24, 'ef_construction': 300, 'use_int8': 4, 'rs': 0.5}]' '[10]' '[20]' '[30]' '[40]' '[60]' '[80]' '[120]' '[200]' '[400]' '[600]' '[800]'
-2025-03-23 00:37:56,725 - INFO - Output saved to: ../artifact/vsag/python3/remote.txt
-2025-03-23 00:37:56,725 - ERROR - Original program failed: python3, return code: 2
-2025-03-23 00:37:56,726 - INFO - Running CXLMemSim with default policy: python3
-2025-03-23 00:37:56,726 - INFO - Running command: ./CXLMemSim -t /usr/bin/python3 run_algorithm.py --dataset random-xs-20-angular --algorithm vsag --module ann_benchmarks.algorithms.vsag --constructor Vsag --runs 2 --count 10 --batch '['angular', 20, {'M': 24, 'ef_construction': 300, 'use_int8': 4, 'rs': 0.5}]' '[10]' '[20]' '[30]' '[40]' '[60]' '[80]' '[120]' '[200]' '[400]' '[600]' '[800]' -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:37:58,491 - INFO - Output saved to: ../artifact/vsag/python3/cxlmemsim.txt
-2025-03-23 00:37:58,491 - INFO - Processing workload: microbench
-2025-03-23 00:37:58,491 - INFO - Processing program: ld
-2025-03-23 00:37:58,491 - INFO - Running original program: ld
-2025-03-23 00:37:58,492 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ./microbench/ld
-2025-03-23 00:37:58,495 - INFO - Output saved to: ../artifact/microbench/ld/orig.txt
-2025-03-23 00:37:58,495 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ./microbench/ld
-2025-03-23 00:37:58,499 - INFO - Output saved to: ../artifact/microbench/ld/remote.txt
-2025-03-23 00:37:58,499 - ERROR - Original program failed: ld, return code: 1
-2025-03-23 00:37:58,499 - INFO - Running CXLMemSim with default policy: ld
-2025-03-23 00:37:58,499 - INFO - Running command: ./CXLMemSim -t ./microbench/ld -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:38:00,255 - INFO - Output saved to: ../artifact/microbench/ld/cxlmemsim.txt
-2025-03-23 00:38:00,255 - INFO - Processing program: st
-2025-03-23 00:38:00,255 - INFO - Running original program: st
-2025-03-23 00:38:00,256 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ./microbench/st
-2025-03-23 00:38:00,260 - INFO - Output saved to: ../artifact/microbench/st/orig.txt
-2025-03-23 00:38:00,260 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ./microbench/st
-2025-03-23 00:38:00,263 - INFO - Output saved to: ../artifact/microbench/st/remote.txt
-2025-03-23 00:38:00,263 - ERROR - Original program failed: st, return code: 1
-2025-03-23 00:38:00,263 - INFO - Running CXLMemSim with default policy: st
-2025-03-23 00:38:00,263 - INFO - Running command: ./CXLMemSim -t ./microbench/st -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:38:02,018 - INFO - Output saved to: ../artifact/microbench/st/cxlmemsim.txt
-2025-03-23 00:38:02,018 - INFO - Processing program: ld_serial
-2025-03-23 00:38:02,018 - INFO - Running original program: ld_serial
-2025-03-23 00:38:02,018 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ./microbench/ld_serial
-2025-03-23 00:38:02,021 - INFO - Output saved to: ../artifact/microbench/ld_serial/orig.txt
-2025-03-23 00:38:02,021 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ./microbench/ld_serial
-2025-03-23 00:38:02,023 - INFO - Output saved to: ../artifact/microbench/ld_serial/remote.txt
-2025-03-23 00:38:02,023 - ERROR - Original program failed: ld_serial, return code: 1
-2025-03-23 00:38:02,023 - INFO - Running CXLMemSim with default policy: ld_serial
-2025-03-23 00:38:02,023 - INFO - Running command: ./CXLMemSim -t ./microbench/ld_serial -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:38:03,829 - INFO - Output saved to: ../artifact/microbench/ld_serial/cxlmemsim.txt
-2025-03-23 00:38:03,829 - INFO - Processing program: st_serial
-2025-03-23 00:38:03,829 - INFO - Running original program: st_serial
-2025-03-23 00:38:03,829 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ./microbench/st_serial
-2025-03-23 00:38:03,832 - INFO - Output saved to: ../artifact/microbench/st_serial/orig.txt
-2025-03-23 00:38:03,832 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ./microbench/st_serial
-2025-03-23 00:38:03,835 - INFO - Output saved to: ../artifact/microbench/st_serial/remote.txt
-2025-03-23 00:38:03,835 - ERROR - Original program failed: st_serial, return code: 1
-2025-03-23 00:38:03,835 - INFO - Running CXLMemSim with default policy: st_serial
-2025-03-23 00:38:03,835 - INFO - Running command: ./CXLMemSim -t ./microbench/st_serial -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:38:05,594 - INFO - Output saved to: ../artifact/microbench/st_serial/cxlmemsim.txt
-2025-03-23 00:38:05,594 - INFO - Processing program: malloc
-2025-03-23 00:38:05,594 - INFO - Running original program: malloc
-2025-03-23 00:38:05,594 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ./microbench/malloc
-2025-03-23 00:41:38,264 - INFO - Output saved to: ../artifact/microbench/malloc/orig.txt
-2025-03-23 00:41:38,275 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ./microbench/malloc
-2025-03-23 00:42:36,066 - INFO - Output saved to: ../artifact/microbench/malloc/remote.txt
-2025-03-23 00:42:36,067 - ERROR - Original program failed: malloc, return code: 137
-2025-03-23 00:42:36,067 - INFO - Running CXLMemSim with default policy: malloc
-2025-03-23 00:42:36,067 - INFO - Running command: ./CXLMemSim -t ./microbench/malloc -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:46:24,084 - INFO - Output saved to: ../artifact/microbench/malloc/cxlmemsim.txt
-2025-03-23 00:46:24,085 - INFO - Processing program: writeback
-2025-03-23 00:46:24,086 - INFO - Running original program: writeback
-2025-03-23 00:46:24,086 - INFO - Running command: time numactl --cpunodebind=0 --membind=0 ./microbench/writeback
-2025-03-23 00:46:24,090 - INFO - Output saved to: ../artifact/microbench/writeback/orig.txt
-2025-03-23 00:46:24,091 - INFO - Running command: time numactl --cpunodebind=0 --membind=1 ./microbench/writeback
-2025-03-23 00:46:24,093 - INFO - Output saved to: ../artifact/microbench/writeback/remote.txt
-2025-03-23 00:46:24,093 - ERROR - Original program failed: writeback, return code: 1
-2025-03-23 00:46:24,093 - INFO - Running CXLMemSim with default policy: writeback
-2025-03-23 00:46:24,093 - INFO - Running command: ./CXLMemSim -t ./microbench/writeback -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50
-2025-03-23 00:46:25,865 - INFO - Output saved to: ../artifact/microbench/writeback/cxlmemsim.txt
-2025-03-23 00:46:25,866 - INFO - All workloads completed. Total time: 0h 14m 12s
+2025-04-10 21:43:52,076 - INFO - Starting all workloads
+2025-04-10 21:43:52,076 - INFO - Running tests with 12 policy combinations
+2025-04-10 21:43:52,076 - INFO - Processing workload: gapbs
+2025-04-10 21:43:52,076 - INFO - Processing program: bc
+2025-04-10 21:43:52,076 - INFO - Running original program: bc
+2025-04-10 21:43:52,076 - INFO - Running CXLMemSim with policy combination [interleave, none, none, none]: bc
+2025-04-10 21:43:52,076 - INFO - Running command: ./CXLMemSim -t ../workloads/gapbs/bc -g 25 -n 10 -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50 -k interleave,none,none,none
+2025-04-11 09:09:11,228 - INFO - Starting all workloads
+2025-04-11 09:09:11,228 - INFO - Running tests with 12 policy combinations
+2025-04-11 09:09:11,228 - INFO - Processing workload: gapbs
+2025-04-11 09:09:11,228 - INFO - Processing program: bfs
+2025-04-11 09:09:11,228 - INFO - Running original program: bfs
+2025-04-11 09:09:11,228 - INFO - Running CXLMemSim with policy combination [interleave, none, none, none]: bfs
+2025-04-11 09:09:11,228 - INFO - Running command: ./CXLMemSim -t ../workloads/gapbs/bfs -g 25 -n 10 -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50 -k interleave,none,none,none
+2025-04-11 09:09:36,314 - INFO - Starting all workloads
+2025-04-11 09:09:36,314 - INFO - Running tests with 12 policy combinations
+2025-04-11 09:09:36,314 - INFO - Processing workload: gapbs
+2025-04-11 09:09:36,314 - INFO - Processing program: bfs
+2025-04-11 09:09:36,314 - INFO - Running original program: bfs
+2025-04-11 09:09:36,314 - INFO - Running CXLMemSim with policy combination [interleave, none, none, none]: bfs
+2025-04-11 09:09:36,314 - INFO - Running command: ./CXLMemSim -t ../workloads/gapbs/bfs -g 20 -n 10 -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50 -k interleave,none,none,none
+2025-04-11 09:11:04,263 - INFO - Starting all workloads
+2025-04-11 09:11:04,263 - INFO - Running tests with 12 policy combinations
+2025-04-11 09:11:04,263 - INFO - Processing workload: gapbs
+2025-04-11 09:11:04,263 - INFO - Processing program: bfs
+2025-04-11 09:11:04,263 - INFO - Running original program: bfs
+2025-04-11 09:11:04,263 - INFO - Running CXLMemSim with policy combination [interleave, none, none, none]: bfs
+2025-04-11 09:11:04,263 - INFO - Running command: ./CXLMemSim -t ../workloads/gapbs/bfs -g 20 -n 10 -p 10 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50 -k interleave,none,none,none
+2025-04-11 09:18:33,366 - INFO - Starting all workloads
+2025-04-11 09:18:33,366 - INFO - Running tests with 12 policy combinations
+2025-04-11 09:18:33,366 - INFO - Processing workload: gapbs
+2025-04-11 09:18:33,366 - INFO - Processing program: bfs
+2025-04-11 09:18:33,366 - INFO - Running original program: bfs
+2025-04-11 09:18:33,366 - INFO - Running CXLMemSim with policy combination [interleave, none, none, none]: bfs
+2025-04-11 09:18:33,366 - INFO - Running command: ./CXLMemSim -t ../workloads/gapbs/bfs -g 20 -n 10 -p 1000 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50 -k interleave,none,none,none
+2025-05-08 18:12:41,707 - INFO - Starting all workloads
+2025-05-08 18:12:41,740 - INFO - Running tests with 1 policy combinations
+2025-05-08 18:12:41,740 - INFO - Processing workload: microbench
+2025-05-08 18:12:41,740 - INFO - Processing program: ld1
+2025-05-08 18:12:41,740 - INFO - Running original program: ld1
+2025-05-08 18:12:41,740 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-08 18:12:41,742 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:14:53,623 - INFO - PCI 0x0000 run 1: 131.8802s
+2025-05-08 18:14:53,623 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:17:06,284 - INFO - PCI 0x0000 run 2: 132.6609s
+2025-05-08 18:17:06,284 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:19:18,301 - INFO - PCI 0x0000 run 3: 132.0167s
+2025-05-08 18:19:18,301 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:21:30,204 - INFO - PCI 0x0000 run 4: 131.9025s
+2025-05-08 18:21:30,204 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:23:43,001 - INFO - PCI 0x0000 run 5: 132.7968s
+2025-05-08 18:23:43,001 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:25:55,588 - INFO - PCI 0x0000 run 6: 132.5867s
+2025-05-08 18:25:55,588 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:28:08,343 - INFO - PCI 0x0000 run 7: 132.7547s
+2025-05-08 18:28:08,343 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:30:19,481 - INFO - PCI 0x0000 run 8: 131.1379s
+2025-05-08 18:30:19,482 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:32:31,294 - INFO - PCI 0x0000 run 9: 131.8126s
+2025-05-08 18:32:31,295 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:34:45,249 - INFO - PCI 0x0000 run 10: 133.9539s
+2025-05-08 18:34:45,249 - INFO - PCI 0x0000: avg=132.3503s, std=0.7730s
+2025-05-08 18:34:45,250 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-08 18:34:45,253 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:36:57,300 - INFO - PCI 0xffff run 1: 132.0479s
+2025-05-08 18:36:57,301 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:39:09,399 - INFO - PCI 0xffff run 2: 132.0985s
+2025-05-08 18:39:09,400 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:41:21,506 - INFO - PCI 0xffff run 3: 132.1060s
+2025-05-08 18:41:21,506 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:43:32,660 - INFO - PCI 0xffff run 4: 131.1542s
+2025-05-08 18:43:32,661 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:45:45,496 - INFO - PCI 0xffff run 5: 132.8354s
+2025-05-08 18:45:45,496 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:47:56,665 - INFO - PCI 0xffff run 6: 131.1685s
+2025-05-08 18:47:56,665 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:50:08,800 - INFO - PCI 0xffff run 7: 132.1347s
+2025-05-08 18:50:08,800 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:52:19,922 - INFO - PCI 0xffff run 8: 131.1215s
+2025-05-08 18:52:19,922 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:54:32,778 - INFO - PCI 0xffff run 9: 132.8558s
+2025-05-08 18:54:32,778 - INFO - Running command: ./microbench/ld1
+2025-05-08 18:56:44,817 - INFO - PCI 0xffff run 10: 132.0385s
+2025-05-08 18:56:44,818 - INFO - PCI 0xffff: avg=131.9561s, std=0.6353s
+2025-05-08 18:56:44,818 - INFO - Processing program: ld2
+2025-05-08 18:56:44,818 - INFO - Running original program: ld2
+2025-05-08 18:56:44,819 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-08 18:56:44,821 - INFO - Running command: ./microbench/ld2
+2025-05-08 18:58:41,597 - INFO - PCI 0x0000 run 1: 116.7756s
+2025-05-08 18:58:41,597 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:00:37,546 - INFO - PCI 0x0000 run 2: 115.9485s
+2025-05-08 19:00:37,546 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:02:37,667 - INFO - PCI 0x0000 run 3: 120.1203s
+2025-05-08 19:02:37,667 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:04:36,091 - INFO - PCI 0x0000 run 4: 118.4237s
+2025-05-08 19:04:36,091 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:06:34,113 - INFO - PCI 0x0000 run 5: 118.0217s
+2025-05-08 19:06:34,113 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:08:33,465 - INFO - PCI 0x0000 run 6: 119.3521s
+2025-05-08 19:08:33,466 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:10:34,805 - INFO - PCI 0x0000 run 7: 121.3393s
+2025-05-08 19:10:34,805 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:12:33,344 - INFO - PCI 0x0000 run 8: 118.5386s
+2025-05-08 19:12:33,344 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:14:27,608 - INFO - PCI 0x0000 run 9: 114.2640s
+2025-05-08 19:14:27,608 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:16:27,462 - INFO - PCI 0x0000 run 10: 119.8535s
+2025-05-08 19:16:27,463 - INFO - PCI 0x0000: avg=118.2637s, std=2.1174s
+2025-05-08 19:16:27,463 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-08 19:16:27,466 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:18:27,859 - INFO - PCI 0xffff run 1: 120.3921s
+2025-05-08 19:18:27,859 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:20:25,649 - INFO - PCI 0xffff run 2: 117.7904s
+2025-05-08 19:20:25,649 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:22:20,270 - INFO - PCI 0xffff run 3: 114.6204s
+2025-05-08 19:22:20,270 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:24:17,953 - INFO - PCI 0xffff run 4: 117.6831s
+2025-05-08 19:24:17,954 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:26:12,347 - INFO - PCI 0xffff run 5: 114.3935s
+2025-05-08 19:26:12,348 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:28:12,069 - INFO - PCI 0xffff run 6: 119.7218s
+2025-05-08 19:28:12,070 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:30:10,059 - INFO - PCI 0xffff run 7: 117.9890s
+2025-05-08 19:30:10,059 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:32:11,113 - INFO - PCI 0xffff run 8: 121.0536s
+2025-05-08 19:32:11,113 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:34:05,897 - INFO - PCI 0xffff run 9: 114.7840s
+2025-05-08 19:34:05,897 - INFO - Running command: ./microbench/ld2
+2025-05-08 19:36:03,910 - INFO - PCI 0xffff run 10: 118.0128s
+2025-05-08 19:36:03,911 - INFO - PCI 0xffff: avg=117.6441s, std=2.3958s
+2025-05-08 19:36:03,911 - INFO - Processing program: ld4
+2025-05-08 19:36:03,911 - INFO - Running original program: ld4
+2025-05-08 19:36:03,911 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-08 19:36:03,913 - INFO - Running command: ./microbench/ld4
+2025-05-08 19:37:47,933 - INFO - PCI 0x0000 run 1: 104.0207s
+2025-05-08 19:37:47,934 - INFO - Running command: ./microbench/ld4
+2025-05-08 19:39:30,027 - INFO - PCI 0x0000 run 2: 102.0938s
+2025-05-08 19:39:30,028 - INFO - Running command: ./microbench/ld4
+2025-05-08 19:41:13,749 - INFO - PCI 0x0000 run 3: 103.7210s
+2025-05-08 19:41:13,749 - INFO - Running command: ./microbench/ld4
+2025-05-08 19:42:55,832 - INFO - PCI 0x0000 run 4: 102.0832s
+2025-05-08 19:42:55,833 - INFO - Running command: ./microbench/ld4
+2025-05-08 19:44:39,822 - INFO - PCI 0x0000 run 5: 103.9891s
+2025-05-08 19:44:39,822 - INFO - Running command: ./microbench/ld4
+2025-05-08 19:46:24,817 - INFO - PCI 0x0000 run 6: 104.9945s
+2025-05-08 19:46:24,817 - INFO - Running command: ./microbench/ld4
+2025-05-08 19:48:07,316 - INFO - PCI 0x0000 run 7: 102.4995s
+2025-05-08 19:48:07,317 - INFO - Running command: ./microbench/ld4
+2025-05-08 19:49:49,343 - INFO - PCI 0x0000 run 8: 102.0267s
+2025-05-08 19:49:49,344 - INFO - Running command: ./microbench/ld4
+2025-05-08 19:51:32,057 - INFO - PCI 0x0000 run 9: 102.7128s
+2025-05-08 19:51:32,057 - INFO - Running command: ./microbench/ld4
+2025-05-08 19:53:17,214 - INFO - PCI 0x0000 run 10: 105.1569s
+2025-05-08 19:53:17,214 - INFO - PCI 0x0000: avg=103.3298s, std=1.2030s
+2025-05-08 19:53:17,215 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-08 19:53:17,217 - INFO - Running command: ./microbench/ld4
+2025-05-08 19:55:01,055 - INFO - PCI 0xffff run 1: 103.8374s
+2025-05-08 19:55:01,055 - INFO - Running command: ./microbench/ld4
+2025-05-08 19:56:45,005 - INFO - PCI 0xffff run 2: 103.9505s
+2025-05-08 19:56:45,005 - INFO - Running command: ./microbench/ld4
+2025-05-08 19:58:27,104 - INFO - PCI 0xffff run 3: 102.0982s
+2025-05-08 19:58:27,104 - INFO - Running command: ./microbench/ld4
+2025-05-08 20:00:10,787 - INFO - PCI 0xffff run 4: 103.6829s
+2025-05-08 20:00:10,787 - INFO - Running command: ./microbench/ld4
+2025-05-08 20:01:54,989 - INFO - PCI 0xffff run 5: 104.2014s
+2025-05-08 20:01:54,989 - INFO - Running command: ./microbench/ld4
+2025-05-08 20:03:38,535 - INFO - PCI 0xffff run 6: 103.5458s
+2025-05-08 20:03:38,535 - INFO - Running command: ./microbench/ld4
+2025-05-08 20:05:22,440 - INFO - PCI 0xffff run 7: 103.9045s
+2025-05-08 20:05:22,440 - INFO - Running command: ./microbench/ld4
+2025-05-08 20:07:07,452 - INFO - PCI 0xffff run 8: 105.0121s
+2025-05-08 20:07:07,452 - INFO - Running command: ./microbench/ld4
+2025-05-08 20:08:53,124 - INFO - PCI 0xffff run 9: 105.6714s
+2025-05-08 20:08:53,124 - INFO - Running command: ./microbench/ld4
+2025-05-08 20:10:37,291 - INFO - PCI 0xffff run 10: 104.1666s
+2025-05-08 20:10:37,291 - INFO - PCI 0xffff: avg=104.0071s, std=0.9338s
+2025-05-08 20:10:37,292 - INFO - Processing program: ld8
+2025-05-08 20:10:37,292 - INFO - Running original program: ld8
+2025-05-08 20:10:37,292 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-08 20:10:37,295 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:12:08,278 - INFO - PCI 0x0000 run 1: 90.9829s
+2025-05-08 20:12:08,278 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:13:39,939 - INFO - PCI 0x0000 run 2: 91.6608s
+2025-05-08 20:13:39,939 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:15:11,840 - INFO - PCI 0x0000 run 3: 91.9003s
+2025-05-08 20:15:11,840 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:16:42,822 - INFO - PCI 0x0000 run 4: 90.9821s
+2025-05-08 20:16:42,822 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:18:14,571 - INFO - PCI 0x0000 run 5: 91.7484s
+2025-05-08 20:18:14,571 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:19:45,597 - INFO - PCI 0x0000 run 6: 91.0259s
+2025-05-08 20:19:45,597 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:21:16,806 - INFO - PCI 0x0000 run 7: 91.2091s
+2025-05-08 20:21:16,807 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:22:48,108 - INFO - PCI 0x0000 run 8: 91.3012s
+2025-05-08 20:22:48,108 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:24:19,071 - INFO - PCI 0x0000 run 9: 90.9629s
+2025-05-08 20:24:19,072 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:25:51,977 - INFO - PCI 0x0000 run 10: 92.9049s
+2025-05-08 20:25:51,977 - INFO - PCI 0x0000: avg=91.4678s, std=0.6132s
+2025-05-08 20:25:51,978 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-08 20:25:51,980 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:27:23,719 - INFO - PCI 0xffff run 1: 91.7392s
+2025-05-08 20:27:23,719 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:28:55,452 - INFO - PCI 0xffff run 2: 91.7326s
+2025-05-08 20:28:55,452 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:30:26,442 - INFO - PCI 0xffff run 3: 90.9898s
+2025-05-08 20:30:26,442 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:31:57,427 - INFO - PCI 0xffff run 4: 90.9844s
+2025-05-08 20:31:57,427 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:33:29,143 - INFO - PCI 0xffff run 5: 91.7159s
+2025-05-08 20:33:29,143 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:35:02,049 - INFO - PCI 0xffff run 6: 92.9055s
+2025-05-08 20:35:02,049 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:36:33,768 - INFO - PCI 0xffff run 7: 91.7185s
+2025-05-08 20:36:33,768 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:38:05,493 - INFO - PCI 0xffff run 8: 91.7252s
+2025-05-08 20:38:05,494 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:39:37,199 - INFO - PCI 0xffff run 9: 91.7056s
+2025-05-08 20:39:37,200 - INFO - Running command: ./microbench/ld8
+2025-05-08 20:41:08,753 - INFO - PCI 0xffff run 10: 91.5532s
+2025-05-08 20:41:08,753 - INFO - PCI 0xffff: avg=91.6770s, std=0.5260s
+2025-05-08 20:41:08,754 - INFO - Processing program: ld16
+2025-05-08 20:41:08,754 - INFO - Running original program: ld16
+2025-05-08 20:41:08,754 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-08 20:41:08,757 - INFO - Running command: ./microbench/ld16
+2025-05-08 20:42:35,002 - INFO - PCI 0x0000 run 1: 86.2444s
+2025-05-08 20:42:35,002 - INFO - Running command: ./microbench/ld16
+2025-05-08 20:44:01,210 - INFO - PCI 0x0000 run 2: 86.2082s
+2025-05-08 20:44:01,211 - INFO - Running command: ./microbench/ld16
+2025-05-08 20:45:27,492 - INFO - PCI 0x0000 run 3: 86.2810s
+2025-05-08 20:45:27,492 - INFO - Running command: ./microbench/ld16
+2025-05-08 20:46:54,603 - INFO - PCI 0x0000 run 4: 87.1106s
+2025-05-08 20:46:54,603 - INFO - Running command: ./microbench/ld16
+2025-05-08 20:48:21,231 - INFO - PCI 0x0000 run 5: 86.6278s
+2025-05-08 20:48:21,231 - INFO - Running command: ./microbench/ld16
+2025-05-08 20:49:48,398 - INFO - PCI 0x0000 run 6: 87.1666s
+2025-05-08 20:49:48,398 - INFO - Running command: ./microbench/ld16
+2025-05-08 20:51:15,859 - INFO - PCI 0x0000 run 7: 87.4606s
+2025-05-08 20:51:15,859 - INFO - Running command: ./microbench/ld16
+2025-05-08 20:52:42,648 - INFO - PCI 0x0000 run 8: 86.7887s
+2025-05-08 20:52:42,648 - INFO - Running command: ./microbench/ld16
+2025-05-08 20:54:08,947 - INFO - PCI 0x0000 run 9: 86.2987s
+2025-05-08 20:54:08,947 - INFO - Running command: ./microbench/ld16
+2025-05-08 20:55:35,661 - INFO - PCI 0x0000 run 10: 86.7142s
+2025-05-08 20:55:35,662 - INFO - PCI 0x0000: avg=86.6901s, std=0.4426s
+2025-05-08 20:55:35,663 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-08 20:55:35,666 - INFO - Running command: ./microbench/ld16
+2025-05-08 20:57:02,337 - INFO - PCI 0xffff run 1: 86.6717s
+2025-05-08 20:57:02,338 - INFO - Running command: ./microbench/ld16
+2025-05-08 20:58:29,544 - INFO - PCI 0xffff run 2: 87.2063s
+2025-05-08 20:58:29,544 - INFO - Running command: ./microbench/ld16
+2025-05-08 20:59:56,875 - INFO - PCI 0xffff run 3: 87.3306s
+2025-05-08 20:59:56,875 - INFO - Running command: ./microbench/ld16
+2025-05-08 21:01:23,198 - INFO - PCI 0xffff run 4: 86.3224s
+2025-05-08 21:01:23,198 - INFO - Running command: ./microbench/ld16
+2025-05-08 21:02:50,332 - INFO - PCI 0xffff run 5: 87.1335s
+2025-05-08 21:02:50,332 - INFO - Running command: ./microbench/ld16
+2025-05-08 21:04:17,109 - INFO - PCI 0xffff run 6: 86.7768s
+2025-05-08 21:04:17,109 - INFO - Running command: ./microbench/ld16
+2025-05-08 21:05:43,562 - INFO - PCI 0xffff run 7: 86.4526s
+2025-05-08 21:05:43,562 - INFO - Running command: ./microbench/ld16
+2025-05-08 21:07:10,302 - INFO - PCI 0xffff run 8: 86.7402s
+2025-05-08 21:07:10,303 - INFO - Running command: ./microbench/ld16
+2025-05-08 21:08:37,279 - INFO - PCI 0xffff run 9: 86.9760s
+2025-05-08 21:08:37,279 - INFO - Running command: ./microbench/ld16
+2025-05-08 21:10:03,710 - INFO - PCI 0xffff run 10: 86.4310s
+2025-05-08 21:10:03,711 - INFO - PCI 0xffff: avg=86.8041s, std=0.3487s
+2025-05-08 21:10:03,711 - INFO - Processing program: ld32
+2025-05-08 21:10:03,711 - INFO - Running original program: ld32
+2025-05-08 21:10:03,711 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-08 21:10:03,714 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:11:03,333 - INFO - PCI 0x0000 run 1: 59.6190s
+2025-05-08 21:11:03,333 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:12:03,066 - INFO - PCI 0x0000 run 2: 59.7327s
+2025-05-08 21:12:03,066 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:13:02,717 - INFO - PCI 0x0000 run 3: 59.6503s
+2025-05-08 21:13:02,717 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:14:02,417 - INFO - PCI 0x0000 run 4: 59.7001s
+2025-05-08 21:14:02,418 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:15:02,985 - INFO - PCI 0x0000 run 5: 60.5675s
+2025-05-08 21:15:02,986 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:16:02,606 - INFO - PCI 0x0000 run 6: 59.6202s
+2025-05-08 21:16:02,606 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:17:03,258 - INFO - PCI 0x0000 run 7: 60.6518s
+2025-05-08 21:17:03,258 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:18:02,956 - INFO - PCI 0x0000 run 8: 59.6976s
+2025-05-08 21:18:02,956 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:19:03,558 - INFO - PCI 0x0000 run 9: 60.6022s
+2025-05-08 21:19:03,559 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:20:03,153 - INFO - PCI 0x0000 run 10: 59.5945s
+2025-05-08 21:20:03,154 - INFO - PCI 0x0000: avg=59.9436s, std=0.4603s
+2025-05-08 21:20:03,154 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-08 21:20:03,157 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:21:03,801 - INFO - PCI 0xffff run 1: 60.6444s
+2025-05-08 21:21:03,801 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:22:03,433 - INFO - PCI 0xffff run 2: 59.6316s
+2025-05-08 21:22:03,433 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:23:03,186 - INFO - PCI 0xffff run 3: 59.7527s
+2025-05-08 21:23:03,186 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:24:02,889 - INFO - PCI 0xffff run 4: 59.7026s
+2025-05-08 21:24:02,889 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:25:04,231 - INFO - PCI 0xffff run 5: 61.3419s
+2025-05-08 21:25:04,231 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:26:03,678 - INFO - PCI 0xffff run 6: 59.4466s
+2025-05-08 21:26:03,678 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:27:04,317 - INFO - PCI 0xffff run 7: 60.6383s
+2025-05-08 21:27:04,317 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:28:04,031 - INFO - PCI 0xffff run 8: 59.7139s
+2025-05-08 21:28:04,031 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:29:03,632 - INFO - PCI 0xffff run 9: 59.6006s
+2025-05-08 21:29:03,632 - INFO - Running command: ./microbench/ld32
+2025-05-08 21:30:04,123 - INFO - PCI 0xffff run 10: 60.4908s
+2025-05-08 21:30:04,123 - INFO - PCI 0xffff: avg=60.0963s, std=0.6328s
+2025-05-08 21:30:04,124 - INFO - Processing program: ld64
+2025-05-08 21:30:04,124 - INFO - Running original program: ld64
+2025-05-08 21:30:04,124 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-08 21:30:04,126 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:31:02,262 - INFO - PCI 0x0000 run 1: 58.1357s
+2025-05-08 21:31:02,262 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:31:59,903 - INFO - PCI 0x0000 run 2: 57.6408s
+2025-05-08 21:31:59,904 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:32:57,584 - INFO - PCI 0x0000 run 3: 57.6799s
+2025-05-08 21:32:57,584 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:33:55,109 - INFO - PCI 0x0000 run 4: 57.5252s
+2025-05-08 21:33:55,110 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:34:52,694 - INFO - PCI 0x0000 run 5: 57.5840s
+2025-05-08 21:34:52,694 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:35:50,419 - INFO - PCI 0x0000 run 6: 57.7251s
+2025-05-08 21:35:50,419 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:36:48,097 - INFO - PCI 0x0000 run 7: 57.6777s
+2025-05-08 21:36:48,097 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:37:45,763 - INFO - PCI 0x0000 run 8: 57.6658s
+2025-05-08 21:37:45,764 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:38:43,501 - INFO - PCI 0x0000 run 9: 57.7373s
+2025-05-08 21:38:43,501 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:39:41,597 - INFO - PCI 0x0000 run 10: 58.0961s
+2025-05-08 21:39:41,598 - INFO - PCI 0x0000: avg=57.7468s, std=0.2045s
+2025-05-08 21:39:41,598 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-08 21:39:41,600 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:40:39,323 - INFO - PCI 0xffff run 1: 57.7233s
+2025-05-08 21:40:39,324 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:41:38,847 - INFO - PCI 0xffff run 2: 59.5235s
+2025-05-08 21:41:38,848 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:42:37,007 - INFO - PCI 0xffff run 3: 58.1595s
+2025-05-08 21:42:37,007 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:43:35,106 - INFO - PCI 0xffff run 4: 58.0987s
+2025-05-08 21:43:35,107 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:44:33,230 - INFO - PCI 0xffff run 5: 58.1232s
+2025-05-08 21:44:33,230 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:45:30,880 - INFO - PCI 0xffff run 6: 57.6500s
+2025-05-08 21:45:30,880 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:46:29,053 - INFO - PCI 0xffff run 7: 58.1725s
+2025-05-08 21:46:29,053 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:47:27,460 - INFO - PCI 0xffff run 8: 58.4069s
+2025-05-08 21:47:27,460 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:48:26,117 - INFO - PCI 0xffff run 9: 58.6566s
+2025-05-08 21:48:26,117 - INFO - Running command: ./microbench/ld64
+2025-05-08 21:49:24,206 - INFO - PCI 0xffff run 10: 58.0883s
+2025-05-08 21:49:24,206 - INFO - PCI 0xffff: avg=58.2602s, std=0.5299s
+2025-05-08 21:49:24,207 - INFO - Processing program: ld128
+2025-05-08 21:49:24,207 - INFO - Running original program: ld128
+2025-05-08 21:49:24,207 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-08 21:49:24,209 - INFO - Running command: ./microbench/ld128
+2025-05-08 21:50:24,283 - INFO - PCI 0x0000 run 1: 60.0732s
+2025-05-08 21:50:24,283 - INFO - Running command: ./microbench/ld128
+2025-05-08 21:51:25,440 - INFO - PCI 0x0000 run 2: 61.1567s
+2025-05-08 21:51:25,440 - INFO - Running command: ./microbench/ld128
+2025-05-08 21:52:25,299 - INFO - PCI 0x0000 run 3: 59.8588s
+2025-05-08 21:52:25,299 - INFO - Running command: ./microbench/ld128
+2025-05-08 21:53:25,617 - INFO - PCI 0x0000 run 4: 60.3183s
+2025-05-08 21:53:25,618 - INFO - Running command: ./microbench/ld128
+2025-05-08 21:54:25,536 - INFO - PCI 0x0000 run 5: 59.9184s
+2025-05-08 21:54:25,536 - INFO - Running command: ./microbench/ld128
+2025-05-08 21:55:25,394 - INFO - PCI 0x0000 run 6: 59.8581s
+2025-05-08 21:55:25,395 - INFO - Running command: ./microbench/ld128
+2025-05-08 21:56:25,437 - INFO - PCI 0x0000 run 7: 60.0417s
+2025-05-08 21:56:25,437 - INFO - Running command: ./microbench/ld128
+2025-05-08 21:57:25,409 - INFO - PCI 0x0000 run 8: 59.9718s
+2025-05-08 21:57:25,409 - INFO - Running command: ./microbench/ld128
+2025-05-08 21:58:25,329 - INFO - PCI 0x0000 run 9: 59.9201s
+2025-05-08 21:58:25,329 - INFO - Running command: ./microbench/ld128
+2025-05-08 21:59:25,818 - INFO - PCI 0x0000 run 10: 60.4888s
+2025-05-08 21:59:25,819 - INFO - PCI 0x0000: avg=60.1606s, std=0.4057s
+2025-05-08 21:59:25,820 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-08 21:59:25,821 - INFO - Running command: ./microbench/ld128
+2025-05-08 22:00:25,730 - INFO - PCI 0xffff run 1: 59.9085s
+2025-05-08 22:00:25,730 - INFO - Running command: ./microbench/ld128
+2025-05-08 22:01:26,028 - INFO - PCI 0xffff run 2: 60.2981s
+2025-05-08 22:01:26,029 - INFO - Running command: ./microbench/ld128
+2025-05-08 22:02:26,526 - INFO - PCI 0xffff run 3: 60.4976s
+2025-05-08 22:02:26,527 - INFO - Running command: ./microbench/ld128
+2025-05-08 22:03:27,697 - INFO - PCI 0xffff run 4: 61.1702s
+2025-05-08 22:03:27,697 - INFO - Running command: ./microbench/ld128
+2025-05-08 22:04:28,931 - INFO - PCI 0xffff run 5: 61.2339s
+2025-05-08 22:04:28,931 - INFO - Running command: ./microbench/ld128
+2025-05-08 22:05:28,772 - INFO - PCI 0xffff run 6: 59.8409s
+2025-05-08 22:05:28,773 - INFO - Running command: ./microbench/ld128
+2025-05-08 22:06:30,165 - INFO - PCI 0xffff run 7: 61.3926s
+2025-05-08 22:06:30,166 - INFO - Running command: ./microbench/ld128
+2025-05-08 22:07:30,152 - INFO - PCI 0xffff run 8: 59.9866s
+2025-05-08 22:07:30,153 - INFO - Running command: ./microbench/ld128
+2025-05-08 22:08:30,099 - INFO - PCI 0xffff run 9: 59.9462s
+2025-05-08 22:08:30,099 - INFO - Running command: ./microbench/ld128
+2025-05-08 22:09:30,006 - INFO - PCI 0xffff run 10: 59.9065s
+2025-05-08 22:09:30,006 - INFO - PCI 0xffff: avg=60.4181s, std=0.6205s
+2025-05-08 22:09:30,007 - INFO - Processing program: ld256
+2025-05-08 22:09:30,007 - INFO - Running original program: ld256
+2025-05-08 22:09:30,007 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-08 22:09:30,010 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:10:13,746 - INFO - PCI 0x0000 run 1: 43.7358s
+2025-05-08 22:10:13,747 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:10:57,522 - INFO - PCI 0x0000 run 2: 43.7750s
+2025-05-08 22:10:57,522 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:11:40,776 - INFO - PCI 0x0000 run 3: 43.2541s
+2025-05-08 22:11:40,776 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:12:24,405 - INFO - PCI 0x0000 run 4: 43.6287s
+2025-05-08 22:12:24,405 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:13:07,530 - INFO - PCI 0x0000 run 5: 43.1245s
+2025-05-08 22:13:07,530 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:13:50,985 - INFO - PCI 0x0000 run 6: 43.4546s
+2025-05-08 22:13:50,985 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:14:34,255 - INFO - PCI 0x0000 run 7: 43.2694s
+2025-05-08 22:14:34,255 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:15:17,373 - INFO - PCI 0x0000 run 8: 43.1185s
+2025-05-08 22:15:17,374 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:16:01,063 - INFO - PCI 0x0000 run 9: 43.6888s
+2025-05-08 22:16:01,063 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:16:44,305 - INFO - PCI 0x0000 run 10: 43.2418s
+2025-05-08 22:16:44,305 - INFO - PCI 0x0000: avg=43.4291s, std=0.2587s
+2025-05-08 22:16:44,306 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-08 22:16:44,309 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:17:27,732 - INFO - PCI 0xffff run 1: 43.4226s
+2025-05-08 22:17:27,733 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:18:11,193 - INFO - PCI 0xffff run 2: 43.4600s
+2025-05-08 22:18:11,193 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:18:54,430 - INFO - PCI 0xffff run 3: 43.2371s
+2025-05-08 22:18:54,430 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:19:37,667 - INFO - PCI 0xffff run 4: 43.2366s
+2025-05-08 22:19:37,667 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:20:21,355 - INFO - PCI 0xffff run 5: 43.6876s
+2025-05-08 22:20:21,355 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:21:04,619 - INFO - PCI 0xffff run 6: 43.2637s
+2025-05-08 22:21:04,619 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:21:47,807 - INFO - PCI 0xffff run 7: 43.1879s
+2025-05-08 22:21:47,807 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:22:31,457 - INFO - PCI 0xffff run 8: 43.6495s
+2025-05-08 22:22:31,457 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:23:14,763 - INFO - PCI 0xffff run 9: 43.3061s
+2025-05-08 22:23:14,764 - INFO - Running command: ./microbench/ld256
+2025-05-08 22:23:58,053 - INFO - PCI 0xffff run 10: 43.2891s
+2025-05-08 22:23:58,054 - INFO - PCI 0xffff: avg=43.3740s, std=0.1765s
+2025-05-08 22:23:58,054 - INFO - Processing program: st1
+2025-05-08 22:23:58,054 - INFO - Running original program: st1
+2025-05-08 22:23:58,054 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-08 22:23:58,057 - INFO - Running command: ./microbench/st1
+2025-05-08 22:26:08,553 - INFO - PCI 0x0000 run 1: 130.4955s
+2025-05-08 22:26:08,553 - INFO - Running command: ./microbench/st1
+2025-05-08 22:28:19,303 - INFO - PCI 0x0000 run 2: 130.7499s
+2025-05-08 22:28:19,303 - INFO - Running command: ./microbench/st1
+2025-05-08 22:30:30,244 - INFO - PCI 0x0000 run 3: 130.9409s
+2025-05-08 22:30:30,245 - INFO - Running command: ./microbench/st1
+2025-05-08 22:32:41,427 - INFO - PCI 0x0000 run 4: 131.1821s
+2025-05-08 22:32:41,427 - INFO - Running command: ./microbench/st1
+2025-05-08 22:34:51,809 - INFO - PCI 0x0000 run 5: 130.3825s
+2025-05-08 22:34:51,810 - INFO - Running command: ./microbench/st1
+2025-05-08 22:37:02,341 - INFO - PCI 0x0000 run 6: 130.5310s
+2025-05-08 22:37:02,341 - INFO - Running command: ./microbench/st1
+2025-05-08 22:39:13,738 - INFO - PCI 0x0000 run 7: 131.3964s
+2025-05-08 22:39:13,738 - INFO - Running command: ./microbench/st1
+2025-05-08 22:41:24,388 - INFO - PCI 0x0000 run 8: 130.6502s
+2025-05-08 22:41:24,388 - INFO - Running command: ./microbench/st1
+2025-05-08 22:43:36,481 - INFO - PCI 0x0000 run 9: 132.0926s
+2025-05-08 22:43:36,481 - INFO - Running command: ./microbench/st1
+2025-05-08 22:45:48,830 - INFO - PCI 0x0000 run 10: 132.3485s
+2025-05-08 22:45:48,831 - INFO - PCI 0x0000: avg=131.0770s, std=0.6821s
+2025-05-08 22:45:48,831 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-08 22:45:48,834 - INFO - Running command: ./microbench/st1
+2025-05-08 22:48:00,246 - INFO - PCI 0xffff run 1: 131.4121s
+2025-05-08 22:48:00,247 - INFO - Running command: ./microbench/st1
+2025-05-08 22:50:10,626 - INFO - PCI 0xffff run 2: 130.3791s
+2025-05-08 22:50:10,626 - INFO - Running command: ./microbench/st1
+2025-05-08 22:52:20,998 - INFO - PCI 0xffff run 3: 130.3716s
+2025-05-08 22:52:20,998 - INFO - Running command: ./microbench/st1
+2025-05-08 22:54:33,181 - INFO - PCI 0xffff run 4: 132.1831s
+2025-05-08 22:54:33,181 - INFO - Running command: ./microbench/st1
+2025-05-08 22:56:43,575 - INFO - PCI 0xffff run 5: 130.3938s
+2025-05-08 22:56:43,576 - INFO - Running command: ./microbench/st1
+2025-05-08 22:58:54,872 - INFO - PCI 0xffff run 6: 131.2962s
+2025-05-08 22:58:54,872 - INFO - Running command: ./microbench/st1
+2025-05-08 23:01:06,252 - INFO - PCI 0xffff run 7: 131.3795s
+2025-05-08 23:01:06,252 - INFO - Running command: ./microbench/st1
+2025-05-08 23:03:16,890 - INFO - PCI 0xffff run 8: 130.6379s
+2025-05-08 23:03:16,890 - INFO - Running command: ./microbench/st1
+2025-05-08 23:05:27,379 - INFO - PCI 0xffff run 9: 130.4883s
+2025-05-08 23:05:27,379 - INFO - Running command: ./microbench/st1
+2025-05-08 23:07:38,737 - INFO - PCI 0xffff run 10: 131.3581s
+2025-05-08 23:07:38,738 - INFO - PCI 0xffff: avg=130.9900s, std=0.6209s
+2025-05-08 23:07:38,738 - INFO - Processing program: st2
+2025-05-08 23:07:38,738 - INFO - Running original program: st2
+2025-05-08 23:07:38,739 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-08 23:07:38,741 - INFO - Running command: ./microbench/st2
+2025-05-08 23:09:37,308 - INFO - PCI 0x0000 run 1: 118.5668s
+2025-05-08 23:09:37,309 - INFO - Running command: ./microbench/st2
+2025-05-08 23:11:36,715 - INFO - PCI 0x0000 run 2: 119.4062s
+2025-05-08 23:11:36,715 - INFO - Running command: ./microbench/st2
+2025-05-08 23:13:32,698 - INFO - PCI 0x0000 run 3: 115.9830s
+2025-05-08 23:13:32,698 - INFO - Running command: ./microbench/st2
+2025-05-08 23:15:26,778 - INFO - PCI 0x0000 run 4: 114.0796s
+2025-05-08 23:15:26,778 - INFO - Running command: ./microbench/st2
+2025-05-08 23:17:21,373 - INFO - PCI 0x0000 run 5: 114.5943s
+2025-05-08 23:17:21,373 - INFO - Running command: ./microbench/st2
+2025-05-08 23:19:17,110 - INFO - PCI 0x0000 run 6: 115.7373s
+2025-05-08 23:19:17,111 - INFO - Running command: ./microbench/st2
+2025-05-08 23:21:15,200 - INFO - PCI 0x0000 run 7: 118.0891s
+2025-05-08 23:21:15,200 - INFO - Running command: ./microbench/st2
+2025-05-08 23:23:10,330 - INFO - PCI 0x0000 run 8: 115.1296s
+2025-05-08 23:23:10,330 - INFO - Running command: ./microbench/st2
+2025-05-08 23:25:05,683 - INFO - PCI 0x0000 run 9: 115.3528s
+2025-05-08 23:25:05,683 - INFO - Running command: ./microbench/st2
+2025-05-08 23:27:04,657 - INFO - PCI 0x0000 run 10: 118.9738s
+2025-05-08 23:27:04,657 - INFO - PCI 0x0000: avg=116.5912s, std=1.9667s
+2025-05-08 23:27:04,657 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-08 23:27:04,658 - INFO - Running command: ./microbench/st2
+2025-05-08 23:29:03,281 - INFO - PCI 0xffff run 1: 118.6226s
+2025-05-08 23:29:03,281 - INFO - Running command: ./microbench/st2
+2025-05-08 23:30:59,832 - INFO - PCI 0xffff run 2: 116.5502s
+2025-05-08 23:30:59,832 - INFO - Running command: ./microbench/st2
+2025-05-08 23:32:53,531 - INFO - PCI 0xffff run 3: 113.6995s
+2025-05-08 23:32:53,532 - INFO - Running command: ./microbench/st2
+2025-05-08 23:34:53,729 - INFO - PCI 0xffff run 4: 120.1969s
+2025-05-08 23:34:53,729 - INFO - Running command: ./microbench/st2
+2025-05-08 23:36:52,130 - INFO - PCI 0xffff run 5: 118.4009s
+2025-05-08 23:36:52,130 - INFO - Running command: ./microbench/st2
+2025-05-08 23:38:52,290 - INFO - PCI 0xffff run 6: 120.1601s
+2025-05-08 23:38:52,290 - INFO - Running command: ./microbench/st2
+2025-05-08 23:40:50,962 - INFO - PCI 0xffff run 7: 118.6712s
+2025-05-08 23:40:50,962 - INFO - Running command: ./microbench/st2
+2025-05-08 23:42:45,736 - INFO - PCI 0xffff run 8: 114.7740s
+2025-05-08 23:42:45,736 - INFO - Running command: ./microbench/st2
+2025-05-08 23:44:43,952 - INFO - PCI 0xffff run 9: 118.2153s
+2025-05-08 23:44:43,952 - INFO - Running command: ./microbench/st2
+2025-05-08 23:46:38,613 - INFO - PCI 0xffff run 10: 114.6606s
+2025-05-08 23:46:38,613 - INFO - PCI 0xffff: avg=117.3951s, std=2.3342s
+2025-05-08 23:46:38,614 - INFO - Processing program: st4
+2025-05-08 23:46:38,614 - INFO - Running original program: st4
+2025-05-08 23:46:38,614 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-08 23:46:38,617 - INFO - Running command: ./microbench/st4
+2025-05-08 23:48:23,936 - INFO - PCI 0x0000 run 1: 105.3197s
+2025-05-08 23:48:23,937 - INFO - Running command: ./microbench/st4
+2025-05-08 23:50:09,353 - INFO - PCI 0x0000 run 2: 105.4167s
+2025-05-08 23:50:09,354 - INFO - Running command: ./microbench/st4
+2025-05-08 23:51:54,424 - INFO - PCI 0x0000 run 3: 105.0707s
+2025-05-08 23:51:54,425 - INFO - Running command: ./microbench/st4
+2025-05-08 23:53:39,534 - INFO - PCI 0x0000 run 4: 105.1094s
+2025-05-08 23:53:39,534 - INFO - Running command: ./microbench/st4
+2025-05-08 23:55:25,153 - INFO - PCI 0x0000 run 5: 105.6188s
+2025-05-08 23:55:25,153 - INFO - Running command: ./microbench/st4
+2025-05-08 23:57:10,052 - INFO - PCI 0x0000 run 6: 104.8985s
+2025-05-08 23:57:10,052 - INFO - Running command: ./microbench/st4
+2025-05-08 23:58:54,853 - INFO - PCI 0x0000 run 7: 104.8009s
+2025-05-08 23:58:54,854 - INFO - Running command: ./microbench/st4
+2025-05-09 00:00:40,130 - INFO - PCI 0x0000 run 8: 105.2761s
+2025-05-09 00:00:40,130 - INFO - Running command: ./microbench/st4
+2025-05-09 00:02:26,852 - INFO - PCI 0x0000 run 9: 106.7221s
+2025-05-09 00:02:26,852 - INFO - Running command: ./microbench/st4
+2025-05-09 00:04:11,776 - INFO - PCI 0x0000 run 10: 104.9241s
+2025-05-09 00:04:11,777 - INFO - PCI 0x0000: avg=105.3157s, std=0.5554s
+2025-05-09 00:04:11,778 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-09 00:04:11,780 - INFO - Running command: ./microbench/st4
+2025-05-09 00:05:56,864 - INFO - PCI 0xffff run 1: 105.0847s
+2025-05-09 00:05:56,865 - INFO - Running command: ./microbench/st4
+2025-05-09 00:07:41,863 - INFO - PCI 0xffff run 2: 104.9981s
+2025-05-09 00:07:41,863 - INFO - Running command: ./microbench/st4
+2025-05-09 00:09:26,897 - INFO - PCI 0xffff run 3: 105.0334s
+2025-05-09 00:09:26,897 - INFO - Running command: ./microbench/st4
+2025-05-09 00:11:11,674 - INFO - PCI 0xffff run 4: 104.7768s
+2025-05-09 00:11:11,674 - INFO - Running command: ./microbench/st4
+2025-05-09 00:12:56,491 - INFO - PCI 0xffff run 5: 104.8167s
+2025-05-09 00:12:56,491 - INFO - Running command: ./microbench/st4
+2025-05-09 00:14:41,899 - INFO - PCI 0xffff run 6: 105.4075s
+2025-05-09 00:14:41,899 - INFO - Running command: ./microbench/st4
+2025-05-09 00:16:26,655 - INFO - PCI 0xffff run 7: 104.7558s
+2025-05-09 00:16:26,655 - INFO - Running command: ./microbench/st4
+2025-05-09 00:18:11,728 - INFO - PCI 0xffff run 8: 105.0730s
+2025-05-09 00:18:11,729 - INFO - Running command: ./microbench/st4
+2025-05-09 00:19:56,885 - INFO - PCI 0xffff run 9: 105.1562s
+2025-05-09 00:19:56,885 - INFO - Running command: ./microbench/st4
+2025-05-09 00:21:42,044 - INFO - PCI 0xffff run 10: 105.1589s
+2025-05-09 00:21:42,044 - INFO - PCI 0xffff: avg=105.0261s, std=0.2015s
+2025-05-09 00:21:42,045 - INFO - Processing program: st8
+2025-05-09 00:21:42,045 - INFO - Running original program: st8
+2025-05-09 00:21:42,045 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-09 00:21:42,047 - INFO - Running command: ./microbench/st8
+2025-05-09 00:23:13,519 - INFO - PCI 0x0000 run 1: 91.4719s
+2025-05-09 00:23:13,519 - INFO - Running command: ./microbench/st8
+2025-05-09 00:24:44,146 - INFO - PCI 0x0000 run 2: 90.6264s
+2025-05-09 00:24:44,146 - INFO - Running command: ./microbench/st8
+2025-05-09 00:26:15,565 - INFO - PCI 0x0000 run 3: 91.4189s
+2025-05-09 00:26:15,565 - INFO - Running command: ./microbench/st8
+2025-05-09 00:27:46,210 - INFO - PCI 0x0000 run 4: 90.6441s
+2025-05-09 00:27:46,210 - INFO - Running command: ./microbench/st8
+2025-05-09 00:29:17,135 - INFO - PCI 0x0000 run 5: 90.9245s
+2025-05-09 00:29:17,135 - INFO - Running command: ./microbench/st8
+2025-05-09 00:30:49,749 - INFO - PCI 0x0000 run 6: 92.6144s
+2025-05-09 00:30:49,750 - INFO - Running command: ./microbench/st8
+2025-05-09 00:32:21,173 - INFO - PCI 0x0000 run 7: 91.4233s
+2025-05-09 00:32:21,173 - INFO - Running command: ./microbench/st8
+2025-05-09 00:33:51,810 - INFO - PCI 0x0000 run 8: 90.6366s
+2025-05-09 00:33:51,810 - INFO - Running command: ./microbench/st8
+2025-05-09 00:35:23,253 - INFO - PCI 0x0000 run 9: 91.4425s
+2025-05-09 00:35:23,253 - INFO - Running command: ./microbench/st8
+2025-05-09 00:36:54,281 - INFO - PCI 0x0000 run 10: 91.0280s
+2025-05-09 00:36:54,282 - INFO - PCI 0x0000: avg=91.2231s, std=0.6043s
+2025-05-09 00:36:54,282 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-09 00:36:54,285 - INFO - Running command: ./microbench/st8
+2025-05-09 00:38:25,518 - INFO - PCI 0xffff run 1: 91.2328s
+2025-05-09 00:38:25,519 - INFO - Running command: ./microbench/st8
+2025-05-09 00:39:58,191 - INFO - PCI 0xffff run 2: 92.6727s
+2025-05-09 00:39:58,192 - INFO - Running command: ./microbench/st8
+2025-05-09 00:41:28,862 - INFO - PCI 0xffff run 3: 90.6708s
+2025-05-09 00:41:28,863 - INFO - Running command: ./microbench/st8
+2025-05-09 00:43:00,180 - INFO - PCI 0xffff run 4: 91.3168s
+2025-05-09 00:43:00,180 - INFO - Running command: ./microbench/st8
+2025-05-09 00:44:31,436 - INFO - PCI 0xffff run 5: 91.2557s
+2025-05-09 00:44:31,436 - INFO - Running command: ./microbench/st8
+2025-05-09 00:46:03,328 - INFO - PCI 0xffff run 6: 91.8923s
+2025-05-09 00:46:03,329 - INFO - Running command: ./microbench/st8
+2025-05-09 00:47:34,778 - INFO - PCI 0xffff run 7: 91.4494s
+2025-05-09 00:47:34,778 - INFO - Running command: ./microbench/st8
+2025-05-09 00:49:05,797 - INFO - PCI 0xffff run 8: 91.0192s
+2025-05-09 00:49:05,798 - INFO - Running command: ./microbench/st8
+2025-05-09 00:50:37,225 - INFO - PCI 0xffff run 9: 91.4272s
+2025-05-09 00:50:37,225 - INFO - Running command: ./microbench/st8
+2025-05-09 00:52:07,932 - INFO - PCI 0xffff run 10: 90.7067s
+2025-05-09 00:52:07,933 - INFO - PCI 0xffff: avg=91.3644s, std=0.5836s
+2025-05-09 00:52:07,933 - INFO - Processing program: st16
+2025-05-09 00:52:07,933 - INFO - Running original program: st16
+2025-05-09 00:52:07,933 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-09 00:52:07,937 - INFO - Running command: ./microbench/st16
+2025-05-09 00:53:28,849 - INFO - PCI 0x0000 run 1: 80.9116s
+2025-05-09 00:53:28,849 - INFO - Running command: ./microbench/st16
+2025-05-09 00:54:49,611 - INFO - PCI 0x0000 run 2: 80.7620s
+2025-05-09 00:54:49,611 - INFO - Running command: ./microbench/st16
+2025-05-09 00:56:10,645 - INFO - PCI 0x0000 run 3: 81.0341s
+2025-05-09 00:56:10,646 - INFO - Running command: ./microbench/st16
+2025-05-09 00:57:31,369 - INFO - PCI 0x0000 run 4: 80.7231s
+2025-05-09 00:57:31,369 - INFO - Running command: ./microbench/st16
+2025-05-09 00:58:52,214 - INFO - PCI 0x0000 run 5: 80.8452s
+2025-05-09 00:58:52,215 - INFO - Running command: ./microbench/st16
+2025-05-09 01:00:14,078 - INFO - PCI 0x0000 run 6: 81.8631s
+2025-05-09 01:00:14,078 - INFO - Running command: ./microbench/st16
+2025-05-09 01:01:34,796 - INFO - PCI 0x0000 run 7: 80.7174s
+2025-05-09 01:01:34,796 - INFO - Running command: ./microbench/st16
+2025-05-09 01:02:55,656 - INFO - PCI 0x0000 run 8: 80.8601s
+2025-05-09 01:02:55,656 - INFO - Running command: ./microbench/st16
+2025-05-09 01:04:16,259 - INFO - PCI 0x0000 run 9: 80.6028s
+2025-05-09 01:04:16,259 - INFO - Running command: ./microbench/st16
+2025-05-09 01:05:37,099 - INFO - PCI 0x0000 run 10: 80.8392s
+2025-05-09 01:05:37,099 - INFO - PCI 0x0000: avg=80.9159s, std=0.3533s
+2025-05-09 01:05:37,099 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-09 01:05:37,103 - INFO - Running command: ./microbench/st16
+2025-05-09 01:06:57,988 - INFO - PCI 0xffff run 1: 80.8856s
+2025-05-09 01:06:57,988 - INFO - Running command: ./microbench/st16
+2025-05-09 01:08:18,093 - INFO - PCI 0xffff run 2: 80.1046s
+2025-05-09 01:08:18,093 - INFO - Running command: ./microbench/st16
+2025-05-09 01:09:38,999 - INFO - PCI 0xffff run 3: 80.9051s
+2025-05-09 01:09:38,999 - INFO - Running command: ./microbench/st16
+2025-05-09 01:10:59,305 - INFO - PCI 0xffff run 4: 80.3057s
+2025-05-09 01:10:59,305 - INFO - Running command: ./microbench/st16
+2025-05-09 01:12:20,261 - INFO - PCI 0xffff run 5: 80.9557s
+2025-05-09 01:12:20,261 - INFO - Running command: ./microbench/st16
+2025-05-09 01:13:40,434 - INFO - PCI 0xffff run 6: 80.1728s
+2025-05-09 01:13:40,434 - INFO - Running command: ./microbench/st16
+2025-05-09 01:15:00,656 - INFO - PCI 0xffff run 7: 80.2219s
+2025-05-09 01:15:00,656 - INFO - Running command: ./microbench/st16
+2025-05-09 01:16:21,577 - INFO - PCI 0xffff run 8: 80.9204s
+2025-05-09 01:16:21,577 - INFO - Running command: ./microbench/st16
+2025-05-09 01:17:41,697 - INFO - PCI 0xffff run 9: 80.1199s
+2025-05-09 01:17:41,697 - INFO - Running command: ./microbench/st16
+2025-05-09 01:19:02,524 - INFO - PCI 0xffff run 10: 80.8268s
+2025-05-09 01:19:02,525 - INFO - PCI 0xffff: avg=80.5418s, std=0.3814s
+2025-05-09 01:19:02,525 - INFO - Processing program: st32
+2025-05-09 01:19:02,526 - INFO - Running original program: st32
+2025-05-09 01:19:02,526 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-09 01:19:02,529 - INFO - Running command: ./microbench/st32
+2025-05-09 01:19:58,373 - INFO - PCI 0x0000 run 1: 55.8434s
+2025-05-09 01:19:58,373 - INFO - Running command: ./microbench/st32
+2025-05-09 01:20:54,386 - INFO - PCI 0x0000 run 2: 56.0134s
+2025-05-09 01:20:54,387 - INFO - Running command: ./microbench/st32
+2025-05-09 01:21:50,197 - INFO - PCI 0x0000 run 3: 55.8101s
+2025-05-09 01:21:50,197 - INFO - Running command: ./microbench/st32
+2025-05-09 01:22:46,843 - INFO - PCI 0x0000 run 4: 56.6458s
+2025-05-09 01:22:46,843 - INFO - Running command: ./microbench/st32
+2025-05-09 01:23:42,742 - INFO - PCI 0x0000 run 5: 55.8990s
+2025-05-09 01:23:42,743 - INFO - Running command: ./microbench/st32
+2025-05-09 01:24:39,369 - INFO - PCI 0x0000 run 6: 56.6268s
+2025-05-09 01:24:39,370 - INFO - Running command: ./microbench/st32
+2025-05-09 01:25:36,881 - INFO - PCI 0x0000 run 7: 57.5111s
+2025-05-09 01:25:36,881 - INFO - Running command: ./microbench/st32
+2025-05-09 01:26:32,903 - INFO - PCI 0x0000 run 8: 56.0214s
+2025-05-09 01:26:32,903 - INFO - Running command: ./microbench/st32
+2025-05-09 01:27:28,735 - INFO - PCI 0x0000 run 9: 55.8316s
+2025-05-09 01:27:28,735 - INFO - Running command: ./microbench/st32
+2025-05-09 01:28:25,152 - INFO - PCI 0x0000 run 10: 56.4167s
+2025-05-09 01:28:25,152 - INFO - PCI 0x0000: avg=56.2619s, std=0.5458s
+2025-05-09 01:28:25,153 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-09 01:28:25,157 - INFO - Running command: ./microbench/st32
+2025-05-09 01:29:21,672 - INFO - PCI 0xffff run 1: 56.5157s
+2025-05-09 01:29:21,673 - INFO - Running command: ./microbench/st32
+2025-05-09 01:30:18,404 - INFO - PCI 0xffff run 2: 56.7311s
+2025-05-09 01:30:18,404 - INFO - Running command: ./microbench/st32
+2025-05-09 01:31:14,295 - INFO - PCI 0xffff run 3: 55.8909s
+2025-05-09 01:31:14,295 - INFO - Running command: ./microbench/st32
+2025-05-09 01:32:10,333 - INFO - PCI 0xffff run 4: 56.0380s
+2025-05-09 01:32:10,334 - INFO - Running command: ./microbench/st32
+2025-05-09 01:33:06,225 - INFO - PCI 0xffff run 5: 55.8909s
+2025-05-09 01:33:06,225 - INFO - Running command: ./microbench/st32
+2025-05-09 01:34:02,391 - INFO - PCI 0xffff run 6: 56.1660s
+2025-05-09 01:34:02,391 - INFO - Running command: ./microbench/st32
+2025-05-09 01:34:58,418 - INFO - PCI 0xffff run 7: 56.0260s
+2025-05-09 01:34:58,418 - INFO - Running command: ./microbench/st32
+2025-05-09 01:35:54,309 - INFO - PCI 0xffff run 8: 55.8910s
+2025-05-09 01:35:54,309 - INFO - Running command: ./microbench/st32
+2025-05-09 01:36:50,928 - INFO - PCI 0xffff run 9: 56.6191s
+2025-05-09 01:36:50,929 - INFO - Running command: ./microbench/st32
+2025-05-09 01:37:46,835 - INFO - PCI 0xffff run 10: 55.9063s
+2025-05-09 01:37:46,836 - INFO - PCI 0xffff: avg=56.1675s, std=0.3295s
+2025-05-09 01:37:46,836 - INFO - Processing program: st64
+2025-05-09 01:37:46,836 - INFO - Running original program: st64
+2025-05-09 01:37:46,836 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-09 01:37:46,838 - INFO - Running command: ./microbench/st64
+2025-05-09 01:38:45,098 - INFO - PCI 0x0000 run 1: 58.2596s
+2025-05-09 01:38:45,098 - INFO - Running command: ./microbench/st64
+2025-05-09 01:39:42,301 - INFO - PCI 0x0000 run 2: 57.2029s
+2025-05-09 01:39:42,302 - INFO - Running command: ./microbench/st64
+2025-05-09 01:40:40,044 - INFO - PCI 0x0000 run 3: 57.7425s
+2025-05-09 01:40:40,044 - INFO - Running command: ./microbench/st64
+2025-05-09 01:41:36,902 - INFO - PCI 0x0000 run 4: 56.8577s
+2025-05-09 01:41:36,903 - INFO - Running command: ./microbench/st64
+2025-05-09 01:42:34,268 - INFO - PCI 0x0000 run 5: 57.3652s
+2025-05-09 01:42:34,268 - INFO - Running command: ./microbench/st64
+2025-05-09 01:43:31,561 - INFO - PCI 0x0000 run 6: 57.2928s
+2025-05-09 01:43:31,561 - INFO - Running command: ./microbench/st64
+2025-05-09 01:44:28,917 - INFO - PCI 0x0000 run 7: 57.3555s
+2025-05-09 01:44:28,917 - INFO - Running command: ./microbench/st64
+2025-05-09 01:45:25,819 - INFO - PCI 0x0000 run 8: 56.9022s
+2025-05-09 01:45:25,819 - INFO - Running command: ./microbench/st64
+2025-05-09 01:46:23,172 - INFO - PCI 0x0000 run 9: 57.3523s
+2025-05-09 01:46:23,172 - INFO - Running command: ./microbench/st64
+2025-05-09 01:47:19,988 - INFO - PCI 0x0000 run 10: 56.8161s
+2025-05-09 01:47:19,989 - INFO - PCI 0x0000: avg=57.3147s, std=0.4374s
+2025-05-09 01:47:19,989 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-09 01:47:19,991 - INFO - Running command: ./microbench/st64
+2025-05-09 01:48:17,372 - INFO - PCI 0xffff run 1: 57.3812s
+2025-05-09 01:48:17,372 - INFO - Running command: ./microbench/st64
+2025-05-09 01:49:14,233 - INFO - PCI 0xffff run 2: 56.8609s
+2025-05-09 01:49:14,233 - INFO - Running command: ./microbench/st64
+2025-05-09 01:50:11,052 - INFO - PCI 0xffff run 3: 56.8189s
+2025-05-09 01:50:11,052 - INFO - Running command: ./microbench/st64
+2025-05-09 01:51:08,219 - INFO - PCI 0xffff run 4: 57.1668s
+2025-05-09 01:51:08,220 - INFO - Running command: ./microbench/st64
+2025-05-09 01:52:05,539 - INFO - PCI 0xffff run 5: 57.3193s
+2025-05-09 01:52:05,539 - INFO - Running command: ./microbench/st64
+2025-05-09 01:53:03,276 - INFO - PCI 0xffff run 6: 57.7372s
+2025-05-09 01:53:03,277 - INFO - Running command: ./microbench/st64
+2025-05-09 01:54:00,636 - INFO - PCI 0xffff run 7: 57.3593s
+2025-05-09 01:54:00,636 - INFO - Running command: ./microbench/st64
+2025-05-09 01:54:58,003 - INFO - PCI 0xffff run 8: 57.3669s
+2025-05-09 01:54:58,004 - INFO - Running command: ./microbench/st64
+2025-05-09 01:55:55,378 - INFO - PCI 0xffff run 9: 57.3740s
+2025-05-09 01:55:55,378 - INFO - Running command: ./microbench/st64
+2025-05-09 01:56:52,190 - INFO - PCI 0xffff run 10: 56.8122s
+2025-05-09 01:56:52,190 - INFO - PCI 0xffff: avg=57.2197s, std=0.3031s
+2025-05-09 01:56:52,191 - INFO - Processing program: st128
+2025-05-09 01:56:52,191 - INFO - Running original program: st128
+2025-05-09 01:56:52,191 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-09 01:56:52,193 - INFO - Running command: ./microbench/st128
+2025-05-09 01:57:51,506 - INFO - PCI 0x0000 run 1: 59.3128s
+2025-05-09 01:57:51,506 - INFO - Running command: ./microbench/st128
+2025-05-09 01:58:50,603 - INFO - PCI 0x0000 run 2: 59.0965s
+2025-05-09 01:58:50,603 - INFO - Running command: ./microbench/st128
+2025-05-09 01:59:50,026 - INFO - PCI 0x0000 run 3: 59.4232s
+2025-05-09 01:59:50,026 - INFO - Running command: ./microbench/st128
+2025-05-09 02:00:49,384 - INFO - PCI 0x0000 run 4: 59.3572s
+2025-05-09 02:00:49,384 - INFO - Running command: ./microbench/st128
+2025-05-09 02:01:48,905 - INFO - PCI 0x0000 run 5: 59.5208s
+2025-05-09 02:01:48,905 - INFO - Running command: ./microbench/st128
+2025-05-09 02:02:48,090 - INFO - PCI 0x0000 run 6: 59.1852s
+2025-05-09 02:02:48,091 - INFO - Running command: ./microbench/st128
+2025-05-09 02:03:47,172 - INFO - PCI 0x0000 run 7: 59.0809s
+2025-05-09 02:03:47,172 - INFO - Running command: ./microbench/st128
+2025-05-09 02:04:46,568 - INFO - PCI 0x0000 run 8: 59.3957s
+2025-05-09 02:04:46,568 - INFO - Running command: ./microbench/st128
+2025-05-09 02:05:45,904 - INFO - PCI 0x0000 run 9: 59.3359s
+2025-05-09 02:05:45,904 - INFO - Running command: ./microbench/st128
+2025-05-09 02:06:45,574 - INFO - PCI 0x0000 run 10: 59.6695s
+2025-05-09 02:06:45,574 - INFO - PCI 0x0000: avg=59.3378s, std=0.1834s
+2025-05-09 02:06:45,575 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-09 02:06:45,578 - INFO - Running command: ./microbench/st128
+2025-05-09 02:07:44,917 - INFO - PCI 0xffff run 1: 59.3386s
+2025-05-09 02:07:44,917 - INFO - Running command: ./microbench/st128
+2025-05-09 02:08:44,455 - INFO - PCI 0xffff run 2: 59.5381s
+2025-05-09 02:08:44,455 - INFO - Running command: ./microbench/st128
+2025-05-09 02:09:43,626 - INFO - PCI 0xffff run 3: 59.1707s
+2025-05-09 02:09:43,626 - INFO - Running command: ./microbench/st128
+2025-05-09 02:10:42,979 - INFO - PCI 0xffff run 4: 59.3525s
+2025-05-09 02:10:42,979 - INFO - Running command: ./microbench/st128
+2025-05-09 02:11:42,243 - INFO - PCI 0xffff run 5: 59.2633s
+2025-05-09 02:11:42,243 - INFO - Running command: ./microbench/st128
+2025-05-09 02:12:41,416 - INFO - PCI 0xffff run 6: 59.1728s
+2025-05-09 02:12:41,416 - INFO - Running command: ./microbench/st128
+2025-05-09 02:13:40,685 - INFO - PCI 0xffff run 7: 59.2692s
+2025-05-09 02:13:40,686 - INFO - Running command: ./microbench/st128
+2025-05-09 02:14:39,880 - INFO - PCI 0xffff run 8: 59.1943s
+2025-05-09 02:14:39,880 - INFO - Running command: ./microbench/st128
+2025-05-09 02:15:39,022 - INFO - PCI 0xffff run 9: 59.1419s
+2025-05-09 02:15:39,022 - INFO - Running command: ./microbench/st128
+2025-05-09 02:16:38,258 - INFO - PCI 0xffff run 10: 59.2353s
+2025-05-09 02:16:38,258 - INFO - PCI 0xffff: avg=59.2677s, std=0.1183s
+2025-05-09 02:16:38,259 - INFO - Processing program: st256
+2025-05-09 02:16:38,259 - INFO - Running original program: st256
+2025-05-09 02:16:38,259 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0x0000
+2025-05-09 02:16:38,260 - INFO - Running command: ./microbench/st256
+2025-05-09 02:17:21,311 - INFO - PCI 0x0000 run 1: 43.0511s
+2025-05-09 02:17:21,312 - INFO - Running command: ./microbench/st256
+2025-05-09 02:18:04,137 - INFO - PCI 0x0000 run 2: 42.8255s
+2025-05-09 02:18:04,138 - INFO - Running command: ./microbench/st256
+2025-05-09 02:18:47,066 - INFO - PCI 0x0000 run 3: 42.9282s
+2025-05-09 02:18:47,066 - INFO - Running command: ./microbench/st256
+2025-05-09 02:19:29,893 - INFO - PCI 0x0000 run 4: 42.8268s
+2025-05-09 02:19:29,893 - INFO - Running command: ./microbench/st256
+2025-05-09 02:20:13,369 - INFO - PCI 0x0000 run 5: 43.4756s
+2025-05-09 02:20:13,369 - INFO - Running command: ./microbench/st256
+2025-05-09 02:20:56,640 - INFO - PCI 0x0000 run 6: 43.2705s
+2025-05-09 02:20:56,640 - INFO - Running command: ./microbench/st256
+2025-05-09 02:21:39,501 - INFO - PCI 0x0000 run 7: 42.8612s
+2025-05-09 02:21:39,502 - INFO - Running command: ./microbench/st256
+2025-05-09 02:22:22,327 - INFO - PCI 0x0000 run 8: 42.8251s
+2025-05-09 02:22:22,327 - INFO - Running command: ./microbench/st256
+2025-05-09 02:23:05,863 - INFO - PCI 0x0000 run 9: 43.5359s
+2025-05-09 02:23:05,863 - INFO - Running command: ./microbench/st256
+2025-05-09 02:23:48,699 - INFO - PCI 0x0000 run 10: 42.8360s
+2025-05-09 02:23:48,700 - INFO - PCI 0x0000: avg=43.0436s, std=0.2814s
+2025-05-09 02:23:48,701 - INFO - Running command: setpci -s 17:00.1 0xe08.l=0xffff
+2025-05-09 02:23:48,704 - INFO - Running command: ./microbench/st256
+2025-05-09 02:24:31,737 - INFO - PCI 0xffff run 1: 43.0331s
+2025-05-09 02:24:31,737 - INFO - Running command: ./microbench/st256
+2025-05-09 02:25:14,661 - INFO - PCI 0xffff run 2: 42.9235s
+2025-05-09 02:25:14,661 - INFO - Running command: ./microbench/st256
+2025-05-09 02:25:57,682 - INFO - PCI 0xffff run 3: 43.0211s
+2025-05-09 02:25:57,682 - INFO - Running command: ./microbench/st256
+2025-05-09 02:26:40,694 - INFO - PCI 0xffff run 4: 43.0119s
+2025-05-09 02:26:40,695 - INFO - Running command: ./microbench/st256
+2025-05-09 02:27:23,603 - INFO - PCI 0xffff run 5: 42.9079s
+2025-05-09 02:27:23,603 - INFO - Running command: ./microbench/st256
+2025-05-09 02:28:06,504 - INFO - PCI 0xffff run 6: 42.9014s
+2025-05-09 02:28:06,505 - INFO - Running command: ./microbench/st256
+2025-05-09 02:28:49,375 - INFO - PCI 0xffff run 7: 42.8703s
+2025-05-09 02:28:49,375 - INFO - Running command: ./microbench/st256
+2025-05-09 02:29:32,552 - INFO - PCI 0xffff run 8: 43.1764s
+2025-05-09 02:29:32,552 - INFO - Running command: ./microbench/st256
+2025-05-09 02:30:15,420 - INFO - PCI 0xffff run 9: 42.8683s
+2025-05-09 02:30:15,421 - INFO - Running command: ./microbench/st256
+2025-05-09 02:30:58,302 - INFO - PCI 0xffff run 10: 42.8812s
+2025-05-09 02:30:58,303 - INFO - PCI 0xffff: avg=42.9595s, std=0.0993s
+2025-05-09 02:30:58,303 - INFO - All workloads completed. Total time: 8h 18m 16s

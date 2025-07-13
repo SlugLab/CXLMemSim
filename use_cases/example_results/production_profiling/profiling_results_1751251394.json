@@ -1,0 +1,69 @@
+[
+  {
+    "workload": "simple_test_baseline_dram",
+    "config": {
+      "name": "simple_test_baseline_dram",
+      "binary": "/bin/sleep",
+      "args": [
+        "1"
+      ],
+      "interval": 1,
+      "timeout": 10,
+      "dram_latency": 85,
+      "capacity": [
+        100
+      ],
+      "topology": "(1)"
+    },
+    "execution_time": 0.05884408950805664,
+    "stdout": "",
+    "stderr": "terminate called after throwing an instance of 'cxxopts::exceptions::no_such_option'\n  what():  Option \u2018i\u2019 does not exist\n",
+    "returncode": -6,
+    "timestamp": "2025-06-29 19:43:14",
+    "metrics": {
+      "local_accesses": 0,
+      "remote_accesses": 0,
+      "average_latency": 0,
+      "bandwidth_utilization": 0,
+      "page_faults": 0
+    }
+  },
+  {
+    "workload": "simple_test_cxl_basic",
+    "config": {
+      "name": "simple_test_cxl_basic",
+      "binary": "/bin/sleep",
+      "args": [
+        "1"
+      ],
+      "interval": 1,
+      "timeout": 10,
+      "dram_latency": 85,
+      "latency": [
+        150,
+        180
+      ],
+      "bandwidth": [
+        30000,
+        20000
+      ],
+      "capacity": [
+        50,
+        50
+      ],
+      "topology": "(1,(2))"
+    },
+    "execution_time": 0.06693840026855469,
+    "stdout": "",
+    "stderr": "terminate called after throwing an instance of 'cxxopts::exceptions::no_such_option'\n  what():  Option \u2018i\u2019 does not exist\n",
+    "returncode": -6,
+    "timestamp": "2025-06-29 19:43:14",
+    "metrics": {
+      "local_accesses": 0,
+      "remote_accesses": 0,
+      "average_latency": 0,
+      "bandwidth_utilization": 0,
+      "page_faults": 0
+    }
+  }
+]

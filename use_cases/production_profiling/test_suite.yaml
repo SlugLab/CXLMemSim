@@ -1,0 +1,21 @@
+parallel_jobs: 2
+
+workloads:
+  - name: "simple_test"
+    binary: "/bin/sleep"
+    args: ["1"]
+    interval: 1
+    timeout: 10
+
+cxl_configurations:
+  - name: "baseline_dram"
+    dram_latency: 85
+    capacity: [100]
+    topology: "(1)"
+    
+  - name: "cxl_basic"
+    dram_latency: 85
+    latency: [150, 180]
+    bandwidth: [30000, 20000]
+    capacity: [50, 50]
+    topology: "(1,(2))"

@@ -1,0 +1,46 @@
+workloads:
+  - name: "test_workload"
+    binary: "/bin/sleep"
+    args: ["2"]
+    interval: 1
+    metric_weights:
+      execution_time: 0.5
+      throughput: 0.3
+      latency: 0.2
+
+hardware_configurations:
+  - name: "baseline_config"
+    local_memory_gb: 128
+    cxl_memory_gb: 0
+    local_dram_latency: 85
+    base_system_cost: 5000
+    dram_cost_per_gb: 8
+    base_power: 200
+    topology: "(1)"
+    memory_distribution: [100]
+    
+  - name: "cxl_config"
+    local_memory_gb: 64
+    cxl_memory_gb: 64
+    local_dram_latency: 85
+    cxl_latency_ns: 150
+    cxl_bandwidth_gbps: 32
+    base_system_cost: 5000
+    dram_cost_per_gb: 8
+    cxl_cost_per_gb: 4
+    cxl_device_cost: 500
+    base_power: 200
+    topology: "(1,(2))"
+    memory_distribution: [50, 50]
+
+requirements:
+  max_budget: 15000
+  min_performance: 1.0
+  optimization_weights:
+    performance: 0.4
+    cost: 0.4
+    power: 0.2
+
+tco_parameters:
+  years: 3
+  electricity_cost_per_kwh: 0.12

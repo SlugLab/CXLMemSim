@@ -1,0 +1,72 @@
+# Endpoint Hotness Demonstration Configuration
+# This configuration demonstrates how hotness affects different CXL endpoints
+
+evaluation_duration: 180  # Longer duration to observe hotness patterns
+
+workloads:
+  - name: "skewed_hotness_workload"
+    type: "database"
+    binary: "./microbench/ld"
+    args: []
+    pebs_period: 5  # Changed from interval to pebs_period
+    dram_latency: 85
+    latency: [150, 180, 200, 250]  # Multiple endpoints with different latencies
+    bandwidth: [30000, 25000, 20000, 15000]  # Decreasing bandwidth for farther endpoints
+    tier_capacities: [64, 64, 64, 64]  # Equal capacity per tier
+    topology: "(1,(2,3,4))"  # 3 CXL endpoints
+    read_write_ratio: 0.8
+    working_set_size: 120  # GB
+    
+  - name: "uniform_hotness_workload"
+    type: "web"
+    binary: "./microbench/random_access"
+    args: []
+    pebs_period: 3
+    dram_latency: 85
+    latency: [120, 140, 160]
+    bandwidth: [40000, 35000, 30000]
+    tier_capacities: [96, 80, 80]
+    topology: "(1,(2,3))"  # 2 CXL endpoints
+    read_write_ratio: 0.9
+    working_set_size: 100
+    
+  - name: "bursty_hotness_workload"
+    type: "analytics"
+    binary: "./workloads/gapbs/pr"
+    args: ["-f", "test.gr"]
+    pebs_period: 10
+    dram_latency: 85
+    latency: [200, 250, 300, 350]
+    bandwidth: [20000, 15000, 10000, 8000]
+    tier_capacities: [32, 96, 96, 32]  # Asymmetric capacities
+    topology: "(1,(2,3,4))"  # 3 CXL endpoints
+    read_write_ratio: 0.6
+    working_set_size: 200
+
+policies_to_evaluate:
+  - "static_balanced"
+  - "hotness_based"
+  - "endpoint_aware_hotness"
+
+# Training data focused on endpoint-specific patterns
+ml_training_data:
+  - memory_intensity: 0.9
+    access_locality: 0.8
+    read_write_ratio: 0.8
+    working_set_size: 120
+    cache_miss_rate: 0.15
+    optimal_allocation: [0.5, 0.3, 0.15, 0.05]  # Decreasing allocation with distance
+    
+  - memory_intensity: 0.5
+    access_locality: 0.7
+    read_write_ratio: 0.9
+    working_set_size: 100
+    cache_miss_rate: 0.2
+    optimal_allocation: [0.4, 0.3, 0.3]  # More uniform for web workload
+    
+  - memory_intensity: 0.7
+    access_locality: 0.5
+    read_write_ratio: 0.6
+    working_set_size: 200
+    cache_miss_rate: 0.3
+    optimal_allocation: [0.2, 0.4, 0.3, 0.1]  # Analytics prefer middle tiers

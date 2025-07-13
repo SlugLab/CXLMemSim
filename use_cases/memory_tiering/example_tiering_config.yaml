@@ -1,0 +1,103 @@
+# Memory Tiering Policy Evaluation Configuration
+
+evaluation_duration: 120  # seconds per policy evaluation
+
+workloads:
+  - name: "memory_intensive_db"
+    type: "database"
+    binary: "./microbench/ld"
+    args: []
+    interval: 5
+    dram_latency: 85
+    latency: [150, 180]  # CXL read/write latency
+    bandwidth: [30000, 25000]  # CXL read/write bandwidth (MB/s)
+    tier_capacities: [128, 128]  # GB for local/CXL tiers
+    topology: "(1,(2))"
+    read_write_ratio: 0.8
+    working_set_size: 80  # GB
+    
+  - name: "analytics_workload"
+    type: "analytics"
+    binary: "./workloads/gapbs/pr"
+    args: ["-f", "test.gr"]
+    interval: 10
+    dram_latency: 85
+    latency: [200, 250]
+    bandwidth: [20000, 15000]
+    tier_capacities: [64, 192]
+    topology: "(1,(2,3))"
+    read_write_ratio: 0.6
+    working_set_size: 150
+    
+  - name: "web_server_simulation"
+    type: "web"
+    binary: "./microbench/random_access"
+    args: []
+    interval: 3
+    dram_latency: 85
+    latency: [120, 140]
+    bandwidth: [40000, 35000]
+    tier_capacities: [96, 160]
+    topology: "(1,(2))"
+    read_write_ratio: 0.9
+    working_set_size: 60
+
+policies_to_evaluate:
+  - "static_balanced"
+  - "static_local_heavy"
+  - "static_cxl_heavy"
+  - "hotness_based"
+  - "endpoint_aware_hotness"
+  - "ml_based"
+  - "adaptive"
+
+# Training data for ML-based policy (synthetic examples)
+ml_training_data:
+  - memory_intensity: 0.8
+    access_locality: 0.9
+    read_write_ratio: 0.8
+    working_set_size: 80
+    cache_miss_rate: 0.15
+    optimal_allocation: [0.7, 0.3]  # 70% local, 30% CXL
+    
+  - memory_intensity: 0.4
+    access_locality: 0.6
+    read_write_ratio: 0.6
+    working_set_size: 150
+    cache_miss_rate: 0.25
+    optimal_allocation: [0.3, 0.7]  # 30% local, 70% CXL
+    
+  - memory_intensity: 0.9
+    access_locality: 0.8
+    read_write_ratio: 0.9
+    working_set_size: 60
+    cache_miss_rate: 0.1
+    optimal_allocation: [0.8, 0.2]  # 80% local, 20% CXL
+    
+  - memory_intensity: 0.6
+    access_locality: 0.7
+    read_write_ratio: 0.7
+    working_set_size: 100
+    cache_miss_rate: 0.2
+    optimal_allocation: [0.5, 0.5]  # Balanced
+    
+  - memory_intensity: 0.3
+    access_locality: 0.5
+    read_write_ratio: 0.5
+    working_set_size: 200
+    cache_miss_rate: 0.3
+    optimal_allocation: [0.2, 0.8]  # 20% local, 80% CXL
+    
+  - memory_intensity: 0.7
+    access_locality: 0.85
+    read_write_ratio: 0.75
+    working_set_size: 90
+    cache_miss_rate: 0.12
+    optimal_allocation: [0.65, 0.35]
+    
+  - memory_intensity: 0.5
+    access_locality: 0.65
+    read_write_ratio: 0.65
+    working_set_size: 120
+    cache_miss_rate: 0.22
+    optimal_allocation: [0.45, 0.55]

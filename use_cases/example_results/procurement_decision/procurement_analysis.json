@@ -1,0 +1,58 @@
+{
+  "results": [
+    {
+      "config": {
+        "name": "baseline_config",
+        "local_memory_gb": 128,
+        "cxl_memory_gb": 0,
+        "local_dram_latency": 85,
+        "base_system_cost": 5000,
+        "dram_cost_per_gb": 8,
+        "base_power": 200,
+        "topology": "(1)",
+        "memory_distribution": [
+          100
+        ]
+      },
+      "metrics": {},
+      "performance_score": 0,
+      "total_cost": 6024,
+      "power_estimate": 248.0,
+      "cost_per_performance": Infinity,
+      "hardware_name": "baseline_config",
+      "workload_name": "test_workload"
+    },
+    {
+      "config": {
+        "name": "cxl_config",
+        "local_memory_gb": 64,
+        "cxl_memory_gb": 64,
+        "local_dram_latency": 85,
+        "cxl_latency_ns": 150,
+        "cxl_bandwidth_gbps": 32,
+        "base_system_cost": 5000,
+        "dram_cost_per_gb": 8,
+        "cxl_cost_per_gb": 4,
+        "cxl_device_cost": 500,
+        "base_power": 200,
+        "topology": "(1,(2))",
+        "memory_distribution": [
+          50,
+          50
+        ]
+      },
+      "metrics": {},
+      "performance_score": 0,
+      "total_cost": 6268,
+      "power_estimate": 253.2,
+      "cost_per_performance": Infinity,
+      "hardware_name": "cxl_config",
+      "workload_name": "test_workload"
+    }
+  ],
+  "recommendation": {
+    "recommendation": "No configuration meets all requirements",
+    "suggestion": "Consider relaxing constraints or exploring custom configurations"
+  },
+  "timestamp": "2025-06-30T18:13:07.869697"
+}

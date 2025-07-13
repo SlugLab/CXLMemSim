@@ -1,0 +1,8 @@
+Production Workload Profiling Summary
+==================================================
+
+Total configurations tested: 2
+Average execution time: 0.54 seconds
+Average remote access ratio: nan%
+Average memory latency: 0.00 ns
+Average bandwidth utilization: 0.00%

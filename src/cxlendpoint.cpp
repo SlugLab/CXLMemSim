@@ -623,9 +623,7 @@ void CXLMemExpander::process_queued_requests(uint64_t current_time) {
 double CXLMemExpander::calculate_congestion_delay(uint64_t timestamp) {
     // Calculate congestion based on queue occupancy
     double queue_utilization = static_cast<double>(request_queue_.size()) / MAX_QUEUE_SIZE;
-   git add src/cxlendpoint.cpp
-   git add  src/rob.cc
-   git add  src/rob.cpp
+
     // Non-linear congestion model
     if (queue_utilization < 0.5) {
         return 0.0;  // No congestion

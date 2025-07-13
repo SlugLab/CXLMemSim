@@ -13,12 +13,17 @@ cxlsim = [
     70038.14, 1452.55, 2011.24, 501.4, 1455.345
 ]
 
+cxlsim_std = [
+    10.0, 100.0, 300.0, 340.0, 200.0, 100.0,
+    10000.0, 100.0, 100.0, 100.0, 100.0
+]
+
 # Real latency values
 real = [
      19.628, 573.134, 1138.34, 1773.22, 850.62, 1510.90,
      77340.14, 1333.78, 2347.19, 527.4, 1558.534
 ]
-
+cxlsim_std = [x / y for x, y in zip(cxlsim_std, real)]
 # Normalize: CXLMemSim / Real
 normalized = [c / r for c, r in zip(cxlsim, real)]
 
@@ -27,7 +32,7 @@ width = 0.6
 
 # Plotting normalized bar chart
 fig, ax = plt.subplots(figsize=(14, 6))
-bars = ax.bar(x, normalized, width, color='skyblue')
+bars = ax.bar(x, normalized, width, color='skyblue', yerr=cxlsim_std, capsize=5)
 
 # Annotate values above bars
 for i, val in enumerate(normalized):

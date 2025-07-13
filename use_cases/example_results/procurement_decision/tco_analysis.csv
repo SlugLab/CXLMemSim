@@ -1,0 +1,3 @@
+Hardware,Initial Cost,Annual Electricity,Annual Maintenance,3-Year TCO
+baseline_config,6024,260.69759999999997,120.48,7167.5328
+cxl_config,6268,266.16383999999994,125.36,7442.5715199999995

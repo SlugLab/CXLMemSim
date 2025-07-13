@@ -1,0 +1,29 @@
+evaluation_duration: 30
+
+workloads:
+  - name: "test_memory_workload"
+    type: "general"
+    binary: "/bin/sleep"
+    args: ["2"]
+    interval: 2
+    dram_latency: 85
+    latency: [150, 180]
+    bandwidth: [30000, 25000]
+    tier_capacities: [64, 64]
+    topology: "(1,(2))"
+    read_write_ratio: 0.7
+    working_set_size: 32
+
+policies_to_evaluate:
+  - "static_balanced"
+  - "static_local_heavy"
+  - "hotness_based"
+  - "endpoint_aware_hotness"
+
+ml_training_data:
+  - memory_intensity: 0.5
+    access_locality: 0.7
+    read_write_ratio: 0.7
+    working_set_size: 32
+    cache_miss_rate: 0.2
+    optimal_allocation: [0.5, 0.5]

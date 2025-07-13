@@ -1,0 +1,356 @@
+[
+  {
+    "policy": "static_balanced",
+    "workload": "test_memory_workload",
+    "results": [
+      {
+        "timestamp": 1.0103063583374023,
+        "allocation": [
+          0.5,
+          0.5
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.11363243255553607,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.5,
+            0.5
+          ]
+        }
+      },
+      {
+        "timestamp": 7.022769212722778,
+        "allocation": [
+          0.5,
+          0.5
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.30053149161086257,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.5,
+            0.5
+          ]
+        }
+      },
+      {
+        "timestamp": 13.03469967842102,
+        "allocation": [
+          0.5,
+          0.5
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.3109347438395108,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.5,
+            0.5
+          ]
+        }
+      },
+      {
+        "timestamp": 19.047276973724365,
+        "allocation": [
+          0.5,
+          0.5
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.49023936789347644,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.5,
+            0.5
+          ]
+        }
+      },
+      {
+        "timestamp": 25.06049108505249,
+        "allocation": [
+          0.5,
+          0.5
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.42606732788055734,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.5,
+            0.5
+          ]
+        }
+      }
+    ],
+    "summary": {
+      "avg_performance": 0.0,
+      "performance_std": 0.0,
+      "min_performance": 0,
+      "max_performance": 0,
+      "num_evaluations": 5
+    }
+  },
+  {
+    "policy": "static_local_heavy",
+    "workload": "test_memory_workload",
+    "results": [
+      {
+        "timestamp": 1.0116851329803467,
+        "allocation": [
+          0.8,
+          0.2
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.20050226740755253,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.8,
+            0.2
+          ]
+        }
+      },
+      {
+        "timestamp": 7.023711919784546,
+        "allocation": [
+          0.8,
+          0.2
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.10231451908460787,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.8,
+            0.2
+          ]
+        }
+      },
+      {
+        "timestamp": 13.037542581558228,
+        "allocation": [
+          0.8,
+          0.2
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.2571140417774656,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.8,
+            0.2
+          ]
+        }
+      },
+      {
+        "timestamp": 19.049858331680298,
+        "allocation": [
+          0.8,
+          0.2
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.4668371117286685,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.8,
+            0.2
+          ]
+        }
+      },
+      {
+        "timestamp": 25.06332516670227,
+        "allocation": [
+          0.8,
+          0.2
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.4629706128523687,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.8,
+            0.2
+          ]
+        }
+      }
+    ],
+    "summary": {
+      "avg_performance": 0.0,
+      "performance_std": 0.0,
+      "min_performance": 0,
+      "max_performance": 0,
+      "num_evaluations": 5
+    }
+  },
+  {
+    "policy": "hotness_based",
+    "workload": "test_memory_workload",
+    "results": [
+      {
+        "timestamp": 1.0104162693023682,
+        "allocation": [
+          0.5,
+          0.5
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.25045482006647185,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.5,
+            0.5
+          ]
+        }
+      },
+      {
+        "timestamp": 7.025171756744385,
+        "allocation": [
+          0.5,
+          0.5
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.10139891164935258,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.5,
+            0.5
+          ]
+        }
+      },
+      {
+        "timestamp": 13.037483930587769,
+        "allocation": [
+          0.5,
+          0.5
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.20654857207811533,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.5,
+            0.5
+          ]
+        }
+      },
+      {
+        "timestamp": 19.05013132095337,
+        "allocation": [
+          0.5,
+          0.5
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.4313154424321294,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.5,
+            0.5
+          ]
+        }
+      },
+      {
+        "timestamp": 25.061604022979736,
+        "allocation": [
+          0.5,
+          0.5
+        ],
+        "access_pattern": {
+          "hot_page_ratio": 0.4880103118255742,
+          "access_locality": 0.6,
+          "read_write_ratio": 0.7,
+          "cache_miss_rate": 0.14
+        },
+        "performance": {
+          "metrics": {},
+          "score": 0,
+          "allocation": [
+            0.5,
+            0.5
+          ]
+        }
+      }
+    ],
+    "summary": {
+      "avg_performance": 0.0,
+      "performance_std": 0.0,
+      "min_performance": 0,
+      "max_performance": 0,
+      "num_evaluations": 5
+    }
+  }
+]
