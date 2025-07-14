@@ -10,6 +10,19 @@ This directory contains the integration between QEMU and CXLMemSim, allowing QEM
 
 ## Building
 
+### Using CMake (Recommended)
+
+```bash
+cd qemu_integration
+mkdir build
+cd build
+cmake ..
+make -j$(nproc)
+sudo make install
+```
+
+### Using Make (Legacy)
+
 ```bash
 cd qemu_integration
 make
@@ -41,8 +54,20 @@ export CXL_MEMSIM_PORT=9999
 
 - **Cacheline-granular access**: All memory operations are performed at 64-byte cacheline granularity
 - **Hotness tracking**: Tracks access frequency for each 4KB page
-- **Latency simulation**: Uses CXLMemSim's latency calculation based on topology
-- **Statistics**: Dumps hotness statistics on exit
+- **Latency simulation**: Configurable latency models based on topology
+- **Statistics**: Comprehensive access statistics and performance metrics
+- **Multiple server implementations**:
+  - `cxlmemsim_server`: Simple server with basic latency modeling
+  - `cxlmemsim_server_advanced`: Advanced server with topology-aware latency
+
+### Advanced Server Features
+
+The advanced server (`cxlmemsim_server_advanced`) provides:
+- Topology file support for configuring multiple memory tiers
+- Per-page access statistics (read/write counts and bytes)
+- Periodic statistics reporting
+- Memory usage tracking
+- Hot page identification
 
 ## Protocol
 
