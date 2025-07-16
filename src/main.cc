@@ -11,7 +11,9 @@
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_OFF
 #include "cxlendpoint.h"
 #include "helper.h"
+#ifndef SERVER_MODE
 #include "monitor.h"
+#endif
 #include "policy.h"
 #include <cerrno>
 #include <cmath>
@@ -27,7 +29,9 @@
 #include <unistd.h>
 Helper helper{};
 CXLController *controller;
+#ifndef SERVER_MODE
 Monitors *monitors;
+#endif
 auto cha_mapping = std::vector{0, 1, 2, 3, 4, 5, 6, 7, 8};
 int main(int argc, char *argv[]) {
     spdlog::cfg::load_env_levels();
@@ -205,7 +209,9 @@ int main(int argc, char *argv[]) {
         helper.used_cpu.push_back(cpuset[j]);
         helper.used_cha.push_back(cpuset[j]);
     }
+#ifndef SERVER_MODE
     monitors = new Monitors{tnum, &use_cpuset};
+#endif
 
     /** Reinterpret the input for the argv argc */
     char cmd_buf[1024] = {0};

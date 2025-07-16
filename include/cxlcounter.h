@@ -14,7 +14,7 @@
 #include <atomic>
 #include <concepts>
 #include <cstdint>
-#include <expected>
+#include <optional>
 #include <format>
 #include <source_location>
 #include <string>
@@ -160,8 +160,8 @@ public:
     // 统计方法
     constexpr uint64_t total_operations() const noexcept { return load + store + migrate_in + migrate_out + hit_old; }
 
-    // 使用C++23的expected获取操作结果
-    std::expected<uint64_t, std::string> safe_get(EventType type) const noexcept {
+    // 获取操作结果
+    std::optional<uint64_t> safe_get(EventType type) const noexcept {
         switch (type) {
         case EventType::Load:
             return load;
@@ -174,7 +174,7 @@ public:
         case EventType::HitOld:
             return hit_old;
         default:
-            return std::unexpected(std::string("Invalid event type for CXLMemExpanderEvent"));
+            return std::nullopt;
         }
     }
 };

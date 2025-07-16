@@ -11,8 +11,9 @@
 
 #ifndef CXLMEMSIM_MONITOR_H
 #define CXLMEMSIM_MONITOR_H
-
+#ifdef SERVER_MODE
 #include "bpftimeruntime.h"
+#endif
 #include "cxlcontroller.h"
 #include "helper.h"
 #include "pebs.h"
@@ -69,7 +70,9 @@ public:
     bool is_process;
     PEBS *pebs_ctx{};
     LBR *lbr_ctx{};
+#ifdef SERVER_MODE
     BpfTimeRuntime *bpftime_ctx{};
+#endif
 
     Monitor(const Monitor &other)
         : tgid(other.tgid), tid(other.tid), cpu_core(other.cpu_core), wanted_delay(other.wanted_delay),
@@ -78,8 +81,11 @@ public:
           after(nullptr), // Will be set after copying elements
           total_delay(other.total_delay), start_exec_ts(other.start_exec_ts), end_exec_ts(other.end_exec_ts),
           is_process(other.is_process), pebs_ctx(other.pebs_ctx ? new PEBS(*other.pebs_ctx) : nullptr),
-          lbr_ctx(other.lbr_ctx ? new LBR(*other.lbr_ctx) : nullptr),
-          bpftime_ctx(other.bpftime_ctx ? new BpfTimeRuntime(*other.bpftime_ctx) : nullptr) {
+          lbr_ctx(other.lbr_ctx ? new LBR(*other.lbr_ctx) : nullptr)
+#ifdef SERVER_MODE
+          , bpftime_ctx(other.bpftime_ctx ? new BpfTimeRuntime(*other.bpftime_ctx) : nullptr)
+#endif
+          {
         status.store(other.status.load());
         std::copy(std::begin(other.elem), std::end(other.elem), std::begin(elem));
         before = &elem[0];

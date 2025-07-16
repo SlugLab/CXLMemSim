@@ -17,9 +17,12 @@
 #include <linux/bpf.h>
 #include <string>
 #include <sys/types.h>
+#ifdef HAVE_BPFTIME
 #include "bpftime_config.hpp"
 #include "bpftime_logger.hpp"
 #include "bpftime_shm.hpp"
+#endif
+#ifdef HAVE_BPFTIME
 template <typename K, typename V>
 class BPFUpdater {
 public:
@@ -48,6 +51,7 @@ public:
         return item2->is_locked;
     }
 };
+#endif
 class BpfTimeRuntime {
 public:
     BpfTimeRuntime(pid_t, std::string);

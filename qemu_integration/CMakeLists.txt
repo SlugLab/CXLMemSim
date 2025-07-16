@@ -14,16 +14,16 @@ include_directories(
 )
 
 # QEMU interception library
-add_library(CXLMemSimClient SHARED
+add_library(CXLMemSim SHARED
     src/qemu_cxl_memsim.c
     src/qemu_init_wrapper.c
 )
 
-target_link_libraries(CXLMemSimClient
+target_link_libraries(CXLMemSim
     pthread
 )
 
-set_target_properties(CXLMemSimClient PROPERTIES
+set_target_properties(CXLMemSim PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 

@@ -1,13 +1,13 @@
 #!/bin/bash
 
-QEMU_BINARY=${QEMU_BINARY:-qemu-system-x86_64}
+QEMU_BINARY=$PWD/../lib/qemu/build/qemu-system-x86_64
 CXL_MEMSIM_HOST=${CXL_MEMSIM_HOST:-127.0.0.1}
 CXL_MEMSIM_PORT=${CXL_MEMSIM_PORT:-9999}
 VM_MEMORY=${VM_MEMORY:-2G}
 CXL_MEMORY=${CXL_MEMORY:-4G}
 DISK_IMAGE=${DISK_IMAGE:-disk.qcow2}
 
-export 【=/usr/local/lib/libCXLMemSim.so
+export LD_PRELOAD=/usr/local/lib/libCXLMemSim.so
 export CXL_MEMSIM_HOST=$CXL_MEMSIM_HOST
 export CXL_MEMSIM_PORT=$CXL_MEMSIM_PORT
 

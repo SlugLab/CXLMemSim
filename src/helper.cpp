@@ -11,7 +11,9 @@
 
 #include "helper.h"
 #include <fstream>
+#ifndef SERVER_MODE
 #include <monitor.h>
+#endif
 #include <signal.h>
 #include <string>
 #include <vector>
@@ -122,8 +124,10 @@ Helper::Helper() {
 }
 void Helper::noop_handler(int) { ; }
 void Helper::suspend_handler(int) {
+#ifndef SERVER_MODE
     for (auto &m : monitors->mon)
         m.status = MONITOR_SUSPEND;
+#endif
 }
 void Helper::detach_children() {
     struct sigaction sa {};

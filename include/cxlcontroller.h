@@ -253,13 +253,17 @@ public:
     double calculate_latency(const std::vector<std::tuple<uint64_t, uint64_t>> &elem,
                              double dramlatency) override; // traverse the tree to calculate the latency
     double calculate_bandwidth(const std::vector<std::tuple<uint64_t, uint64_t>> &elem) override;
+#ifndef SERVER_MODE
     void insert_one(thread_info &t_info, lbr &lbr);
     int insert(uint64_t timestamp, uint64_t tid, lbr lbrs[32], cntr counters[32]);
+#endif
     int insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint64_t virt_addr, int index) override;
     void delete_entry(uint64_t addr, uint64_t length) override;
+#ifndef SERVER_MODE
     void set_stats(mem_stats stats);
     void set_process_info(const proc_info &process_info);
     void set_thread_info(const proc_info &thread_info);
+#endif
     void perform_migration();
     // 添加缓存访问方法
     std::optional<uint64_t> access_cache(uint64_t addr, uint64_t timestamp) { return lru_cache.get(addr, timestamp); }
