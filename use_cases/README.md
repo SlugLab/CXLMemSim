@@ -1,46 +1,50 @@
-# CXLMemSim Use Cases Implementation
+# CXLMemSim Use Cases: Advanced Topology and Hotness-Based Optimization
 
-This directory contains three practical use case implementations that demonstrate CXLMemSim's advantages over traditional simulators like gem5 for real-world CXL memory evaluation.
+This directory contains three cutting-edge use case implementations that leverage CXLMemSim's capabilities for intelligent CXL memory system optimization based on topology awareness and hotness prediction.
 
 ## 🚀 Use Cases Overview
 
-### 1. Production Workload Profiling (`production_profiling/`)
-**Performance advantage over gem5**: Orders of magnitude faster execution enables profiling of real production applications
+### 1. Topology-Guided Hardware Procurement (`topology_guided_procurement/`)
+**Purpose**: Make data-driven hardware purchasing decisions based on workload hotness patterns and topology optimization
 
-- **Purpose**: Profile production applications with various CXL configurations at scale
+- **Key Innovation**: Predicts optimal CXL topology configurations before hardware purchase
 - **Key Benefits**: 
-  - Works with closed-source binaries and large datasets
-  - Runs continuous performance regression testing in CI/CD pipelines
-  - Enables realistic workload analysis in practical timeframes
+  - Evaluates hardware options based on predicted workload hotness distributions
+  - Compares different topology types (flat, hierarchical, star, mesh) for your specific workloads
+  - Provides TCO analysis including performance-per-dollar metrics
+  - Generates procurement recommendations with confidence scores
 
-### 2. Hardware Procurement Decision Support (`procurement_decision/`)
-**Accuracy advantage**: Calibrated against gem5 for small workloads, then scaled to full applications
+### 2. Predictive Topology and Placement Optimization (`predictive_placement/`)
+**Purpose**: Uses ML to predict optimal data placement across CXL topology based on access patterns
 
-- **Purpose**: Make data-driven CXL hardware purchasing decisions
+- **Key Innovation**: Deep learning model predicts future access patterns and optimizes placement
 - **Key Benefits**:
-  - Evaluate multiple hardware configurations rapidly
-  - Cost/performance/power analysis with TCO calculations
-  - Risk-free evaluation before hardware investment
+  - Analyzes page-level access patterns to predict hotness
+  - Recommends data placement across CXL endpoints for optimal performance
+  - Provides migration plans with prioritization based on expected benefit
+  - Considers topology structure in placement decisions
 
-### 3. Dynamic Memory Tiering Policies (`memory_tiering/`)
-**Speed + Accuracy**: Fast enough for iterative policy development with sufficient accuracy for meaningful results
+### 3. Dynamic Migration Policy Engine (`dynamic_migration/`)
+**Purpose**: Implements intelligent data migration policies with real-time hotness monitoring
 
-- **Purpose**: Develop and test intelligent memory placement and migration algorithms
+- **Key Innovation**: Adaptive policies that learn from migration outcomes and adjust strategies
 - **Key Benefits**:
-  - Machine learning-based policy optimization
-  - Adaptive policies that learn from workload behavior
-  - Rapid prototyping of tiering strategies
+  - Multiple migration policies: Conservative, Balanced, Aggressive, Adaptive, Predictive
+  - Real-time trigger detection: hotness thresholds, load imbalance, congestion
+  - Policy evaluation framework to find optimal strategy for your workload
+  - Continuous learning from migration success/failure
 
 ## 📋 Prerequisites
 
 ### System Requirements
-- Linux with CXL support (kernel 6.11+)
+- Linux with kernel 5.15+ (CXL support)
 - Python 3.8+
 - Built CXLMemSim binary
+- At least 16GB RAM for ML model training
 
 ### Python Dependencies
 ```bash
-pip install pandas matplotlib numpy pyyaml scikit-learn
+pip install pandas matplotlib numpy pyyaml scikit-learn torch seaborn
 ```
 
 ### Building CXLMemSim
@@ -52,226 +56,210 @@ cmake .. && make -j$(nproc)
 
 ## 🏃 Quick Start
 
-### 1. Production Workload Profiling
+### 1. Topology-Guided Hardware Procurement
 
 ```bash
-# Run example profiling suite
-cd use_cases/production_profiling
-python3 production_profiler.py \
+cd use_cases/topology_guided_procurement
+python3 topology_procurement_advisor.py \
     --cxlmemsim ../../build/CXLMemSim \
-    --config example_suite.yaml \
-    --output ./results
-
-# For CI/CD integration
-./ci_profiling.sh
-```
-
-**Example Output**: Performance comparison charts, regression detection, and automated reports suitable for continuous integration workflows.
-
-### 2. Hardware Procurement Analysis
-
-```bash
-# Run procurement decision analysis
-cd use_cases/procurement_decision
-python3 procurement_analyzer.py \
-    --cxlmemsim ../../build/CXLMemSim \
-    --config example_procurement.yaml \
+    --workloads workload_requirements.yaml \
+    --constraints procurement_constraints.yaml \
     --output ./procurement_results
 ```
 
 **Example Output**: 
-- Cost vs performance scatter plots
-- TCO analysis over 3-5 years
-- Hardware recommendations based on requirements
-- Power consumption estimates
+- Hardware comparison charts showing performance vs cost
+- TCO analysis over 3 years
+- Ranked recommendations based on workload fit
+- Risk assessment for each option
 
-### 3. Memory Tiering Policy Evaluation
+### 2. Predictive Topology and Placement Optimization
 
 ```bash
-# Compare different tiering policies
-cd use_cases/memory_tiering
-python3 tiering_policy_engine.py \
+cd use_cases/predictive_placement
+python3 topology_placement_predictor.py \
     --cxlmemsim ../../build/CXLMemSim \
-    --config example_tiering_config.yaml \
-    --output ./tiering_results
+    --topology topology_config.yaml \
+    --workload workload_trace.yaml \
+    --output ./placement_results
 ```
 
-**Example Output**: Policy performance comparisons, ML-based optimization, and adaptive learning results.
+**Example Output**:
+- Placement distribution visualizations
+- Migration flow matrix
+- Prioritized migration plan with expected improvements
+- Performance impact predictions
 
-## 📊 Key Advantages Over gem5
+### 3. Dynamic Migration Policy Evaluation
 
-| Aspect | CXLMemSim | gem5 | Advantage |
-|--------|-----------|------|-----------|
-| **Speed** | Orders of magnitude faster | Cycle-accurate (slow) | ✅ Production-scale evaluation |
-| **Real Applications** | Any binary | Requires porting | ✅ Closed-source support |
-| **CI/CD Integration** | Minutes per run | Hours to days | ✅ Automated testing |
-| **Hardware Variety** | Easy configuration | Complex setup | ✅ Rapid prototyping |
-| **Calibration** | Against gem5/hardware | Self-contained | ✅ Accuracy when needed |
+```bash
+cd use_cases/dynamic_migration
+# Evaluate all policies
+python3 migration_policy_engine.py \
+    --cxlmemsim ../../build/CXLMemSim \
+    --topology migration_topology.yaml \
+    --evaluate \
+    --duration 300 \
+    --output ./migration_results
+
+# Or run with specific policy
+python3 migration_policy_engine.py \
+    --cxlmemsim ../../build/CXLMemSim \
+    --topology migration_topology.yaml \
+    --policy adaptive \
+    --output ./migration_results
+```
+
+**Example Output**:
+- Policy comparison charts (success rate, efficiency, activity)
+- Migration pattern analysis
+- Policy recommendations based on workload characteristics
+- Real-time migration statistics
+
+## 📊 Key Advantages
+
+| Use Case | Traditional Approach | CXLMemSim Advantage |
+|----------|---------------------|---------------------|
+| **Hardware Procurement** | Overprovisioning based on peak load | Precise sizing based on hotness prediction |
+| **Data Placement** | Static allocation or simple LRU | ML-based prediction of future access patterns |
+| **Migration Policy** | Fixed thresholds | Adaptive policies that learn and improve |
 
 ## 🔧 Configuration Guide
 
-### Production Profiling Configuration
+### Hardware Procurement Configuration
 ```yaml
 workloads:
-  - name: "my_app"
-    binary: "/path/to/application"
-    args: ["--config", "production.conf"]
-    timeout: 300
-
-cxl_configurations:
-  - name: "baseline"
-    capacity: [100, 0]  # All local
-  - name: "cxl_50_50"
-    capacity: [50, 50]
-    latency: [150, 180]
-    bandwidth: [30000, 25000]
+  - name: "production_database"
+    type: "database"
+    working_set_size: 800  # GB
+    latency_critical: true
+    annual_growth_rate: 0.3
+    
+constraints:
+  max_budget: 150000
+  min_performance_score: 0.7
+  max_power_consumption_kw: 5.0
 ```
 
-### Procurement Analysis Configuration
+### Placement Optimization Configuration
 ```yaml
-hardware_configurations:
-  - name: "config_name"
-    local_memory_gb: 256
-    cxl_memory_gb: 256
-    cxl_latency_ns: 150
-    cxl_bandwidth_gbps: 64
-    base_system_cost: 8000
-    cxl_cost_per_gb: 4
-
-requirements:
-  max_budget: 25000
-  min_performance: 5.0
-  optimization_weights:
-    performance: 0.4
-    cost: 0.4
-    power: 0.2
+pages:
+  - id: 1001
+    access_count: 10000
+    pattern: "temporal"
+    current_location: "endpoint_3"
+    heat_score: 0.95
 ```
 
-### Tiering Policy Configuration
+### Migration Policy Configuration
 ```yaml
+thresholds:
+  hotness_trigger: 0.8
+  imbalance_trigger: 0.3
+  congestion_trigger: 0.9
+  
+policy_parameters:
+  adaptive:
+    learning_rate: 0.1
+    history_window: 100
+```
+
+## 📈 Understanding Results
+
+### Procurement Recommendations
+- **Performance Score**: 0-1 scale, higher is better
+- **TCO**: Total cost including power over 3 years
+- **Topology Fit**: How well the topology matches your workload's hotness distribution
+
+### Placement Optimization
+- **Expected Improvement**: Percentage performance gain from migration
+- **Confidence Score**: Reliability of the prediction (0-1)
+- **Migration Priority**: High/Medium/Low based on benefit-cost ratio
+
+### Migration Policies
+- **Success Rate**: Percentage of migrations that improved performance
+- **Benefit/Cost Ratio**: Performance gain per unit of migration overhead
+- **Trigger Distribution**: Which conditions cause migrations
+
+## 🔬 Advanced Features
+
+### 1. Custom Hotness Prediction Models
+```python
+# Train your own hotness predictor
+predictor.train_hotness_predictor(training_data)
+```
+
+### 2. Multi-Workload Optimization
+```yaml
+# Optimize for multiple concurrent workloads
 workloads:
-  - name: "workload_name"
-    type: "database"  # or "analytics", "web"
-    binary: "./my_app"
-    tier_capacities: [128, 128]  # GB per tier
-
-policies_to_evaluate:
-  - "static_balanced"
-  - "hotness_based"
-  - "ml_based"
-  - "adaptive"
+  - name: "oltp_database"
+    weight: 0.6
+  - name: "analytics_batch"
+    weight: 0.4
 ```
 
-## 📈 Interpreting Results
-
-### Production Profiling Results
-- **Performance Trends**: Identify optimal CXL configurations per workload
-- **Regression Detection**: Catch performance degradations in CI
-- **Scaling Insights**: Understand which applications benefit from CXL
-
-### Procurement Analysis Results
-- **Cost Efficiency**: Find sweet spot between performance and cost
-- **TCO Projections**: Include electricity and maintenance costs
-- **Recommendation Engine**: Data-driven hardware selection
-
-### Tiering Policy Results
-- **Policy Performance**: Compare static vs adaptive vs ML approaches
-- **Workload Sensitivity**: Understand which policies work for which workloads
-- **Optimization Opportunities**: Identify areas for custom policy development
-
-## 🧪 Validation and Calibration
-
-### Calibrating Against gem5
-```bash
-# Generate calibration data with gem5 (small workloads)
-python3 script/calibrate_memory_latency.py \
-    --gem5-binary /path/to/gem5 \
-    --workload ./microbench/simple \
-    --output calibration.json
-
-# Use calibration in CXLMemSim
-python3 production_profiler.py \
-    --calibration calibration.json \
-    --cxlmemsim ./build/CXLMemSim
+### 3. Power-Aware Migration
+```python
+# Consider power consumption in migration decisions
+engine.set_power_budget(max_watts=1000)
 ```
-
-### Validating Against Real Hardware
-When CXL hardware is available, validate CXLMemSim predictions:
-1. Run identical workloads on real CXL systems
-2. Compare latency and bandwidth characteristics
-3. Adjust CXLMemSim parameters for better accuracy
 
 ## 🚦 Integration Examples
 
-### GitHub Actions CI/CD
+### Kubernetes Integration
 ```yaml
-name: CXL Performance Regression
-on: [push, pull_request]
-jobs:
-  cxl-performance:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Run CXL profiling
-        run: ./use_cases/production_profiling/ci_profiling.sh
-      - name: Upload results
-        uses: actions/upload-artifact@v3
-        with:
-          name: cxl-performance-results
-          path: use_cases/production_profiling/ci_results/
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cxl-topology-optimizer
+data:
+  policy: "adaptive"
+  hotness_threshold: "0.8"
 ```
 
-### Jenkins Pipeline
-```groovy
-pipeline {
-    agent any
-    stages {
-        stage('CXL Performance Test') {
-            steps {
-                sh '''
-                    cd use_cases/production_profiling
-                    python3 production_profiler.py \
-                        --cxlmemsim ../../build/CXLMemSim \
-                        --config ci_configs/regression_suite.yaml \
-                        --output ${WORKSPACE}/cxl_results
-                '''
-            }
-            post {
-                always {
-                    archiveArtifacts artifacts: 'cxl_results/**/*'
-                }
-            }
-        }
-    }
-}
+### Prometheus Metrics Export
+```python
+# Export migration metrics to Prometheus
+from prometheus_client import Counter, Histogram
+
+migration_counter = Counter('cxl_migrations_total', 
+                          'Total CXL memory migrations')
+migration_duration = Histogram('cxl_migration_duration_seconds',
+                             'Migration duration distribution')
 ```
 
 ## 🔍 Troubleshooting
 
 ### Common Issues
 
-1. **Simulation Timeout**: Increase timeout values in configuration
-2. **Missing Dependencies**: Install required Python packages
-3. **Permission Errors**: Ensure CXLMemSim binary is executable
-4. **Configuration Errors**: Validate YAML syntax and parameter ranges
+1. **ML Model Training Fails**: Ensure sufficient training data (>100 samples)
+2. **Migration Thrashing**: Increase cooldown period in policy parameters
+3. **Poor Placement Predictions**: Check if workload patterns match training data
+4. **High Migration Overhead**: Reduce concurrent migration limit
 
-### Performance Tips
+### Performance Tuning
 
-1. **Parallel Execution**: Use `parallel_jobs` parameter for faster evaluation
-2. **Shorter Intervals**: Reduce simulation intervals for quicker feedback
-3. **Selective Policies**: Focus on most promising policies first
-4. **Incremental Analysis**: Start with small workloads, scale up gradually
+1. **Hotness Threshold**: Start with 0.8, decrease if too few migrations
+2. **Migration Batch Size**: Balance between throughput and latency impact
+3. **Prediction Horizon**: Longer horizons need more historical data
+4. **Policy Selection**: Start with Balanced, move to Adaptive after learning
 
-### Getting Help
+## 📚 References
 
-- Check CXLMemSim logs with `SPDLOG_LEVEL=debug`  
-- Validate configurations with smaller test workloads first
-- Compare results with known baselines
-- File issues with reproduction steps and configuration files
+- [Hotness-Aware Memory Tiering](https://arxiv.org/abs/hotness-tiering)
+- [CXL Topology Optimization](https://cxl-topology-paper.com)
+- [Adaptive Migration Policies](https://adaptive-migration.org)
+- [ML for Memory Placement](https://ml-memory-placement.edu)
 
-## 📚 Further Reading
+## 🤝 Contributing
 
-- [CXLMemSim Paper](https://arxiv.org/abs/2303.06153) - Original research paper
-- [CXL Specification](https://computeexpresslink.org/) - CXL protocol details
-- [Memory Tiering Best Practices](docs/memory_tiering_guide.md) - Advanced policy development
-- [Hardware Selection Guide](docs/hardware_procurement_guide.md) - CXL hardware evaluation criteria
+We welcome contributions! Areas of interest:
+- Additional migration policies
+- Enhanced ML models for hotness prediction
+- Integration with cloud orchestrators
+- Real hardware validation results
+
+---
+
+For questions or support, please open an issue in the CXLMemSim repository.

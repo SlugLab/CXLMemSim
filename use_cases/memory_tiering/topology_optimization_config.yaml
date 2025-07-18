@@ -1,0 +1,117 @@
+# Topology and Strategy Optimization Configuration
+# This configuration demonstrates intelligent topology selection based on hotness prediction
+
+workloads:
+  - name: "high_skew_database"
+    type: "database"
+    binary: "./microbench/ld"
+    args: []
+    pebs_period: 5
+    dram_latency: 85
+    # Workload characteristics for hotness prediction
+    memory_intensity: 0.9
+    access_locality: 0.8
+    read_write_ratio: 0.8
+    working_set_size: 120
+    thread_count: 16
+    access_pattern_type: 2  # 0: sequential, 1: random, 2: strided
+    temporal_reuse: 0.7
+    spatial_reuse: 0.8
+    num_endpoints: 4
+    
+  - name: "distributed_analytics"
+    type: "analytics"
+    binary: "./workloads/gapbs/pr"
+    args: ["-f", "test.gr"]
+    pebs_period: 10
+    dram_latency: 85
+    memory_intensity: 0.6
+    access_locality: 0.5
+    read_write_ratio: 0.6
+    working_set_size: 200
+    thread_count: 32
+    access_pattern_type: 1
+    temporal_reuse: 0.3
+    spatial_reuse: 0.4
+    num_endpoints: 6
+    
+  - name: "web_cache_workload"
+    type: "web"
+    binary: "./microbench/random_access"
+    args: []
+    pebs_period: 3
+    dram_latency: 85
+    memory_intensity: 0.7
+    access_locality: 0.6
+    read_write_ratio: 0.9
+    working_set_size: 80
+    thread_count: 8
+    access_pattern_type: 1
+    temporal_reuse: 0.5
+    spatial_reuse: 0.5
+    num_endpoints: 3
+    
+  - name: "ml_training_workload"
+    type: "ml"
+    binary: "./workloads/ml/training"
+    args: ["--batch-size", "64"]
+    pebs_period: 5
+    dram_latency: 85
+    memory_intensity: 0.8
+    access_locality: 0.7
+    read_write_ratio: 0.5
+    working_set_size: 150
+    thread_count: 24
+    access_pattern_type: 0
+    temporal_reuse: 0.6
+    spatial_reuse: 0.7
+    num_endpoints: 5
+
+# Candidate topologies for evaluation
+# The optimizer will automatically use its built-in topology library
+# which includes: flat_2, flat_4, hierarchical_4, star_5, mesh_6
+
+# Candidate policies for evaluation
+# Will use: hotness_aware_balanced, topology_optimized, adaptive_hotness
+
+# Training data for ML-based hotness prediction (optional)
+training_data:
+  - memory_intensity: 0.9
+    access_locality: 0.8
+    read_write_ratio: 0.8
+    working_set_size: 100
+    thread_count: 16
+    access_pattern_type: 2
+    temporal_reuse: 0.7
+    spatial_reuse: 0.8
+    hotness_profile:
+      endpoint_2: 0.9
+      endpoint_3: 0.6
+      endpoint_4: 0.3
+      
+  - memory_intensity: 0.5
+    access_locality: 0.5
+    read_write_ratio: 0.6
+    working_set_size: 200
+    thread_count: 32
+    access_pattern_type: 1
+    temporal_reuse: 0.3
+    spatial_reuse: 0.4
+    hotness_profile:
+      endpoint_2: 0.5
+      endpoint_3: 0.5
+      endpoint_4: 0.4
+      endpoint_5: 0.4
+      
+  - memory_intensity: 0.7
+    access_locality: 0.6
+    read_write_ratio: 0.9
+    working_set_size: 80
+    thread_count: 8
+    access_pattern_type: 1
+    temporal_reuse: 0.5
+    spatial_reuse: 0.5
+    hotness_profile:
+      endpoint_2: 0.6
+      endpoint_3: 0.5
+      endpoint_4: 0.4

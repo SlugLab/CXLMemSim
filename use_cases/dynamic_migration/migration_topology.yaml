@@ -1,0 +1,72 @@
+# Topology Configuration for Dynamic Migration Policy Engine
+
+# Local memory configuration
+local_memory_gb: 256
+local_latency_ns: 80
+local_bandwidth_gbps: 120
+
+# CXL endpoints configuration
+cxl_endpoints:
+  - endpoint_id: "endpoint_2"
+    capacity_gb: 512
+    latency_ns: 150
+    bandwidth_gbps: 64
+    hop_distance: 1
+    power_consumption_watts: 30
+    
+  - endpoint_id: "endpoint_3"
+    capacity_gb: 512
+    latency_ns: 180
+    bandwidth_gbps: 56
+    hop_distance: 2
+    power_consumption_watts: 35
+    
+  - endpoint_id: "endpoint_4"
+    capacity_gb: 1024
+    latency_ns: 200
+    bandwidth_gbps: 48
+    hop_distance: 2
+    power_consumption_watts: 45
+    
+  - endpoint_id: "endpoint_5"
+    capacity_gb: 1024
+    latency_ns: 250
+    bandwidth_gbps: 40
+    hop_distance: 3
+    power_consumption_watts: 50
+
+# Migration costs and constraints
+migration_config:
+  bandwidth_per_migration_gbps: 10  # Bandwidth consumed per migration
+  max_concurrent_migrations: 5
+  migration_overhead_ms: 5  # Fixed overhead per migration
+  
+# Performance thresholds
+thresholds:
+  hotness_trigger: 0.8  # Trigger migration when hotness exceeds this
+  imbalance_trigger: 0.3  # Trigger when load imbalance exceeds this
+  congestion_trigger: 0.9  # Trigger when bandwidth utilization exceeds this
+  latency_degradation_factor: 2.0  # Trigger when P99 > P50 * this factor
+
+# Policy-specific parameters
+policy_parameters:
+  conservative:
+    min_benefit_threshold: 0.5  # Only migrate if benefit exceeds this
+    cooldown_period_s: 60  # Wait between migrations
+    
+  balanced:
+    min_benefit_threshold: 0.3
+    cooldown_period_s: 30
+    
+  aggressive:
+    min_benefit_threshold: 0.1
+    cooldown_period_s: 10
+    
+  adaptive:
+    initial_threshold: 0.3
+    learning_rate: 0.1
+    history_window: 100
+    
+  predictive:
+    prediction_horizon_s: 300  # Look ahead 5 minutes
+    confidence_threshold: 0.7

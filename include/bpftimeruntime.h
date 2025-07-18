@@ -17,12 +17,10 @@
 #include <linux/bpf.h>
 #include <string>
 #include <sys/types.h>
-#ifdef HAVE_BPFTIME
+#ifdef SERVER_MODE
 #include "bpftime_config.hpp"
 #include "bpftime_logger.hpp"
 #include "bpftime_shm.hpp"
-#endif
-#ifdef HAVE_BPFTIME
 template <typename K, typename V>
 class BPFUpdater {
 public:
@@ -51,7 +49,6 @@ public:
         return item2->is_locked;
     }
 };
-#endif
 class BpfTimeRuntime {
 public:
     BpfTimeRuntime(pid_t, std::string);
@@ -61,6 +58,7 @@ public:
     BPFUpdater<uint64_t,uint64_t> *updater;
     pid_t tid;
 };
+#endif
 
 
 #define u64 unsigned long long

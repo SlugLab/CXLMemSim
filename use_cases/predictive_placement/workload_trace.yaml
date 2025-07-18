@@ -1,0 +1,117 @@
+# Workload Trace for Placement Optimization
+
+# Memory pages with access patterns
+pages:
+  # Hot pages - frequently accessed
+  - id: 1001
+    size_kb: 4
+    access_count: 10000
+    last_access_time: 1700000000  # Recent
+    pattern: "temporal"
+    current_location: "endpoint_3"
+    heat_score: 0.95
+    
+  - id: 1002
+    size_kb: 4
+    access_count: 8500
+    last_access_time: 1700000100
+    pattern: "random"
+    current_location: "endpoint_4"
+    heat_score: 0.88
+    
+  - id: 1003
+    size_kb: 4
+    access_count: 7200
+    last_access_time: 1700000200
+    pattern: "sequential"
+    current_location: "endpoint_2"
+    heat_score: 0.82
+    
+  # Warm pages - moderate access
+  - id: 2001
+    size_kb: 4
+    access_count: 3000
+    last_access_time: 1699999000
+    pattern: "spatial"
+    current_location: "endpoint_1"
+    heat_score: 0.65
+    
+  - id: 2002
+    size_kb: 4
+    access_count: 2500
+    last_access_time: 1699999500
+    pattern: "strided"
+    current_location: "endpoint_5"
+    heat_score: 0.60
+    
+  - id: 2003
+    size_kb: 4
+    access_count: 2000
+    last_access_time: 1699998000
+    pattern: "random"
+    current_location: "endpoint_3"
+    heat_score: 0.55
+    
+  # Cold pages - rarely accessed
+  - id: 3001
+    size_kb: 4
+    access_count: 500
+    last_access_time: 1699990000
+    pattern: "sequential"
+    current_location: "endpoint_1"
+    heat_score: 0.25
+    
+  - id: 3002
+    size_kb: 4
+    access_count: 300
+    last_access_time: 1699980000
+    pattern: "random"
+    current_location: "endpoint_2"
+    heat_score: 0.20
+    
+  - id: 3003
+    size_kb: 4
+    access_count: 100
+    last_access_time: 1699970000
+    pattern: "spatial"
+    current_location: "endpoint_1"
+    heat_score: 0.10
+    
+  # Large sequential data
+  - id: 4001
+    size_kb: 64
+    access_count: 5000
+    last_access_time: 1700000300
+    pattern: "sequential"
+    current_location: "endpoint_4"
+    heat_score: 0.70
+    
+  - id: 4002
+    size_kb: 64
+    access_count: 4500
+    last_access_time: 1700000400
+    pattern: "sequential"
+    current_location: "endpoint_5"
+    heat_score: 0.68
+    
+# Access trace for simulation
+trace:
+  - page_id: 1001
+    access_count: 100
+    timestamp: 1700001000
+    
+  - page_id: 1002
+    access_count: 85
+    timestamp: 1700001010
+    
+  - page_id: 1003
+    access_count: 72
+    timestamp: 1700001020
+    
+  - page_id: 2001
+    access_count: 30
+    timestamp: 1700001030
+    
+  - page_id: 4001
+    access_count: 50
+    timestamp: 1700001040

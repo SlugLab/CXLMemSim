@@ -1,0 +1,49 @@
+# CXL Topology Configuration for Placement Optimization
+
+# Local memory configuration
+local_memory_gb: 128
+local_latency_ns: 80
+local_bandwidth_gbps: 100
+
+# CXL endpoints configuration
+cxl_endpoints:
+  - endpoint_id: "endpoint_2"
+    capacity_gb: 256
+    latency_ns: 150
+    bandwidth_gbps: 64
+    hop_distance: 1
+    
+  - endpoint_id: "endpoint_3"
+    capacity_gb: 256
+    latency_ns: 180
+    bandwidth_gbps: 56
+    hop_distance: 2
+    
+  - endpoint_id: "endpoint_4"
+    capacity_gb: 512
+    latency_ns: 200
+    bandwidth_gbps: 48
+    hop_distance: 2
+    
+  - endpoint_id: "endpoint_5"
+    capacity_gb: 512
+    latency_ns: 250
+    bandwidth_gbps: 40
+    hop_distance: 3
+
+# Topology structure (Newick format)
+topology_string: "(1,((2,3),(4,5)))"
+
+# Performance characteristics
+congestion_threshold: 0.7  # Endpoint considered congested above this
+migration_cost_gb: 0.1  # Cost in seconds per GB migrated
+power_states:
+  active:
+    power_watts: 30
+    transition_time_ms: 0
+  idle:
+    power_watts: 10
+    transition_time_ms: 10
+  sleep:
+    power_watts: 2
+    transition_time_ms: 100

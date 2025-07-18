@@ -1,0 +1,38 @@
+# Procurement Constraints and Requirements
+
+# Budget constraints
+max_budget: 150000  # Maximum total hardware cost in USD
+budget_flexibility: 0.1  # Can exceed by 10% for exceptional value
+
+# Technical requirements
+min_endpoints: 4  # Minimum number of CXL endpoints
+max_endpoints: 16  # Maximum manageable endpoints
+min_memory_per_endpoint_gb: 128  # Minimum memory per endpoint
+preferred_topology_types:  # In order of preference
+  - "hierarchical"
+  - "flat"
+  - "star"
+  - "mesh"
+
+# Performance requirements
+min_performance_score: 0.7  # Minimum acceptable performance score (0-1)
+latency_importance: 0.8  # Weight for latency in scoring (0-1)
+bandwidth_importance: 0.6  # Weight for bandwidth in scoring (0-1)
+
+# Operational constraints
+max_power_consumption_kw: 5.0  # Maximum power budget
+requires_hot_cold_separation: true  # Need hot/cold data tiering
+requires_dynamic_allocation: false  # Dynamic memory allocation needed
+preferred_vendors:  # Vendor preferences (optional)
+  - "Vendor A"
+  - "Vendor B"
+  
+# TCO considerations
+electricity_cost_per_kwh: 0.12  # $/kWh
+evaluation_period_years: 3  # TCO evaluation period
+max_tco_budget: 200000  # Maximum 3-year TCO
+
+# Risk tolerance
+accept_new_technology: true  # Willing to adopt newer solutions
+require_proven_deployment: false  # Need existing deployments
+support_level_required: "standard"  # standard, premium, or enterprise

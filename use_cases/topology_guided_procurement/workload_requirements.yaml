@@ -1,0 +1,54 @@
+# Workload Requirements for Hardware Procurement Analysis
+
+workloads:
+  - name: "production_database"
+    type: "database"
+    working_set_size: 800  # GB
+    memory_overhead: 0.25  # 25% overhead for indexes, buffers, etc.
+    target_endpoints: 4
+    latency_critical: true
+    real_time: false
+    interactive: true
+    annual_growth_rate: 0.3  # 30% growth per year
+    sla_requirements:
+      strict: true
+      max_latency_ms: 10
+      availability: 0.999
+    
+  - name: "analytics_cluster"
+    type: "analytics"
+    working_set_size: 2000  # GB
+    memory_overhead: 0.15
+    target_endpoints: 8
+    latency_critical: false
+    real_time: false
+    interactive: false
+    annual_growth_rate: 0.5  # 50% growth per year
+    sla_requirements:
+      strict: false
+      
+  - name: "ml_training_pipeline"
+    type: "ml_training"
+    working_set_size: 1500  # GB
+    memory_overhead: 0.2
+    target_endpoints: 6
+    latency_critical: false
+    real_time: false
+    interactive: false
+    annual_growth_rate: 0.4
+    sla_requirements:
+      strict: false
+      
+  - name: "web_cache_tier"
+    type: "web"
+    working_set_size: 600  # GB
+    memory_overhead: 0.3
+    target_endpoints: 4
+    latency_critical: true
+    real_time: true
+    interactive: true
+    annual_growth_rate: 0.25
+    sla_requirements:
+      strict: true
+      max_latency_ms: 5
+      availability: 0.9999
