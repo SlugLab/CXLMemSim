@@ -36,6 +36,7 @@
 #include <set>
 #include <fstream>
 #include <iterator>
+#include <queue>
 
 #ifndef MSG_WAITALL
 #define MSG_WAITALL 0x100
@@ -75,10 +76,21 @@ struct CachelineInfo {
     int owner;                  // Thread ID that owns in EXCLUSIVE/MODIFIED state
     uint64_t last_access_time;
     std::vector<uint8_t> data;  // Actual data
+    bool has_dirty_update;      // Flag for back invalidation
+    uint64_t dirty_update_time; // Timestamp of dirty update
     
-    CachelineInfo() : state(INVALID), owner(-1), last_access_time(0) {
+    CachelineInfo() : state(INVALID), owner(-1), last_access_time(0), 
+                      has_dirty_update(false), dirty_update_time(0) {
         data.resize(64, 0);
     }
+};
+
+// Back invalidation callback entry
+struct BackInvalidationEntry {
+    uint64_t cacheline_addr;
+    int source_thread_id;
+    uint64_t timestamp;
+    std::vector<uint8_t> dirty_data;
 };
 
 // Thread-per-connection server class
@@ -107,11 +119,16 @@ private:
     std::vector<std::thread> client_threads;
     std::mutex thread_list_mutex;
     
+    // Back invalidation tracking
+    std::map<uint64_t, std::queue<BackInvalidationEntry>> back_invalidation_queue;
+    std::shared_mutex back_invalidation_mutex;
+    
     // Statistics
     std::atomic<uint64_t> total_reads{0};
     std::atomic<uint64_t> total_writes{0};
     std::atomic<uint64_t> coherency_invalidations{0};
     std::atomic<uint64_t> coherency_downgrades{0};
+    std::atomic<uint64_t> back_invalidations{0};
     
 public:
     ThreadPerConnectionServer(int port, CXLController* ctrl)
@@ -141,6 +158,12 @@ private:
     void handle_request(int client_fd, int thread_id, ServerRequest& req, ServerResponse& resp);
     uint64_t calculate_total_latency(uint64_t base_latency, double congestion_factor, 
                                    bool had_coherency_miss, uint64_t size);
+    
+    // Back invalidation methods
+    void register_back_invalidation(uint64_t cacheline_addr, int source_thread_id, 
+                                  const std::vector<uint8_t>& dirty_data, uint64_t timestamp);
+    bool check_and_apply_back_invalidations(uint64_t cacheline_addr, int requesting_thread_id, 
+                                           CachelineInfo& info);
 };
 
 static ThreadPerConnectionServer* g_server = nullptr;
@@ -303,6 +326,7 @@ void ThreadPerConnectionServer::stop() {
     SPDLOG_INFO("  Total Writes: {}", total_writes.load());
     SPDLOG_INFO("  Coherency Invalidations: {}", coherency_invalidations.load());
     SPDLOG_INFO("  Coherency Downgrades: {}", coherency_downgrades.load());
+    SPDLOG_INFO("  Back Invalidations: {}", back_invalidations.load());
 }
 
 void ThreadPerConnectionServer::handle_read_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo& info) {
@@ -329,6 +353,10 @@ void ThreadPerConnectionServer::handle_read_coherency(uint64_t cacheline_addr, i
 }
 
 void ThreadPerConnectionServer::handle_write_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo& info) {
+    // Check if we need to register back invalidation for sharers
+    bool need_back_invalidation = false;
+    std::set<int> sharers_to_invalidate;
+    
     switch (info.state) {
         case INVALID:
             info.state = MODIFIED;
@@ -336,7 +364,9 @@ void ThreadPerConnectionServer::handle_write_coherency(uint64_t cacheline_addr, 
             break;
             
         case SHARED:
-            // Invalidate all sharers
+            // Need to invalidate all sharers
+            sharers_to_invalidate = info.sharers;
+            need_back_invalidation = true;
             invalidate_sharers(cacheline_addr, thread_id, info);
             info.state = MODIFIED;
             info.owner = thread_id;
@@ -346,12 +376,20 @@ void ThreadPerConnectionServer::handle_write_coherency(uint64_t cacheline_addr, 
         case EXCLUSIVE:
         case MODIFIED:
             if (info.owner != thread_id) {
-                // Invalidate current owner
+                // Need to invalidate current owner
+                sharers_to_invalidate.insert(info.owner);
+                need_back_invalidation = true;
                 invalidate_sharers(cacheline_addr, thread_id, info);
             }
             info.state = MODIFIED;
             info.owner = thread_id;
             break;
+    }
+    
+    // Mark that this cacheline has a dirty update
+    if (need_back_invalidation) {
+        info.has_dirty_update = true;
+        info.dirty_update_time = std::chrono::steady_clock::now().time_since_epoch().count();
     }
 }
 
@@ -445,6 +483,9 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
         
         // Check if we need coherency actions
         if (req.op_type == 0) {  // READ
+            // First check for back invalidations
+            bool had_back_invalidation = check_and_apply_back_invalidations(cacheline_addr, thread_id, info);
+            
             if (info.state == EXCLUSIVE || info.state == MODIFIED) {
                 if (info.owner != -1 && info.owner != thread_id) {
                     had_coherency_miss = true;
@@ -452,9 +493,14 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             }
             handle_read_coherency(cacheline_addr, thread_id, info);
             
-            // Copy data
+            // Copy data (which may have been updated by back invalidation)
             size_t offset = req.addr - cacheline_addr;
             memcpy(resp.data, info.data.data() + offset, req.size);
+            
+            // Add back invalidation latency penalty if we had one
+            if (had_back_invalidation) {
+                had_coherency_miss = true;  // Treat back invalidation as coherency miss
+            }
             
             total_reads++;
         } else {  // WRITE
@@ -464,11 +510,30 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
                       info.owner != thread_id) {
                 had_coherency_miss = true;
             }
+            // Keep track of who needs invalidation before state change
+            std::set<int> threads_to_invalidate;
+            if (info.state == SHARED) {
+                threads_to_invalidate = info.sharers;
+            } else if ((info.state == EXCLUSIVE || info.state == MODIFIED) && info.owner != thread_id) {
+                threads_to_invalidate.insert(info.owner);
+            }
+            
             handle_write_coherency(cacheline_addr, thread_id, info);
             
             // Update data
             size_t offset = req.addr - cacheline_addr;
             memcpy(info.data.data() + offset, req.data, req.size);
+            
+            // Register back invalidation for threads that had this cacheline
+            if (!threads_to_invalidate.empty()) {
+                std::vector<uint8_t> dirty_data(info.data.begin() + offset, 
+                                               info.data.begin() + offset + req.size);
+                for (int invalidated_thread : threads_to_invalidate) {
+                    if (invalidated_thread != thread_id) {
+                        register_back_invalidation(cacheline_addr, thread_id, dirty_data, req.timestamp);
+                    }
+                }
+            }
             
             total_writes++;
         }
@@ -527,4 +592,64 @@ void ThreadPerConnectionServer::handle_client(int client_fd) {
     
     close(client_fd);
     SPDLOG_INFO("Thread {}: Connection closed", thread_id);
+}
+
+// Back invalidation implementation
+void ThreadPerConnectionServer::register_back_invalidation(uint64_t cacheline_addr, int source_thread_id,
+                                                         const std::vector<uint8_t>& dirty_data, uint64_t timestamp) {
+    std::unique_lock<std::shared_mutex> lock(back_invalidation_mutex);
+    
+    BackInvalidationEntry entry;
+    entry.cacheline_addr = cacheline_addr;
+    entry.source_thread_id = source_thread_id;
+    entry.timestamp = timestamp;
+    entry.dirty_data = dirty_data;
+    
+    back_invalidation_queue[cacheline_addr].push(entry);
+    
+    SPDLOG_DEBUG("Registered back invalidation for cacheline 0x{:x} from thread {}", 
+                 cacheline_addr, source_thread_id);
+}
+
+bool ThreadPerConnectionServer::check_and_apply_back_invalidations(uint64_t cacheline_addr, int requesting_thread_id,
+                                                                 CachelineInfo& info) {
+    std::unique_lock<std::shared_mutex> lock(back_invalidation_mutex);
+    
+    auto it = back_invalidation_queue.find(cacheline_addr);
+    if (it == back_invalidation_queue.end() || it->second.empty()) {
+        return false;  // No back invalidations pending
+    }
+    
+    bool had_back_invalidation = false;
+    
+    // Process all pending back invalidations for this cacheline
+    while (!it->second.empty()) {
+        BackInvalidationEntry& entry = it->second.front();
+        
+        // Apply the dirty data if it's newer than our current data
+        if (entry.timestamp > info.last_access_time) {
+            // Update the data with the dirty version
+            size_t offset = 0;  // Assuming full cacheline update
+            memcpy(info.data.data() + offset, entry.dirty_data.data(), 
+                   std::min(entry.dirty_data.size(), info.data.size()));
+            
+            info.has_dirty_update = false;  // Clear the flag after applying
+            info.dirty_update_time = entry.timestamp;
+            
+            back_invalidations++;
+            had_back_invalidation = true;
+            
+            SPDLOG_DEBUG("Applied back invalidation for cacheline 0x{:x} from thread {} to thread {}", 
+                        cacheline_addr, entry.source_thread_id, requesting_thread_id);
+        }
+        
+        it->second.pop();
+    }
+    
+    // Clean up empty queue
+    if (it->second.empty()) {
+        back_invalidation_queue.erase(it);
+    }
+    
+    return had_back_invalidation;
 }
