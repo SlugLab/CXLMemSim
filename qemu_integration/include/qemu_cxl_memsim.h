@@ -48,6 +48,10 @@ int cxl_type3_write(uint64_t addr, const void *data, size_t size);
 uint64_t cxlmemsim_get_hotness(uint64_t addr);
 void cxlmemsim_dump_hotness_stats(void);
 
+// Back invalidation support for keyboard hook
+int cxlmemsim_check_invalidation(uint64_t phys_addr, size_t size, void *data);
+void cxlmemsim_register_invalidation(uint64_t phys_addr, void *data, size_t size);
+
 #ifdef __cplusplus
 }
 #endif

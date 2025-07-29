@@ -17,8 +17,12 @@ static void __attribute__((constructor)) cxlmemsim_constructor(void) {
     }
 }
 
+// External kbd hook cleanup function
+extern void cleanup_kbd_hook(void);
+
 static void __attribute__((destructor)) cxlmemsim_destructor(void) {
     fprintf(stderr, "Cleaning up CXLMemSim connection\n");
     cxlmemsim_dump_hotness_stats();
     cxlmemsim_cleanup();
+    cleanup_kbd_hook();
 }

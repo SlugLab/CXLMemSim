@@ -251,3 +251,216 @@ void cxlmemsim_dump_hotness_stats(void) {
         free(sorted);
     }
 }
+
+// ============================================================================
+// Keyboard Hook with Back Invalidation Support
+// ============================================================================
+
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/mman.h>
+#include <semaphore.h>
+
+// Shared memory for back invalidation
+#define SHM_NAME "/cxlmemsim_kbd_hook"
+#define SHM_SIZE (1024 * 1024)  // 1MB shared memory
+#define MAX_INVALIDATIONS 1024
+
+typedef struct {
+    uint64_t phys_addr;
+    uint64_t timestamp;
+    uint8_t data[CACHELINE_SIZE];
+    struct back_invalidation *next;
+} back_invalidation_t;
+
+typedef struct {
+    uint32_t head;
+    uint32_t tail;
+    pthread_mutex_t mutex;
+    sem_t sem_items;
+    back_invalidation_t entries[MAX_INVALIDATIONS];
+} invalidation_queue_t;
+
+// Global state for kbd hook
+static uint64_t (*orig_kbd_read_data)(void *opaque, uint64_t addr, unsigned size) = NULL;
+static invalidation_queue_t *inv_queue = NULL;
+static int shm_fd = -1;
+
+// Initialize shared memory for invalidation queue
+static int init_kbd_shared_memory(void) {
+    // Create or open shared memory
+    shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
+    if (shm_fd < 0) {
+        perror("kbd_hook: shm_open failed");
+        return -1;
+    }
+    
+    // Set size
+    if (ftruncate(shm_fd, SHM_SIZE) < 0) {
+        perror("kbd_hook: ftruncate failed");
+        close(shm_fd);
+        return -1;
+    }
+    
+    // Map shared memory
+    inv_queue = mmap(NULL, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (inv_queue == MAP_FAILED) {
+        perror("kbd_hook: mmap failed");
+        close(shm_fd);
+        return -1;
+    }
+    
+    // Initialize if first time
+    static int initialized = 0;
+    if (!initialized) {
+        initialized = 1;
+        inv_queue->head = 0;
+        inv_queue->tail = 0;
+        pthread_mutexattr_t attr;
+        pthread_mutexattr_init(&attr);
+        pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+        pthread_mutex_init(&inv_queue->mutex, &attr);
+        pthread_mutexattr_destroy(&attr);
+        
+        sem_init(&inv_queue->sem_items, 1, 0);
+    }
+    
+    fprintf(stderr, "kbd_hook: Shared memory initialized at %p\n", inv_queue);
+    return 0;
+}
+
+// Check if an address has pending invalidations in shared memory queue
+static int check_and_apply_invalidation(uint64_t phys_addr, void *data, size_t size) {
+    if (!inv_queue) return 0;
+    
+    int found = 0;
+    uint64_t cacheline_addr = phys_addr & ~(CACHELINE_SIZE - 1);
+    
+    pthread_mutex_lock(&inv_queue->mutex);
+    
+    uint32_t current = inv_queue->head;
+    
+    while (current != inv_queue->tail) {
+        back_invalidation_t *entry = &inv_queue->entries[current];
+        uint64_t inv_cacheline = entry->phys_addr & ~(CACHELINE_SIZE - 1);
+        
+        if (cacheline_addr == inv_cacheline) {
+            // Apply invalidation
+            if (data) {
+                uint64_t offset = phys_addr & (CACHELINE_SIZE - 1);
+                size_t copy_size = (size + offset > CACHELINE_SIZE) ? 
+                                  (CACHELINE_SIZE - offset) : size;
+                memcpy(data, entry->data + offset, copy_size);
+            }
+            
+            fprintf(stderr, "kbd_hook: Applied invalidation for PA 0x%lx\n", phys_addr);
+            
+            // Remove from queue by advancing head
+            if (current == inv_queue->head) {
+                inv_queue->head = (inv_queue->head + 1) % MAX_INVALIDATIONS;
+            }
+            found = 1;
+            break;
+        }
+        
+        current = (current + 1) % MAX_INVALIDATIONS;
+    }
+    
+    pthread_mutex_unlock(&inv_queue->mutex);
+    
+    return found;
+}
+
+// Direct invalidation check with CXLMemSim daemon
+int cxlmemsim_check_invalidation(uint64_t phys_addr, size_t size, void *data) {
+    // Check shared memory queue
+    return check_and_apply_invalidation(phys_addr, data, size);
+}
+
+// Register invalidation for an address
+void cxlmemsim_register_invalidation(uint64_t phys_addr, void *data, size_t size) {
+    if (!inv_queue) return;
+    
+    pthread_mutex_lock(&inv_queue->mutex);
+    
+    uint32_t next_tail = (inv_queue->tail + 1) % MAX_INVALIDATIONS;
+    if (next_tail != inv_queue->head) {
+        back_invalidation_t *entry = &inv_queue->entries[inv_queue->tail];
+        entry->phys_addr = phys_addr;
+        entry->timestamp = get_timestamp_ns();
+        if (data && size <= CACHELINE_SIZE) {
+            memcpy(entry->data, data, size);
+        }
+        inv_queue->tail = next_tail;
+        sem_post(&inv_queue->sem_items);
+        
+        fprintf(stderr, "kbd_hook: Registered invalidation for PA 0x%lx\n", phys_addr);
+    }
+    
+    pthread_mutex_unlock(&inv_queue->mutex);
+}
+
+// Hook for kbd_read_data
+uint64_t kbd_read_data(void *opaque, uint64_t addr, unsigned size) {
+    static int initialized = 0;
+    
+    if (!initialized) {
+        initialized = 1;
+        
+        // Get original function
+        orig_kbd_read_data = dlsym(RTLD_NEXT, "kbd_read_data");
+        if (!orig_kbd_read_data) {
+            fprintf(stderr, "kbd_hook: Failed to find original kbd_read_data\n");
+            exit(1);
+        }
+        
+        // Initialize shared memory
+        if (init_kbd_shared_memory() < 0) {
+            fprintf(stderr, "kbd_hook: Failed to initialize shared memory\n");
+        }
+    }
+    
+    // Check for back invalidations
+    uint8_t inv_data[8] = {0};
+    int invalidated = 0;
+    
+    // Check shared memory queue
+    invalidated = check_and_apply_invalidation(addr, inv_data, size);
+    
+    // Call original function
+    uint64_t result = orig_kbd_read_data(opaque, addr, size);
+    
+    // Apply invalidated data if found
+    if (invalidated && size <= sizeof(result)) {
+        memcpy(&result, inv_data, size);
+        fprintf(stderr, "kbd_hook: Using invalidated data for addr 0x%lx: 0x%lx\n", 
+                addr, result);
+    }
+    
+    // Log access if debug enabled
+    if (getenv("KBD_HOOK_DEBUG")) {
+        fprintf(stderr, "kbd_hook: read(0x%lx, %u) = 0x%lx %s\n",
+                addr, size, result, invalidated ? "[INV]" : "");
+    }
+    
+    return result;
+}
+
+// Cleanup kbd hook resources
+static void cleanup_kbd_hook(void) {
+    // Unmap shared memory
+    if (inv_queue) {
+        munmap(inv_queue, SHM_SIZE);
+        inv_queue = NULL;
+    }
+    
+    // Close shared memory
+    if (shm_fd >= 0) {
+        close(shm_fd);
+        shm_fd = -1;
+    }
+}

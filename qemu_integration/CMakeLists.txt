@@ -46,12 +46,21 @@ target_link_libraries(test_cxl_mem
     pthread
 )
 
+# Test kbd hook
+add_executable(test_kbd_hook
+    test_kbd_hook.c
+)
+
+target_link_libraries(test_kbd_hook
+    dl
+)
+
 # Install targets
 install(TARGETS CXLMemSim
     LIBRARY DESTINATION /usr/local/lib
 )
 
-install(TARGETS cxlmemsim_server test_cxl_mem
+install(TARGETS cxlmemsim_server test_cxl_mem test_kbd_hook
     RUNTIME DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
 )
 
