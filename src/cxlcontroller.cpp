@@ -67,7 +67,7 @@ double CXLController::calculate_bandwidth(const std::vector<std::tuple<uint64_t,
     return CXLSwitch::calculate_bandwidth(elem);
 }
 
-#ifndef SERVER_MODE
+#ifdef SERVER_MODE
 void CXLController::set_stats(mem_stats stats) {
     // SPDLOG_INFO("stats: {} {} {} {} {}", stats.total_allocated, stats.total_freed, stats.current_usage,
     // stats.allocation_count, stats.free_count);

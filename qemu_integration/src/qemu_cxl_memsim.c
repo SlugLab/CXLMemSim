@@ -451,7 +451,7 @@ uint64_t kbd_read_data(void *opaque, uint64_t addr, unsigned size) {
 }
 
 // Cleanup kbd hook resources
-static void cleanup_kbd_hook(void) {
+void cleanup_kbd_hook(void) {
     // Unmap shared memory
     if (inv_queue) {
         munmap(inv_queue, SHM_SIZE);

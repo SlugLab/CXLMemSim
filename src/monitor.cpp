@@ -15,6 +15,8 @@
 #include <ctime>
 #include <iostream>
 #include <vector>
+#include <dirent.h>
+#include <cstring>
 timespec Monitor::last_delay = {0, 0};
 
 std::vector<pid_t> get_thread_ids(pid_t pid) {
@@ -168,7 +170,9 @@ int Monitors::enable(uint32_t tgid, uint32_t tid, bool is_process, uint64_t pebs
     mon[target].is_process = is_process;
 
     if (pebs_sample_period) {
+#ifdef SERVER_MODE
         mon[target].bpftime_ctx = new BpfTimeRuntime(tid, "../src/cxlmemsim.json");
+#endif
         /* pebs start */
         mon[target].pebs_ctx = new PEBS(tgid, pebs_sample_period);
         SPDLOG_DEBUG("{}Process [tgid={}, tid={}]: enable to pebs.", target, mon[target].tgid,
@@ -210,9 +214,11 @@ void Monitors::disable(const uint32_t target) {
         mon[target].lbr_ctx->mp = nullptr;
         mon[target].lbr_ctx->sample_period = 0;
     }
+#ifdef SERVER_MODE
     if (mon[target].bpftime_ctx != nullptr) {
         mon[target].bpftime_ctx->tid = -1;
     }
+#endif
     for (auto &j : mon[target].elem) {
         j.pebs.total = 0;
         j.pebs.llcmiss = 0;
@@ -262,7 +268,9 @@ int Monitors::terminate(const uint32_t tgid, const uint32_t tid, const int32_t t
         /* pebs stop */
         delete mon[target].pebs_ctx;
         delete mon[target].lbr_ctx;
+#ifdef SERVER_MODE
         delete mon[target].bpftime_ctx;
+#endif
 
         /* Save end time */
         if (mon[target].end_exec_ts.tv_sec == 0 && mon[target].end_exec_ts.tv_nsec == 0) {
@@ -410,9 +418,11 @@ void Monitor::wait(std::vector<Monitor> *mons, int target) {
         sleep_target = start_ts + wanted_delay * prev_wanted_delay;
         target_nsec = wanted_delay - prev_wanted_delay;
         interval_target = end_ts + interval_delay;
+#ifdef SERVER_MODE
         if (mon.bpftime_ctx && mon.bpftime_ctx->updater->get(mon.tid))
             mon.bpftime_ctx->updater->update(mon.tgid, prev_wanted_delay.tv_nsec - mon.wanted_delay.tv_nsec);
         else
+#endif
             clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &interval_target, nullptr);
         // start time before we ask them to sleep
         clock_gettime(CLOCK_MONOTONIC, &start_ts);

@@ -15,3 +15,5 @@ CMakeUserPresets.json
 voltdb
 foo
 CMakeFiles
+build_server
+README_*
