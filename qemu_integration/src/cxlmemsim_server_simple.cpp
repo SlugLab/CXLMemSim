@@ -14,13 +14,45 @@
 #include <csignal>
 #include "../include/qemu_cxl_memsim.h"
 
+// Cache coherency states (MESI protocol)
+enum CacheState {
+    MESI_INVALID = 0,
+    MESI_SHARED = 1,
+    MESI_EXCLUSIVE = 2,
+    MESI_MODIFIED = 3
+};
+
+// Memory entry structure (128 bytes total)
+struct CXLMemoryEntry {
+    // Data portion (64 bytes)
+    uint8_t data[CACHELINE_SIZE];
+    
+    // Metadata portion (64 bytes)
+    struct {
+        uint8_t cache_state;        // MESI state
+        uint8_t owner_id;           // Current owner host ID
+        uint16_t sharers_bitmap;    // Bitmap of hosts sharing this line
+        uint32_t access_count;      // Number of accesses
+        uint64_t last_access_time;  // Timestamp of last access
+        uint64_t virtual_addr;      // Virtual address mapping
+        uint64_t physical_addr;     // Physical address
+        uint32_t version;           // Version number for coherency
+        uint8_t flags;              // Various flags (dirty, locked, etc.)
+        uint8_t reserved[23];       // Reserved for future use
+    } metadata;
+};
+
 class CXLMemSimServer {
 private:
     int server_fd;
     int port;
-    std::map<uint64_t, std::vector<uint8_t>> memory_storage;
+    std::map<uint64_t, CXLMemoryEntry> memory_storage;
     std::mutex memory_mutex;
     std::atomic<bool> running;
+    
+    // Virtual to physical address mapping
+    std::map<std::pair<uint8_t, uint64_t>, uint64_t> virt_to_phys_map; // <host_id, virt_addr> -> phys_addr
+    std::mutex mapping_mutex;
     
     // Configurable latency parameters
     double base_read_latency_ns;
@@ -81,27 +113,50 @@ public:
     void handle_client(int client_fd) {
         std::cout << "Client connected" << std::endl;
         
+        // Get host ID from client (simplified - in real implementation, this would be part of handshake)
+        static std::atomic<uint8_t> next_host_id{1};
+        uint8_t host_id = next_host_id.fetch_add(1);
+        
         while (running) {
-            CXLMemSimRequest req;
-            ssize_t received = recv(client_fd, &req, sizeof(req), MSG_WAITALL);
+            // First try to receive enhanced request
+            EnhancedRequest req;
+            ssize_t received = recv(client_fd, &req, sizeof(CXLMemSimRequest), MSG_WAITALL);
             
-            if (received != sizeof(req)) {
+            if (received != sizeof(CXLMemSimRequest)) {
                 if (received == 0) {
-                    std::cout << "Client disconnected" << std::endl;
+                    std::cout << "Client disconnected (Host " << (int)host_id << ")" << std::endl;
                 } else {
                     std::cerr << "Failed to receive request" << std::endl;
                 }
                 break;
             }
             
+            // Set host ID and virtual address if not provided
+            req.host_id = host_id;
+            req.virtual_addr = req.addr; // Use physical address as virtual if not provided
+            
             CXLMemSimResponse resp = {0};
             
             if (req.op_type == CXL_READ_OP) {
-                resp.latency_ns = handle_read(req.addr, resp.data, req.size, req.timestamp);
+                resp.latency_ns = handle_read(req.addr, resp.data, req.size, req.timestamp, req.host_id, req.virtual_addr);
                 resp.status = 0;
+                
+                // Get current cache state for response
+                memory_mutex.lock();
+                auto& entry = memory_storage[req.addr];
+                resp.data[CACHELINE_SIZE - 1] = entry.metadata.cache_state; // Store cache state in last byte
+                memory_mutex.unlock();
+                
             } else if (req.op_type == CXL_WRITE_OP) {
-                resp.latency_ns = handle_write(req.addr, req.data, req.size, req.timestamp);
+                resp.latency_ns = handle_write(req.addr, req.data, req.size, req.timestamp, req.host_id, req.virtual_addr);
                 resp.status = 0;
+                
+                // Get current cache state for response
+                memory_mutex.lock();
+                auto& entry = memory_storage[req.addr];
+                resp.data[CACHELINE_SIZE - 1] = entry.metadata.cache_state; // Store cache state in last byte
+                memory_mutex.unlock();
+                
             } else {
                 resp.status = 1;
             }
@@ -112,6 +167,18 @@ public:
                 break;
             }
         }
+        
+        // Clean up host mappings on disconnect
+        mapping_mutex.lock();
+        auto it = virt_to_phys_map.begin();
+        while (it != virt_to_phys_map.end()) {
+            if (it->first.first == host_id) {
+                it = virt_to_phys_map.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        mapping_mutex.unlock();
         
         close(client_fd);
     }
@@ -132,32 +199,148 @@ public:
         return static_cast<uint64_t>(latency);
     }
     
-    uint64_t handle_read(uint64_t addr, uint8_t* data, size_t size, uint64_t timestamp) {
-        update_cacheline_stats(addr);
+    // Enhanced request structure to handle host ID
+    struct EnhancedRequest : CXLMemSimRequest {
+        uint8_t host_id;
+        uint64_t virtual_addr;
+    };
+    
+    CacheState handle_coherency_transition(CXLMemoryEntry& entry, uint8_t requester_id, bool is_write) {
+        CacheState old_state = static_cast<CacheState>(entry.metadata.cache_state);
+        CacheState new_state = old_state;
         
-        memory_mutex.lock();
-        auto it = memory_storage.find(addr);
-        if (it != memory_storage.end() && it->second.size() >= size) {
-            memcpy(data, it->second.data(), size);
+        if (is_write) {
+            // Write request handling
+            switch (old_state) {
+                case MESI_INVALID:
+                case MESI_SHARED:
+                case MESI_EXCLUSIVE:
+                    new_state = MESI_MODIFIED;
+                    entry.metadata.owner_id = requester_id;
+                    entry.metadata.sharers_bitmap = (1 << requester_id);
+                    break;
+                case MESI_MODIFIED:
+                    if (entry.metadata.owner_id != requester_id) {
+                        // Need to invalidate current owner
+                        new_state = MESI_MODIFIED;
+                        entry.metadata.owner_id = requester_id;
+                        entry.metadata.sharers_bitmap = (1 << requester_id);
+                    }
+                    break;
+            }
         } else {
-            // Initialize with zeros if not previously written
-            memset(data, 0, size);
+            // Read request handling
+            switch (old_state) {
+                case MESI_INVALID:
+                    new_state = MESI_EXCLUSIVE;
+                    entry.metadata.owner_id = requester_id;
+                    entry.metadata.sharers_bitmap = (1 << requester_id);
+                    break;
+                case MESI_EXCLUSIVE:
+                    if (entry.metadata.owner_id != requester_id) {
+                        new_state = MESI_SHARED;
+                        entry.metadata.sharers_bitmap |= (1 << requester_id);
+                    }
+                    break;
+                case MESI_SHARED:
+                    entry.metadata.sharers_bitmap |= (1 << requester_id);
+                    break;
+                case MESI_MODIFIED:
+                    if (entry.metadata.owner_id != requester_id) {
+                        new_state = MESI_SHARED;
+                        entry.metadata.sharers_bitmap |= (1 << requester_id);
+                    }
+                    break;
+            }
         }
-        memory_mutex.unlock();
         
-        return calculate_latency(size, true);
+        entry.metadata.cache_state = new_state;
+        entry.metadata.version++;
+        return new_state;
     }
     
-    uint64_t handle_write(uint64_t addr, const uint8_t* data, size_t size, uint64_t timestamp) {
+    uint64_t handle_read(uint64_t addr, uint8_t* data, size_t size, uint64_t timestamp, uint8_t host_id = 0, uint64_t virt_addr = 0) {
         update_cacheline_stats(addr);
         
         memory_mutex.lock();
-        auto& storage = memory_storage[addr];
-        storage.resize(size);
-        memcpy(storage.data(), data, size);
+        auto& entry = memory_storage[addr];
+        
+        // Initialize entry if new
+        if (entry.metadata.physical_addr == 0) {
+            entry.metadata.physical_addr = addr;
+            entry.metadata.cache_state = MESI_INVALID;
+            memset(entry.data, 0, CACHELINE_SIZE);
+        }
+        
+        // Update virtual to physical mapping
+        if (virt_addr != 0) {
+            mapping_mutex.lock();
+            virt_to_phys_map[{host_id, virt_addr}] = addr;
+            entry.metadata.virtual_addr = virt_addr;
+            mapping_mutex.unlock();
+        }
+        
+        // Handle coherency state transition
+        CacheState new_state = handle_coherency_transition(entry, host_id, false);
+        
+        // Copy data
+        memcpy(data, entry.data, std::min(size, (size_t)CACHELINE_SIZE));
+        
+        // Update metadata
+        entry.metadata.access_count++;
+        entry.metadata.last_access_time = timestamp;
+        
         memory_mutex.unlock();
         
-        return calculate_latency(size, false);
+        // Add latency based on state transition
+        uint64_t base_latency = calculate_latency(size, true);
+        if (new_state == MESI_SHARED && entry.metadata.cache_state == MESI_MODIFIED) {
+            base_latency += 50; // Additional latency for writeback
+        }
+        
+        return base_latency;
+    }
+    
+    uint64_t handle_write(uint64_t addr, const uint8_t* data, size_t size, uint64_t timestamp, uint8_t host_id = 0, uint64_t virt_addr = 0) {
+        update_cacheline_stats(addr);
+        
+        memory_mutex.lock();
+        auto& entry = memory_storage[addr];
+        
+        // Initialize entry if new
+        if (entry.metadata.physical_addr == 0) {
+            entry.metadata.physical_addr = addr;
+            entry.metadata.cache_state = MESI_INVALID;
+        }
+        
+        // Update virtual to physical mapping
+        if (virt_addr != 0) {
+            mapping_mutex.lock();
+            virt_to_phys_map[{host_id, virt_addr}] = addr;
+            entry.metadata.virtual_addr = virt_addr;
+            mapping_mutex.unlock();
+        }
+        
+        // Handle coherency state transition
+        CacheState old_state = static_cast<CacheState>(entry.metadata.cache_state);
+        CacheState new_state = handle_coherency_transition(entry, host_id, true);
+        
+        // Copy data
+        memcpy(entry.data, data, std::min(size, (size_t)CACHELINE_SIZE));
+        
+        // Update metadata
+        entry.metadata.access_count++;
+        entry.metadata.last_access_time = timestamp;
+        
+        memory_mutex.unlock();
+        
+        // Add latency based on state transition
+        uint64_t base_latency = calculate_latency(size, false);
+        if (old_state == MESI_SHARED || (old_state == MESI_MODIFIED && entry.metadata.owner_id != host_id)) {
+            base_latency += 100; // Additional latency for invalidation
+        }
+        
+        return base_latency;
     }
     
     void update_cacheline_stats(uint64_t addr) {
@@ -195,7 +378,7 @@ public:
     
     void print_hotness_report() {
         std::lock_guard<std::mutex> lock(stats_mutex);
-        std::cout << "\n=== Cacheline Hotness Report ===" << std::endl;
+        std::cout << "\n=== Cacheline Hotness & Coherency Report ===" << std::endl;
         
         std::vector<std::pair<uint64_t, AccessStats>> sorted_stats;
         for (const auto& entry : cacheline_stats) {
@@ -209,13 +392,50 @@ public:
         
         std::cout << "Top 20 Hottest Cachelines:" << std::endl;
         size_t count = 0;
+        
+        memory_mutex.lock();
         for (const auto& entry : sorted_stats) {
             if (count++ >= 20) break;
-            std::cout << "  Address: 0x" << std::hex << entry.first 
-                     << " - Accesses: " << std::dec << entry.second.count << std::endl;
+            
+            auto mem_it = memory_storage.find(entry.first);
+            if (mem_it != memory_storage.end()) {
+                const auto& mem_entry = mem_it->second;
+                const char* state_str = "INVALID";
+                switch (mem_entry.metadata.cache_state) {
+                    case MESI_SHARED: state_str = "SHARED"; break;
+                    case MESI_EXCLUSIVE: state_str = "EXCLUSIVE"; break;
+                    case MESI_MODIFIED: state_str = "MODIFIED"; break;
+                }
+                
+                std::cout << "  Address: 0x" << std::hex << entry.first 
+                         << " - Accesses: " << std::dec << entry.second.count 
+                         << " - State: " << state_str
+                         << " - Owner: Host" << (int)mem_entry.metadata.owner_id
+                         << " - Sharers: 0x" << std::hex << mem_entry.metadata.sharers_bitmap
+                         << " - Version: " << std::dec << mem_entry.metadata.version << std::endl;
+            } else {
+                std::cout << "  Address: 0x" << std::hex << entry.first 
+                         << " - Accesses: " << std::dec << entry.second.count << std::endl;
+            }
         }
+        memory_mutex.unlock();
         
-        std::cout << "Total unique cachelines accessed: " << cacheline_stats.size() << std::endl;
+        std::cout << "\nCoherency Statistics:" << std::endl;
+        int state_counts[4] = {0};
+        memory_mutex.lock();
+        for (const auto& entry : memory_storage) {
+            if (entry.second.metadata.cache_state < 4) {
+                state_counts[entry.second.metadata.cache_state]++;
+            }
+        }
+        memory_mutex.unlock();
+        
+        std::cout << "  INVALID: " << state_counts[MESI_INVALID] << std::endl;
+        std::cout << "  SHARED: " << state_counts[MESI_SHARED] << std::endl;
+        std::cout << "  EXCLUSIVE: " << state_counts[MESI_EXCLUSIVE] << std::endl;
+        std::cout << "  MODIFIED: " << state_counts[MESI_MODIFIED] << std::endl;
+        
+        std::cout << "\nTotal unique cachelines accessed: " << cacheline_stats.size() << std::endl;
         
         // Calculate total accesses
         uint64_t total_accesses = 0;
@@ -223,6 +443,11 @@ public:
             total_accesses += entry.second.count;
         }
         std::cout << "Total cacheline accesses: " << total_accesses << std::endl;
+        
+        // Virtual to Physical mapping statistics
+        mapping_mutex.lock();
+        std::cout << "\nVirtual to Physical Mappings: " << virt_to_phys_map.size() << " entries" << std::endl;
+        mapping_mutex.unlock();
     }
 };
 
