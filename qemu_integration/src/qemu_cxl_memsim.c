@@ -133,7 +133,8 @@ void cxlmemsim_cleanup(void) {
     g_ctx = NULL;
 }
 
-int cxl_type3_read(uint64_t addr, void *data, size_t size) {
+MemTxResult cxl_type3_read(void* d, uint64_t addr, uint64_t *data,
+    unsigned size, MemTxAttrs attrs) {
     if (!g_ctx) {
         fprintf(stderr, "CXLMemSim not initialized\n");
         return -1;
@@ -164,7 +165,8 @@ int cxl_type3_read(uint64_t addr, void *data, size_t size) {
     return 0;
 }
 
-int cxl_type3_write(uint64_t addr, const void *data, size_t size) {
+MemTxResult cxl_type3_write(void *d,uint64_t  addr, uint64_t data,
+    unsigned size, MemTxAttrs attrs){
     if (!g_ctx) {
         fprintf(stderr, "CXLMemSim not initialized\n");
         return -1;

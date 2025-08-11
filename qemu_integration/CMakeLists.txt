@@ -11,6 +11,8 @@ get_filename_component(CXLMEMSIM_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/.. ABSOLUTE)
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CXLMEMSIM_ROOT}/include
+    ${CXLMEMSIM_ROOT}/lib/Drywall/include
+    ${CXLMEMSIM_ROOT}/lib/Drywall/build
 )
 
 # QEMU interception library
