@@ -31,3 +31,6 @@
 [submodule "lib/Drywall"]
 	path = lib/Drywall
 	url = https://github.com/SlugLab/Drywall
+[submodule "lib/qemu"]
+	path = lib/qemu
+	url = https://github.com/CXLMemUring/qemu

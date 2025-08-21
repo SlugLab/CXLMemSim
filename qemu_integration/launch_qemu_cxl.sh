@@ -1,6 +1,6 @@
 #!/bin/bash
 
-QEMU_BINARY=$PWD/../lib/Drywall/build/qemu-system-x86_64
+QEMU_BINARY=$PWD/../lib/qemu/build/qemu-system-x86_64
 CXL_MEMSIM_HOST=${CXL_MEMSIM_HOST:-127.0.0.1}
 CXL_MEMSIM_PORT=${CXL_MEMSIM_PORT:-9999}
 VM_MEMORY=${VM_MEMORY:-2G}
@@ -11,21 +11,18 @@ export LD_PRELOAD=/usr/local/lib/libCXLMemSim.so
 export CXL_MEMSIM_HOST=$CXL_MEMSIM_HOST
 export CXL_MEMSIM_PORT=$CXL_MEMSIM_PORT
 
-QEMU_CMD="$QEMU_BINARY \
-     --enable-kvm --cpu host -machine q35,cxl=on  \
-    -m $VM_MEMORY \
-    -smp 4 \
-    -drive file=$DISK_IMAGE,if=virtio,format=qcow2 \
-    -object memory-backend-file,id=cxl-mem1,size=$CXL_MEMORY,mem-path=/dev/shm/cxl-mem,share=on \
-    -object memory-backend-ram,id=cxl-lsa1,share=on,size=1G \
-    -device pxb-cxl,id=cxl.0,bus=pcie.0,bus_nr=52 \
-    -device cxl-rp,id=rp0,bus=cxl.0,chassis=0,port=0,slot=0 \
-    -device cxl-type3,bus=rp0,memdev=cxl-mem1,lsa=cxl-lsa1,id=cxl-vmem0 \
-    -M cxl-fmw.0.targets.0=cxl.0,cxl-fmw.0.size=8G \
-    -nographic"
-
-echo "Starting QEMU with CXL memory connected to $CXL_MEMSIM_HOST:$CXL_MEMSIM_PORT"
-echo "Command: $QEMU_CMD"
-echo ""
-
-exec $QEMU_CMD
+exec $QEMU_BINARY \
+    --enable-kvm --cpu host  \
+    -kernel /root/tdx-linux/arch/x86/boot/bzImage \
+    -append "root=/dev/sda rw console=ttyS0,115200 ignore_loglevel nokaslr" \
+    -netdev user,id=network0,hostfwd=tcp::2024-:22 \
+    -device e1000,netdev=network0 \
+    -drive file=/home/victoryang00/CXLMemSim/build/qemu.img,index=0,media=disk,format=raw \
+   -M q35,cxl=on -m 4G,maxmem=8G,slots=8 -smp 4 \
+    -object memory-backend-file,id=cxl-mem1,share=on,mem-path=/tmp/cxltest.raw,size=256M \
+    -object memory-backend-file,id=cxl-lsa1,share=on,mem-path=/tmp/lsa.raw,size=256M \
+    -device pxb-cxl,bus_nr=12,bus=pcie.0,id=cxl.1 \
+    -device cxl-rp,port=0,bus=cxl.1,id=root_port13,chassis=0,slot=2 \
+    -device cxl-type3,bus=root_port13,persistent-memdev=cxl-mem1,lsa=cxl-lsa1,id=cxl-pmem0,sn=0x1 \
+    -M cxl-fmw.0.targets.0=cxl.1,cxl-fmw.0.size=4G \
+    -nographic
