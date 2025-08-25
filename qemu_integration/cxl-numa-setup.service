@@ -1,0 +1,17 @@
+[Unit]
+Description=Configure CXL Memory as NUMA Node
+After=sysinit.target
+After=systemd-modules-load.service
+Before=basic.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/setup_cxl_numa.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutSec=60
+
+[Install]
+WantedBy=sysinit.target
