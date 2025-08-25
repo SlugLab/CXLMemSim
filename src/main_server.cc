@@ -230,10 +230,19 @@ int main(int argc, char *argv[]) {
         SPDLOG_WARN("Topology file {} not found, using default configuration", topology);
     }
     
-    SPDLOG_INFO("CXLMemSim Thread-per-Connection Server starting on port {}", port);
-    SPDLOG_INFO("Topology: {}", topology);
-    SPDLOG_INFO("Capacity: {} GB", capacity);
-    SPDLOG_INFO("Default latency: {} ns", default_latency);
+    SPDLOG_INFO("========================================");
+    SPDLOG_INFO("CXLMemSim CXL Type3 Memory Server");
+    SPDLOG_INFO("========================================");
+    SPDLOG_INFO("Server Configuration:");
+    SPDLOG_INFO("  Port: {}", port);
+    SPDLOG_INFO("  Topology: {}", topology);
+    SPDLOG_INFO("  Capacity: {} GB", capacity);
+    SPDLOG_INFO("  Default latency: {} ns", default_latency);
+    SPDLOG_INFO("  Interleave size: {} bytes", interleave_size);
+    SPDLOG_INFO("CXL Type3 Operations Supported:");
+    SPDLOG_INFO("  - CXL_TYPE3_READ");
+    SPDLOG_INFO("  - CXL_TYPE3_WRITE");
+    SPDLOG_INFO("========================================");
     
     // Set up signal handlers
     signal(SIGINT, signal_handler);
@@ -468,6 +477,11 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     uint64_t cacheline_addr = req.addr & ~(63ULL);  // 64-byte aligned
     bool had_coherency_miss = false;
     
+    // Log CXL Type3 operation
+    const char* op_name = (req.op_type == 0) ? "CXL_TYPE3_READ" : "CXL_TYPE3_WRITE";
+    // SPDLOG_INFO("Thread {}: {} addr=0x{:x} size={} bytes timestamp={}ns", 
+                // thread_id, op_name, req.addr, req.size, req.timestamp);
+    
     // Increment active requests
     congestion_info.active_requests++;
     
@@ -483,12 +497,17 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
         
         // Check if we need coherency actions
         if (req.op_type == 0) {  // READ
+            SPDLOG_DEBUG("Thread {}: CXL_TYPE3_READ processing - checking coherency for cacheline 0x{:x}", 
+                        thread_id, cacheline_addr);
+            
             // First check for back invalidations
             bool had_back_invalidation = check_and_apply_back_invalidations(cacheline_addr, thread_id, info);
             
             if (info.state == EXCLUSIVE || info.state == MODIFIED) {
                 if (info.owner != -1 && info.owner != thread_id) {
                     had_coherency_miss = true;
+                    SPDLOG_DEBUG("Thread {}: CXL_TYPE3_READ coherency miss - cacheline owned by thread {}", 
+                                thread_id, info.owner);
                 }
             }
             handle_read_coherency(cacheline_addr, thread_id, info);
@@ -500,15 +519,27 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             // Add back invalidation latency penalty if we had one
             if (had_back_invalidation) {
                 had_coherency_miss = true;  // Treat back invalidation as coherency miss
+                SPDLOG_DEBUG("Thread {}: CXL_TYPE3_READ had back invalidation for cacheline 0x{:x}", 
+                            thread_id, cacheline_addr);
             }
+            
+            // SPDLOG_INFO("Thread {}: CXL_TYPE3_READ data retrieved - {} bytes from offset {}", 
+            //            thread_id, req.size, offset);
             
             total_reads++;
         } else {  // WRITE
+            // SPDLOG_DEBUG("Thread {}: CXL_TYPE3_WRITE processing - checking coherency for cacheline 0x{:x}", 
+            //             thread_id, cacheline_addr);
+            
             if (info.state == SHARED && !info.sharers.empty()) {
                 had_coherency_miss = true;
+                SPDLOG_DEBUG("Thread {}: CXL_TYPE3_WRITE coherency miss - cacheline shared by {} threads", 
+                            thread_id, info.sharers.size());
             } else if ((info.state == EXCLUSIVE || info.state == MODIFIED) && 
                       info.owner != thread_id) {
                 had_coherency_miss = true;
+                SPDLOG_DEBUG("Thread {}: CXL_TYPE3_WRITE coherency miss - cacheline owned by thread {}", 
+                            thread_id, info.owner);
             }
             // Keep track of who needs invalidation before state change
             std::set<int> threads_to_invalidate;
@@ -518,11 +549,19 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
                 threads_to_invalidate.insert(info.owner);
             }
             
+            if (!threads_to_invalidate.empty()) {
+                // SPDLOG_INFO("Thread {}: CXL_TYPE3_WRITE invalidating {} threads for cacheline 0x{:x}", 
+                        //    thread_id, threads_to_invalidate.size(), cacheline_addr);
+            }
+            
             handle_write_coherency(cacheline_addr, thread_id, info);
             
             // Update data
             size_t offset = req.addr - cacheline_addr;
             memcpy(info.data.data() + offset, req.data, req.size);
+            
+            // SPDLOG_INFO("Thread {}: CXL_TYPE3_WRITE data updated - {} bytes at offset {}", 
+            //            thread_id, req.size, offset);
             
             // Register back invalidation for threads that had this cacheline
             if (!threads_to_invalidate.empty()) {
@@ -558,9 +597,21 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     resp.status = 0;
     resp.latency_ns = total_latency;
     
-    SPDLOG_DEBUG("Thread {}: {} addr 0x{:x}, size {}, latency {}ns (base: {}ns, congestion: {:.2f}x, coherency_miss: {})",
-                thread_id, req.op_type == 0 ? "READ" : "WRITE", req.addr, req.size, 
-                total_latency, static_cast<uint64_t>(base_latency), congestion_factor, had_coherency_miss);
+    // Enhanced logging for CXL Type3 operations
+    const char* op_result = (req.op_type == 0) ? "CXL_TYPE3_READ_COMPLETE" : "CXL_TYPE3_WRITE_COMPLETE";
+    // SPDLOG_INFO("Thread {}: {} addr=0x{:x} size={} latency={}ns (base={}ns congestion={:.2f}x coherency_miss={})",
+    //             thread_id, op_result, req.addr, req.size, 
+                // total_latency, static_cast<uint64_t>(base_latency), congestion_factor, had_coherency_miss);
+    
+    // Log cache state changes
+    // if (had_coherency_miss) {
+    //     SPDLOG_INFO("Thread {}: Coherency action for addr=0x{:x} cacheline=0x{:x}", 
+    //                 thread_id, req.addr, cacheline_addr);
+    // }
+    
+    // Detailed debug logging
+    // SPDLOG_DEBUG("Thread {}: Memory access details - cacheline_addr=0x{:x} offset={} data_size={}",
+    //             thread_id, cacheline_addr, req.addr - cacheline_addr, req.size);
 }
 
 void ThreadPerConnectionServer::handle_client(int client_fd) {

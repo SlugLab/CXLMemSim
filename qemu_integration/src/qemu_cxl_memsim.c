@@ -139,7 +139,7 @@ MemTxResult cxl_type3_read(void* d, uint64_t addr, uint64_t *data,
         fprintf(stderr, "CXLMemSim not initialized\n");
         return -1;
     }
-    
+    fprintf(stderr, "cxl_type3_read: %lx, %lx, %u, %u\n", addr, data, size, attrs);
     size_t offset = 0;
     while (offset < size) {
         CXLMemSimRequest req = {0};
@@ -171,6 +171,7 @@ MemTxResult cxl_type3_write(void *d,uint64_t  addr, uint64_t data,
         fprintf(stderr, "CXLMemSim not initialized\n");
         return -1;
     }
+    fprintf(stderr, "cxl_type3_write: %lx, %lx, %u, %u\n", addr, data, size, attrs);
     
     size_t offset = 0;
     while (offset < size) {
