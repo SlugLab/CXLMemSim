@@ -18,11 +18,14 @@ exec $QEMU_BINARY \
     -netdev user,id=network0,hostfwd=tcp::2024-:22 \
     -device e1000,netdev=network0 \
     -drive file=/home/victoryang00/CXLMemSim/build/qemu.img,index=0,media=disk,format=raw \
-   -M q35,cxl=on -m 4G,maxmem=8G,slots=8 -smp 4 \
+    -M q35,cxl=on -m 4G,maxmem=8G,slots=8 -smp 4 \
+    -device pxb-cxl,bus_nr=12,bus=pcie.0,id=cxl.1 \
+    -device cxl-rp,port=0,bus=cxl.1,id=root_port13,chassis=0,slot=0 \
+    -device cxl-rp,port=1,bus=cxl.1,id=root_port14,chassis=0,slot=1 \
+    -device cxl-type3,bus=root_port13,persistent-memdev=cxl-mem1,lsa=cxl-lsa1,id=cxl-pmem0,sn=0x1 \
+    -device cxl-type1,bus=root_port14,size=256M,cache-size=64M \
+    -device virtio-cxl-accel-pci,bus=pcie.0 \
     -object memory-backend-file,id=cxl-mem1,share=on,mem-path=/tmp/cxltest.raw,size=256M \
     -object memory-backend-file,id=cxl-lsa1,share=on,mem-path=/tmp/lsa.raw,size=256M \
-    -device pxb-cxl,bus_nr=12,bus=pcie.0,id=cxl.1 \
-    -device cxl-rp,port=0,bus=cxl.1,id=root_port13,chassis=0,slot=2 \
-    -device cxl-type3,bus=root_port13,persistent-memdev=cxl-mem1,lsa=cxl-lsa1,id=cxl-pmem0,sn=0x1 \
     -M cxl-fmw.0.targets.0=cxl.1,cxl-fmw.0.size=4G \
     -nographic
