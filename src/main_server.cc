@@ -12,6 +12,7 @@
 #include "cxlendpoint.h"
 #include "helper.h"
 #include "policy.h"
+#include "shared_memory_manager.h"
 #include <cerrno>
 #include <cxxopts.hpp>
 #include <spdlog/cfg/env.h>
@@ -48,7 +49,7 @@ CXLController* controller = nullptr;
 
 // Server request/response structures (matching qemu_integration)
 struct ServerRequest {
-    uint8_t op_type;      // 0=READ, 1=WRITE
+    uint8_t op_type;      // 0=READ, 1=WRITE, 2=GET_SHM_INFO
     uint64_t addr;
     uint64_t size;
     uint64_t timestamp;
@@ -61,29 +62,18 @@ struct ServerResponse {
     uint8_t data[64];
 };
 
-// Coherency states
-enum CoherencyState {
-    INVALID,
-    SHARED,
-    EXCLUSIVE,
-    MODIFIED
+// Extended response for shared memory info
+struct SharedMemoryInfoResponse {
+    uint8_t status;
+    uint64_t base_addr;
+    uint64_t size;
+    uint64_t num_cachelines;
+    char shm_name[256];
 };
 
-// Cacheline coherency information
-struct CachelineInfo {
-    CoherencyState state;
-    std::set<int> sharers;      // Thread IDs that have this cacheline in SHARED state
-    int owner;                  // Thread ID that owns in EXCLUSIVE/MODIFIED state
-    uint64_t last_access_time;
-    std::vector<uint8_t> data;  // Actual data
-    bool has_dirty_update;      // Flag for back invalidation
-    uint64_t dirty_update_time; // Timestamp of dirty update
-    
-    CachelineInfo() : state(INVALID), owner(-1), last_access_time(0), 
-                      has_dirty_update(false), dirty_update_time(0) {
-        data.resize(64, 0);
-    }
-};
+// Using CachelineMetadata from SharedMemoryManager
+// CoherencyState is already defined in shared_memory_manager.h
+using CachelineInfo = CachelineMetadata;
 
 // Back invalidation callback entry
 struct BackInvalidationEntry {
@@ -102,8 +92,11 @@ private:
     std::atomic<bool> running;
     std::atomic<int> next_thread_id;
     
-    // Memory storage with coherency tracking
-    std::map<uint64_t, CachelineInfo> cacheline_storage;  // Cacheline address -> info
+    // Shared memory manager for real memory allocation
+    std::unique_ptr<SharedMemoryManager> shm_manager;
+    
+    // Memory storage with coherency tracking (metadata only)
+    // Actual data is in shared memory managed by shm_manager
     std::shared_mutex memory_mutex;
     
     // Congestion tracking
@@ -131,11 +124,14 @@ private:
     std::atomic<uint64_t> back_invalidations{0};
     
 public:
-    ThreadPerConnectionServer(int port, CXLController* ctrl)
+    ThreadPerConnectionServer(int port, CXLController* ctrl, size_t capacity_mb)
         : port(port), controller(ctrl), running(true), next_thread_id(0) {
         congestion_info.active_requests = 0;
         congestion_info.total_bandwidth_used = 0;
         congestion_info.last_reset = std::chrono::steady_clock::now();
+        
+        // Initialize shared memory manager
+        shm_manager = std::make_unique<SharedMemoryManager>(capacity_mb);
     }
     
     bool start();
@@ -186,7 +182,7 @@ int main(int argc, char *argv[]) {
         ("v,verbose", "Verbose level", cxxopts::value<int>()->default_value("2"))
         ("default_latency", "Default latency", cxxopts::value<size_t>()->default_value("100"))
         ("interleave_size", "Interleave size", cxxopts::value<size_t>()->default_value("256"))
-        ("capacity", "Capacity of CXL expander in GB", cxxopts::value<int>()->default_value("2"))
+        ("capacity", "Capacity of CXL expander in MB", cxxopts::value<int>()->default_value("256"))
         ("p,port", "Server port", cxxopts::value<int>()->default_value("9999"))
         ("t,topology", "Topology file", cxxopts::value<std::string>()->default_value("topology.txt"));
 
@@ -236,7 +232,7 @@ int main(int argc, char *argv[]) {
     SPDLOG_INFO("Server Configuration:");
     SPDLOG_INFO("  Port: {}", port);
     SPDLOG_INFO("  Topology: {}", topology);
-    SPDLOG_INFO("  Capacity: {} GB", capacity);
+    SPDLOG_INFO("  Capacity: {} MB", capacity);
     SPDLOG_INFO("  Default latency: {} ns", default_latency);
     SPDLOG_INFO("  Interleave size: {} bytes", interleave_size);
     SPDLOG_INFO("CXL Type3 Operations Supported:");
@@ -249,7 +245,7 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, signal_handler);
     
     try {
-        ThreadPerConnectionServer server(port, controller);
+        ThreadPerConnectionServer server(port, controller, capacity);
         g_server = &server;
         
         if (!server.start()) {
@@ -268,6 +264,19 @@ int main(int argc, char *argv[]) {
 
 // ThreadPerConnectionServer implementation
 bool ThreadPerConnectionServer::start() {
+    // Initialize shared memory first
+    if (!shm_manager->initialize()) {
+        SPDLOG_ERROR("Failed to initialize shared memory");
+        return false;
+    }
+    
+    auto shm_info = shm_manager->get_shm_info();
+    SPDLOG_INFO("Shared memory initialized:");
+    SPDLOG_INFO("  Name: {}", shm_info.shm_name);
+    SPDLOG_INFO("  Size: {} bytes", shm_info.size);
+    SPDLOG_INFO("  Base address: 0x{:x}", shm_info.base_addr);
+    SPDLOG_INFO("  Cachelines: {}", shm_info.num_cachelines);
+    
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
         SPDLOG_ERROR("Failed to create socket");
@@ -479,8 +488,14 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     
     // Log CXL Type3 operation
     const char* op_name = (req.op_type == 0) ? "CXL_TYPE3_READ" : "CXL_TYPE3_WRITE";
-    // SPDLOG_INFO("Thread {}: {} addr=0x{:x} size={} bytes timestamp={}ns", 
-                // thread_id, op_name, req.addr, req.size, req.timestamp);
+    
+    // Check if address is valid in shared memory
+    if (!shm_manager->is_valid_address(req.addr)) {
+        SPDLOG_ERROR("Thread {}: Invalid address 0x{:x} not in CXL memory range", 
+                    thread_id, req.addr);
+        resp.status = 1;
+        return;
+    }
     
     // Increment active requests
     congestion_info.active_requests++;
@@ -493,7 +508,22 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     // Handle coherency and memory operation
     {
         std::unique_lock<std::shared_mutex> lock(memory_mutex);
-        auto& info = cacheline_storage[cacheline_addr];
+        
+        // Get metadata from shared memory manager
+        auto* metadata = shm_manager->get_cacheline_metadata(cacheline_addr);
+        if (!metadata) {
+            SPDLOG_ERROR("Thread {}: Failed to get metadata for cacheline 0x{:x}", 
+                        thread_id, cacheline_addr);
+            resp.status = 1;
+            congestion_info.active_requests--;
+            return;
+        }
+        
+        // Lock the cacheline for this operation
+        std::lock_guard<std::mutex> cacheline_lock(metadata->lock);
+        
+        // Reference to metadata for compatibility with existing code
+        auto& info = *metadata;
         
         // Check if we need coherency actions
         if (req.op_type == 0) {  // READ
@@ -512,9 +542,14 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             }
             handle_read_coherency(cacheline_addr, thread_id, info);
             
-            // Copy data (which may have been updated by back invalidation)
-            size_t offset = req.addr - cacheline_addr;
-            memcpy(resp.data, info.data.data() + offset, req.size);
+            // Read data from shared memory
+            if (!shm_manager->read_cacheline(req.addr, resp.data, req.size)) {
+                SPDLOG_ERROR("Thread {}: Failed to read from shared memory at 0x{:x}", 
+                            thread_id, req.addr);
+                resp.status = 1;
+                congestion_info.active_requests--;
+                return;
+            }
             
             // Add back invalidation latency penalty if we had one
             if (had_back_invalidation) {
@@ -556,17 +591,24 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             
             handle_write_coherency(cacheline_addr, thread_id, info);
             
-            // Update data
-            size_t offset = req.addr - cacheline_addr;
-            memcpy(info.data.data() + offset, req.data, req.size);
+            // Write data to shared memory
+            if (!shm_manager->write_cacheline(req.addr, req.data, req.size)) {
+                SPDLOG_ERROR("Thread {}: Failed to write to shared memory at 0x{:x}", 
+                            thread_id, req.addr);
+                resp.status = 1;
+                congestion_info.active_requests--;
+                return;
+            }
             
             // SPDLOG_INFO("Thread {}: CXL_TYPE3_WRITE data updated - {} bytes at offset {}", 
             //            thread_id, req.size, offset);
             
             // Register back invalidation for threads that had this cacheline
             if (!threads_to_invalidate.empty()) {
-                std::vector<uint8_t> dirty_data(info.data.begin() + offset, 
-                                               info.data.begin() + offset + req.size);
+                // Read the dirty data from shared memory for back invalidation
+                std::vector<uint8_t> dirty_data(req.size);
+                shm_manager->read_cacheline(req.addr, dirty_data.data(), req.size);
+                
                 for (int invalidated_thread : threads_to_invalidate) {
                     if (invalidated_thread != thread_id) {
                         register_back_invalidation(cacheline_addr, thread_id, dirty_data, req.timestamp);
@@ -631,6 +673,29 @@ void ThreadPerConnectionServer::handle_client(int client_fd) {
             break;
         }
         
+        // Handle special request for shared memory info
+        if (req.op_type == 2) {  // GET_SHM_INFO
+            SharedMemoryInfoResponse shm_resp = {0};
+            auto shm_info = shm_manager->get_shm_info();
+            
+            shm_resp.status = 0;
+            shm_resp.base_addr = shm_info.base_addr;
+            shm_resp.size = shm_info.size;
+            shm_resp.num_cachelines = shm_info.num_cachelines;
+            strncpy(shm_resp.shm_name, shm_info.shm_name.c_str(), sizeof(shm_resp.shm_name) - 1);
+            
+            SPDLOG_INFO("Thread {}: Sending shared memory info - name: {}, size: {} bytes", 
+                       thread_id, shm_info.shm_name, shm_info.size);
+            
+            ssize_t sent = send(client_fd, &shm_resp, sizeof(shm_resp), 0);
+            if (sent != sizeof(shm_resp)) {
+                SPDLOG_ERROR("Thread {}: Failed to send shared memory info", thread_id);
+                break;
+            }
+            continue;
+        }
+        
+        // Regular memory operation
         ServerResponse resp = {0};
         handle_request(client_fd, thread_id, req, resp);
         
@@ -679,19 +744,24 @@ bool ThreadPerConnectionServer::check_and_apply_back_invalidations(uint64_t cach
         
         // Apply the dirty data if it's newer than our current data
         if (entry.timestamp > info.last_access_time) {
-            // Update the data with the dirty version
-            size_t offset = 0;  // Assuming full cacheline update
-            memcpy(info.data.data() + offset, entry.dirty_data.data(), 
-                   std::min(entry.dirty_data.size(), info.data.size()));
+            // Write the dirty data directly to shared memory
+            // Calculate the actual address from cacheline base
+            uint64_t write_addr = cacheline_addr;  // Start of cacheline
             
-            info.has_dirty_update = false;  // Clear the flag after applying
-            info.dirty_update_time = entry.timestamp;
-            
-            back_invalidations++;
-            had_back_invalidation = true;
-            
-            SPDLOG_DEBUG("Applied back invalidation for cacheline 0x{:x} from thread {} to thread {}", 
-                        cacheline_addr, entry.source_thread_id, requesting_thread_id);
+            if (!shm_manager->write_cacheline(write_addr, entry.dirty_data.data(), 
+                                             entry.dirty_data.size())) {
+                SPDLOG_ERROR("Failed to apply back invalidation to shared memory at 0x{:x}", 
+                            write_addr);
+            } else {
+                info.has_dirty_update = false;  // Clear the flag after applying
+                info.dirty_update_time = entry.timestamp;
+                
+                back_invalidations++;
+                had_back_invalidation = true;
+                
+                SPDLOG_DEBUG("Applied back invalidation for cacheline 0x{:x} from thread {} to thread {}", 
+                            cacheline_addr, entry.source_thread_id, requesting_thread_id);
+            }
         }
         
         it->second.pop();
