@@ -124,7 +124,7 @@ Helper::Helper() {
 }
 void Helper::noop_handler(int) { ; }
 void Helper::suspend_handler(int) {
-#ifdef SERVER_MODE
+#ifndef SERVER_MODE
     for (auto &m : monitors->mon)
         m.status = MONITOR_SUSPEND;
 #endif

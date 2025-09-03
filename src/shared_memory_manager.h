@@ -121,7 +121,11 @@ public:
     }
     
     uint64_t cacheline_to_index(uint64_t cacheline_addr) const {
-        return (cacheline_addr - header->base_addr) / CACHELINE_SIZE;
+        if (header && header->base_addr == 0) {
+            // Accept any address, use modulo to map to available cachelines
+            return (cacheline_addr / CACHELINE_SIZE) % header->num_cachelines;
+        }
+        return header ? (cacheline_addr - header->base_addr) / CACHELINE_SIZE : 0;
     }
     
     // Statistics

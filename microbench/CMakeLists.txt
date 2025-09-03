@@ -143,4 +143,17 @@ target_compile_definitions(st_serial64 PRIVATE -DFENCE_COUNT=64)
 add_executable(st_serial128 st_serial.cpp)
 target_compile_definitions(st_serial128 PRIVATE -DFENCE_COUNT=128)
 add_executable(st_serial256 st_serial.cpp)
+
+# DAX litmus tests (C11 atomics)
+add_executable(test_dax_litmus_mp test_dax_litmus_mp.c)
+target_compile_options(test_dax_litmus_mp PRIVATE -std=gnu11)
+
+add_executable(test_dax_litmus_sb test_dax_litmus_sb.c)
+target_compile_options(test_dax_litmus_sb PRIVATE -std=gnu11)
+
+add_executable(test_dax_litmus_atomic test_dax_litmus_atomic.c)
+target_compile_options(test_dax_litmus_atomic PRIVATE -std=gnu11)
+
+add_executable(test_dax_litmus_tearing test_dax_litmus_tearing.c)
+target_compile_options(test_dax_litmus_tearing PRIVATE -std=gnu11)
 target_compile_definitions(st_serial256 PRIVATE -DFENCE_COUNT=256)

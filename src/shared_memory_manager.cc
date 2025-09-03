@@ -8,6 +8,10 @@
 #include <cstring>
 #include <stdexcept>
 #include <sys/types.h>
+#include <cstdlib>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <errno.h>
 
 #define MAGIC_NUMBER 0x43584C4D454D5348ULL  // "CXLMEMSH"
 #define FORMAT_VERSION 1
@@ -132,15 +136,22 @@ void SharedMemoryManager::initialize_header() {
     header->data_offset = sizeof(SharedMemoryHeader);
     header->metadata_offset = 0;  // Metadata is kept locally, not in shared memory
     
-    // CXL memory typically starts at high physical addresses
-    // Using 0x100000000 (4GB) as base address for CXL memory
-    header->base_addr = 0x100000000ULL;
+    // Support both low addresses (for testing) and high CXL addresses
+    // Check environment variable for base address
+    const char* base_addr_env = getenv("CXL_BASE_ADDR");
+    if (base_addr_env) {
+        header->base_addr = strtoull(base_addr_env, NULL, 0);
+    } else {
+        // Default to 0 to accept any address (will be mapped to shared memory)
+        header->base_addr = 0;
+    }
     
     // Calculate number of cachelines
     size_t data_area_size = shm_size - sizeof(SharedMemoryHeader);
     header->num_cachelines = data_area_size / CACHELINE_SIZE;
     
     SPDLOG_INFO("Initialized header: {} cachelines available", header->num_cachelines);
+    SPDLOG_INFO("Base address: 0x{:x} (0 = accept any address)", header->base_addr);
 }
 
 void SharedMemoryManager::initialize_data_area() {
@@ -188,7 +199,14 @@ uint8_t* SharedMemoryManager::get_cacheline_data(uint64_t cacheline_addr) {
         return nullptr;
     }
     
-    // Check if address is valid
+    // If base_addr is 0, accept any address and use modulo mapping
+    if (header->base_addr == 0) {
+        uint64_t index = cacheline_to_index(cacheline_addr);
+        // cacheline_to_index already handles modulo when base_addr is 0
+        return data_area + (index * CACHELINE_SIZE);
+    }
+    
+    // Check if address is valid for non-zero base
     if (cacheline_addr < header->base_addr) {
         return nullptr;
     }
@@ -203,9 +221,34 @@ uint8_t* SharedMemoryManager::get_cacheline_data(uint64_t cacheline_addr) {
 }
 
 bool SharedMemoryManager::read_cacheline(uint64_t addr, uint8_t* buffer, size_t size) {
-    uint64_t cacheline_addr = addr_to_cacheline(addr);
-    uint8_t* cacheline_data = get_cacheline_data(cacheline_addr);
+    // Always allow access when base_addr is 0 (modulo mapping mode)
+    if (header && header->base_addr == 0) {
+        // Handle reads that might span multiple cachelines
+        size_t bytes_read = 0;
+        
+        while (bytes_read < size) {
+            uint64_t current_addr = addr + bytes_read;
+            uint64_t cacheline_addr = addr_to_cacheline(current_addr);
+            uint64_t index = cacheline_to_index(cacheline_addr);
+            uint8_t* cacheline_data = data_area + (index * CACHELINE_SIZE);
+            
+            size_t offset = current_addr - cacheline_addr;
+            size_t bytes_in_cacheline = std::min(size - bytes_read, CACHELINE_SIZE - offset);
+            
+            memcpy(buffer + bytes_read, cacheline_data + offset, bytes_in_cacheline);
+            bytes_read += bytes_in_cacheline;
+            
+            SPDLOG_DEBUG("Read {} bytes from cacheline at 0x{:x} offset {} (mapped to index {})",
+                         bytes_in_cacheline, cacheline_addr, offset, index);
+        }
+        
+        SPDLOG_DEBUG("Total read {} bytes starting at addr 0x{:x}", size, addr);
+        return true;
+    }
     
+    uint64_t cacheline_addr = addr_to_cacheline(addr);
+    
+    uint8_t* cacheline_data = get_cacheline_data(cacheline_addr);
     if (!cacheline_data) {
         SPDLOG_ERROR("Invalid cacheline address: 0x{:x}", cacheline_addr);
         return false;
@@ -228,9 +271,41 @@ bool SharedMemoryManager::read_cacheline(uint64_t addr, uint8_t* buffer, size_t 
 }
 
 bool SharedMemoryManager::write_cacheline(uint64_t addr, const uint8_t* data, size_t size) {
-    uint64_t cacheline_addr = addr_to_cacheline(addr);
-    uint8_t* cacheline_data = get_cacheline_data(cacheline_addr);
+    // Always allow access when base_addr is 0 (modulo mapping mode)
+    if (header && header->base_addr == 0) {
+        // Handle writes that might span multiple cachelines
+        size_t bytes_written = 0;
+        
+        while (bytes_written < size) {
+            uint64_t current_addr = addr + bytes_written;
+            uint64_t cacheline_addr = addr_to_cacheline(current_addr);
+            uint64_t index = cacheline_to_index(cacheline_addr);
+            uint8_t* cacheline_data = data_area + (index * CACHELINE_SIZE);
+            
+            size_t offset = current_addr - cacheline_addr;
+            size_t bytes_in_cacheline = std::min(size - bytes_written, CACHELINE_SIZE - offset);
+            
+            memcpy(cacheline_data + offset, data + bytes_written, bytes_in_cacheline);
+            bytes_written += bytes_in_cacheline;
+            
+            SPDLOG_DEBUG("Wrote {} bytes to cacheline at 0x{:x} offset {} (mapped to index {})",
+                         bytes_in_cacheline, cacheline_addr, offset, index);
+        }
+        
+        // Use stronger memory barrier for shared memory
+        __sync_synchronize();
+        // Force sync entire shared memory region to ensure persistence
+        if (msync(shm_base, shm_size, MS_SYNC) != 0) {
+            SPDLOG_WARN("msync failed: {}", strerror(errno));
+        }
+        
+        SPDLOG_DEBUG("Total wrote {} bytes starting at addr 0x{:x}", size, addr);
+        return true;
+    }
     
+    uint64_t cacheline_addr = addr_to_cacheline(addr);
+    
+    uint8_t* cacheline_data = get_cacheline_data(cacheline_addr);
     if (!cacheline_data) {
         SPDLOG_ERROR("Invalid cacheline address: 0x{:x}", cacheline_addr);
         return false;
@@ -248,6 +323,10 @@ bool SharedMemoryManager::write_cacheline(uint64_t addr, const uint8_t* data, si
     
     // Memory barrier to ensure write is visible to other processes
     __sync_synchronize();
+    // Force sync to backing store
+    if (msync(shm_base, shm_size, MS_SYNC) != 0) {
+        SPDLOG_WARN("msync failed: {}", strerror(errno));
+    }
     
     SPDLOG_DEBUG("Wrote {} bytes to addr 0x{:x} (cacheline 0x{:x} offset {})",
                  size, addr, cacheline_addr, offset);
@@ -304,6 +383,12 @@ bool SharedMemoryManager::is_valid_address(uint64_t addr) const {
         return false;
     }
     
+    // If base_addr is 0, accept any address (will be mapped with modulo)
+    if (header->base_addr == 0) {
+        return true;
+    }
+    
+    // Otherwise check if address is in the configured range
     return addr >= header->base_addr && 
            addr < header->base_addr + (header->num_cachelines * CACHELINE_SIZE);
 }
