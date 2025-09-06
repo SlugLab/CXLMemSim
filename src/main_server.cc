@@ -94,6 +94,7 @@ private:
     
     // Shared memory manager for real memory allocation
     std::unique_ptr<SharedMemoryManager> shm_manager;
+    std::string backing_file_;
     
     // Memory storage with coherency tracking (metadata only)
     // Actual data is in shared memory managed by shm_manager
@@ -124,14 +125,19 @@ private:
     std::atomic<uint64_t> back_invalidations{0};
     
 public:
-    ThreadPerConnectionServer(int port, CXLController* ctrl, size_t capacity_mb)
-        : port(port), controller(ctrl), running(true), next_thread_id(0) {
+    ThreadPerConnectionServer(int port, CXLController* ctrl, size_t capacity_mb, const std::string& backing_file = "")
+        : port(port), controller(ctrl), running(true), next_thread_id(0), backing_file_(backing_file) {
         congestion_info.active_requests = 0;
         congestion_info.total_bandwidth_used = 0;
         congestion_info.last_reset = std::chrono::steady_clock::now();
         
         // Initialize shared memory manager
-        shm_manager = std::make_unique<SharedMemoryManager>(capacity_mb);
+        if (!backing_file_.empty()) {
+            SPDLOG_INFO("Using backing file for memory: {}", backing_file_);
+            shm_manager = std::make_unique<SharedMemoryManager>(capacity_mb, "/cxlmemsim_shared", true, backing_file_);
+        } else {
+            shm_manager = std::make_unique<SharedMemoryManager>(capacity_mb);
+        }
     }
     
     bool start();
@@ -184,10 +190,12 @@ int main(int argc, char *argv[]) {
         ("interleave_size", "Interleave size", cxxopts::value<size_t>()->default_value("256"))
         ("capacity", "Capacity of CXL expander in MB", cxxopts::value<int>()->default_value("256"))
         ("p,port", "Server port", cxxopts::value<int>()->default_value("9999"))
-        ("t,topology", "Topology file", cxxopts::value<std::string>()->default_value("topology.txt"));
+        ("t,topology", "Topology file", cxxopts::value<std::string>()->default_value("topology.txt"))
+        ("backing-file", "Back CXL memory with a regular file (shared across VMs)", cxxopts::value<std::string>()->default_value(""));
 
     auto result = options.parse(argc, argv);
     
+    std::string backing_file = result["backing-file"].as<std::string>();
     if (result.count("help")) {
         fmt::print("{}\n", options.help());
         return 0;
@@ -245,7 +253,7 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, signal_handler);
     
     try {
-        ThreadPerConnectionServer server(port, controller, capacity);
+        ThreadPerConnectionServer server(port, controller, capacity, backing_file);
         g_server = &server;
         
         if (!server.start()) {
@@ -486,8 +494,23 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     uint64_t cacheline_addr = req.addr & ~(63ULL);  // 64-byte aligned
     bool had_coherency_miss = false;
     
-    // Log CXL Type3 operation
+    // Log CXL Type3 operation with detailed information
     const char* op_name = (req.op_type == 0) ? "CXL_TYPE3_READ" : "CXL_TYPE3_WRITE";
+    
+    // Log incoming request details
+    SPDLOG_INFO("Thread {}: {} request - addr=0x{:x}, size={}, cacheline=0x{:x}", 
+                thread_id, op_name, req.addr, req.size, cacheline_addr);
+    
+    if (req.op_type == 1) {  // WRITE
+        // Log first 16 bytes of write data
+        std::stringstream data_str;
+        for (int i = 0; i < std::min(16UL, req.size); i++) {
+            data_str << std::hex << std::setfill('0') << std::setw(2) 
+                    << static_cast<int>(req.data[i]) << " ";
+        }
+        SPDLOG_INFO("Thread {}: WRITE data (first 16 bytes): {}", 
+                   thread_id, data_str.str());
+    }
     
     // Check if address is valid in shared memory
     if (!shm_manager->is_valid_address(req.addr)) {
@@ -551,15 +574,21 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
                 return;
             }
             
+            // Log the data being read
+            std::stringstream read_data_str;
+            for (int i = 0; i < std::min(16UL, req.size); i++) {
+                read_data_str << std::hex << std::setfill('0') << std::setw(2) 
+                             << static_cast<int>(resp.data[i]) << " ";
+            }
+            SPDLOG_INFO("Thread {}: READ response data (first 16 bytes): {}", 
+                       thread_id, read_data_str.str());
+            
             // Add back invalidation latency penalty if we had one
             if (had_back_invalidation) {
                 had_coherency_miss = true;  // Treat back invalidation as coherency miss
                 SPDLOG_DEBUG("Thread {}: CXL_TYPE3_READ had back invalidation for cacheline 0x{:x}", 
                             thread_id, cacheline_addr);
             }
-            
-            // SPDLOG_INFO("Thread {}: CXL_TYPE3_READ data retrieved - {} bytes from offset {}", 
-            //            thread_id, req.size, offset);
             
             total_reads++;
         } else {  // WRITE
@@ -600,8 +629,20 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
                 return;
             }
             
-            // SPDLOG_INFO("Thread {}: CXL_TYPE3_WRITE data updated - {} bytes at offset {}", 
-            //            thread_id, req.size, offset);
+            SPDLOG_INFO("Thread {}: WRITE completed successfully at addr=0x{:x}, size={}", 
+                       thread_id, req.addr, req.size);
+            
+            // Verify write by reading back
+            uint8_t verify_data[64];
+            if (shm_manager->read_cacheline(req.addr, verify_data, req.size)) {
+                std::stringstream verify_str;
+                for (int i = 0; i < std::min(16UL, req.size); i++) {
+                    verify_str << std::hex << std::setfill('0') << std::setw(2) 
+                              << static_cast<int>(verify_data[i]) << " ";
+                }
+                SPDLOG_INFO("Thread {}: WRITE verification - data in memory: {}", 
+                           thread_id, verify_str.str());
+            }
             
             // Register back invalidation for threads that had this cacheline
             if (!threads_to_invalidate.empty()) {

@@ -11,6 +11,8 @@
 #include <cstdlib>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <errno.h>
 
 #define MAGIC_NUMBER 0x43584C4D454D5348ULL  // "CXLMEMSH"
@@ -31,16 +33,35 @@ SharedMemoryManager::SharedMemoryManager(size_t capacity_mb, const std::string& 
                 capacity_mb, shm_size);
 }
 
+SharedMemoryManager::SharedMemoryManager(size_t capacity_mb, const std::string& shm_name, bool use_file, const std::string& file_path)
+    : capacity_mb(capacity_mb), shm_name(shm_name), shm_fd(-1), shm_base(nullptr),
+      shm_size(0), header(nullptr), data_area(nullptr) {
+    shm_size = capacity_mb * 1024 * 1024;
+    use_file_backing = use_file;
+    backing_file_path = file_path;
+    SPDLOG_INFO("SharedMemoryManager: Capacity {}MB, Total size: {} bytes", capacity_mb, shm_size);
+    if (use_file_backing) {
+        SPDLOG_INFO("Using file backing: {}", backing_file_path);
+    }
+}
+
 SharedMemoryManager::~SharedMemoryManager() {
     cleanup();
 }
 
 bool SharedMemoryManager::initialize() {
     try {
-        // Create or open shared memory
-        if (!create_shared_memory()) {
-            SPDLOG_ERROR("Failed to create shared memory");
-            return false;
+        // Create or open shared memory or file backing
+        if (use_file_backing) {
+            if (!create_file_backing()) {
+                SPDLOG_ERROR("Failed to create backing file");
+                return false;
+            }
+        } else {
+            if (!create_shared_memory()) {
+                SPDLOG_ERROR("Failed to create shared memory");
+                return false;
+            }
         }
         
         // Map shared memory
@@ -69,27 +90,38 @@ bool SharedMemoryManager::initialize() {
 }
 
 bool SharedMemoryManager::create_shared_memory() {
-    // Try to unlink existing shared memory first (in case of previous crash)
-    shm_unlink(shm_name.c_str());
+    // First, try to open existing shared memory
+    shm_fd = shm_open(shm_name.c_str(), O_RDWR, 0666);
+    if (shm_fd != -1) {
+        // Existing shared memory found - try to use it
+        struct stat shm_stat;
+        if (fstat(shm_fd, &shm_stat) == 0 && shm_stat.st_size == (off_t)shm_size) {
+            SPDLOG_INFO("Reusing existing shared memory: {}", shm_name);
+            return true;
+        } else {
+            // Size mismatch, close and recreate
+            close(shm_fd);
+            shm_unlink(shm_name.c_str());
+        }
+    }
     
-    // Create shared memory object
+    // Create new shared memory object
     shm_fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR | O_EXCL, 0666);
     if (shm_fd == -1) {
         if (errno == EEXIST) {
-            // Try to open existing
-            shm_fd = shm_open(shm_name.c_str(), O_RDWR, 0666);
+            // Race condition - try to unlink and recreate
+            shm_unlink(shm_name.c_str());
+            shm_fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR | O_EXCL, 0666);
             if (shm_fd == -1) {
-                SPDLOG_ERROR("Failed to open existing shared memory: {}", strerror(errno));
+                SPDLOG_ERROR("Failed to recreate shared memory after unlink: {}", strerror(errno));
                 return false;
             }
-            SPDLOG_INFO("Opened existing shared memory: {}", shm_name);
         } else {
             SPDLOG_ERROR("Failed to create shared memory: {}", strerror(errno));
             return false;
         }
-    } else {
-        SPDLOG_INFO("Created new shared memory: {}", shm_name);
     }
+    SPDLOG_INFO("Created new shared memory: {}", shm_name);
     
     // Set size
     if (ftruncate(shm_fd, shm_size) == -1) {
@@ -99,6 +131,24 @@ bool SharedMemoryManager::create_shared_memory() {
         return false;
     }
     
+    return true;
+}
+
+bool SharedMemoryManager::create_file_backing() {
+    // Create or open regular file for backing
+    int fd = open(backing_file_path.c_str(), O_RDWR | O_CREAT, 0666);
+    if (fd == -1) {
+        SPDLOG_ERROR("Failed to open backing file {}: {}", backing_file_path, strerror(errno));
+        return false;
+    }
+    // Ensure size
+    if (ftruncate(fd, shm_size) == -1) {
+        SPDLOG_ERROR("Failed to set file size: {}", strerror(errno));
+        close(fd);
+        return false;
+    }
+    shm_fd = fd;
+    SPDLOG_INFO("Opened backing file: {} ({} bytes)", backing_file_path, shm_size);
     return true;
 }
 
@@ -155,9 +205,15 @@ void SharedMemoryManager::initialize_header() {
 }
 
 void SharedMemoryManager::initialize_data_area() {
-    // Clear the data area (optional, for security)
+    // Only clear data if this is a fresh initialization (magic number not present)
     size_t data_size = shm_size - sizeof(SharedMemoryHeader);
-    memset(data_area, 0, data_size);
+    if (header->magic != MAGIC_NUMBER) {
+        // Clear the data area only for new shared memory
+        memset(data_area, 0, data_size);
+        SPDLOG_INFO("Cleared data area for new shared memory initialization");
+    } else {
+        SPDLOG_INFO("Preserving existing data in shared memory");
+    }
     
     // Initialize memory regions
     // Start with one large region covering all CXL memory
@@ -295,8 +351,10 @@ bool SharedMemoryManager::write_cacheline(uint64_t addr, const uint8_t* data, si
         // Use stronger memory barrier for shared memory
         __sync_synchronize();
         // Force sync entire shared memory region to ensure persistence
-        if (msync(shm_base, shm_size, MS_SYNC) != 0) {
-            SPDLOG_WARN("msync failed: {}", strerror(errno));
+        if (msync(shm_base, shm_size, MS_SYNC | MS_INVALIDATE) != 0) {
+            SPDLOG_ERROR("msync failed: {}", strerror(errno));
+            // Critical error - data might not be visible to other processes
+            return false;
         }
         
         SPDLOG_DEBUG("Total wrote {} bytes starting at addr 0x{:x}", size, addr);
@@ -324,8 +382,10 @@ bool SharedMemoryManager::write_cacheline(uint64_t addr, const uint8_t* data, si
     // Memory barrier to ensure write is visible to other processes
     __sync_synchronize();
     // Force sync to backing store
-    if (msync(shm_base, shm_size, MS_SYNC) != 0) {
-        SPDLOG_WARN("msync failed: {}", strerror(errno));
+    if (msync(shm_base, shm_size, MS_SYNC | MS_INVALIDATE) != 0) {
+        SPDLOG_ERROR("msync failed: {}", strerror(errno));
+        // Critical error - data might not be visible to other processes
+        return false;
     }
     
     SPDLOG_DEBUG("Wrote {} bytes to addr 0x{:x} (cacheline 0x{:x} offset {})",

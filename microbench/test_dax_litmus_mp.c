@@ -31,15 +31,65 @@ int main(int argc, char **argv) {
     size_t payload_len = (size > 8192) ? (size - 8192) : 4096;      // at least 4KB
     if (payload_len > (256 * 1024)) payload_len = 256 * 1024;       // cap to keep runs quick
 
+    // Clear control on first runner to known state if both zero
     if (role == ROLE_A) {
+        uint32_t ra = atomic_load_explicit(&ctrl->ready_a, memory_order_relaxed);
+        uint32_t rb = atomic_load_explicit(&ctrl->ready_b, memory_order_relaxed);
+        if (ra == 0 && rb == 0) {
+            atomic_store_explicit(&ctrl->magic, 0, memory_order_relaxed);
+            atomic_store_explicit(&ctrl->seq, 0, memory_order_relaxed);
+            atomic_store_explicit(&ctrl->flag, 0, memory_order_relaxed);
+        }
         atomic_store_explicit(&ctrl->ready_a, 1, memory_order_release);
-        // Wait for B
-        while (atomic_load_explicit(&ctrl->ready_b, memory_order_acquire) == 0) busy_pause();
+        // Wait for B with timeout and debug prints
+        uint64_t spins = 0;
+        while (atomic_load_explicit(&ctrl->ready_b, memory_order_acquire) == 0) {
+            if ((++spins % 1000) == 0) {
+                fprintf(stderr, "[MP] waiting ready_b... ra=%u rb=%u magic=%u\n",
+                        atomic_load_explicit(&ctrl->ready_a, memory_order_relaxed),
+                        atomic_load_explicit(&ctrl->ready_b, memory_order_relaxed),
+                        atomic_load_explicit(&ctrl->magic, memory_order_relaxed));
+            }
+            busy_pause();
+            if (spins > 60000) { // ~60s
+                fprintf(stderr, "[MP] timeout waiting for ready_b. Check shared backend/offset.\n");
+                unmap_region(&mh);
+                return 10;
+            }
+        }
         atomic_store_explicit(&ctrl->magic, 0xC0DEC0DEu, memory_order_release);
     } else {
         atomic_store_explicit(&ctrl->ready_b, 1, memory_order_release);
-        while (atomic_load_explicit(&ctrl->ready_a, memory_order_acquire) == 0) busy_pause();
-        while (atomic_load_explicit(&ctrl->magic, memory_order_acquire) != 0xC0DEC0DEu) busy_pause();
+        uint64_t spins = 0;
+        while (atomic_load_explicit(&ctrl->ready_a, memory_order_acquire) == 0) {
+            if ((++spins % 1000) == 0) {
+                fprintf(stderr, "[MP] waiting ready_a... ra=%u rb=%u magic=%u\n",
+                        atomic_load_explicit(&ctrl->ready_a, memory_order_relaxed),
+                        atomic_load_explicit(&ctrl->ready_b, memory_order_relaxed),
+                        atomic_load_explicit(&ctrl->magic, memory_order_relaxed));
+            }
+            busy_pause();
+            if (spins > 60000) {
+                fprintf(stderr, "[MP] timeout waiting for ready_a. Check shared backend/offset.\n");
+                unmap_region(&mh);
+                return 11;
+            }
+        }
+        spins = 0;
+        while (atomic_load_explicit(&ctrl->magic, memory_order_acquire) != 0xC0DEC0DEu) {
+            if ((++spins % 1000) == 0) {
+                fprintf(stderr, "[MP] waiting magic... ra=%u rb=%u magic=%u\n",
+                        atomic_load_explicit(&ctrl->ready_a, memory_order_relaxed),
+                        atomic_load_explicit(&ctrl->ready_b, memory_order_relaxed),
+                        atomic_load_explicit(&ctrl->magic, memory_order_relaxed));
+            }
+            busy_pause();
+            if (spins > 60000) {
+                fprintf(stderr, "[MP] timeout waiting for magic. Check A is running.\n");
+                unmap_region(&mh);
+                return 12;
+            }
+        }
     }
 
     const uint32_t iters = 1000;
@@ -100,4 +150,3 @@ int main(int argc, char **argv) {
         return 3;
     }
 }
-

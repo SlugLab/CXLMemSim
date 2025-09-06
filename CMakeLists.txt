@@ -25,7 +25,8 @@ list(APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR})
 
 find_package(cxxopts REQUIRED)
 find_package(spdlog REQUIRED)
-file(GLOB_RECURSE SOURCE_FILES src/cxl*.cpp src/shared_memory_manager.cc src/policy.cpp src/helper.cpp src/incore.cpp src/uncore.cpp src/perf.cpp)
+file(GLOB_RECURSE SOURCE_FILES src/cxl*.cpp src/policy.cpp src/helper.cpp src/incore.cpp src/uncore.cpp src/perf.cpp)
+set(SERVER_SOURCES src/main_server.cc src/shared_memory_manager.cc)
 
 execute_process(COMMAND uname -r OUTPUT_VARIABLE arch OUTPUT_STRIP_TRAILING_WHITESPACE)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fPIC -pthread")
@@ -35,7 +36,7 @@ set(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -latomic")
 if(SERVER_MODE)
     add_compile_definitions(SERVER_MODE)
 else()
-    add_subdirectory(qemu_integration)
+    # add_subdirectory(qemu_integration)
 endif()
 
 # Create a static library of CXL core functionality
@@ -49,12 +50,12 @@ if(SERVER_MODE)
     set_target_properties(cxlmemsim_latency PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
-    add_executable(CXLMemSim ${SOURCE_FILES} src/main_server.cc)
-    target_include_directories(CXLMemSim PRIVATE include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
-    target_link_libraries(CXLMemSim cxxopts::cxxopts spdlog::spdlog)
+    add_executable(cxlmemsim_server ${SERVER_SOURCES})
+    target_include_directories(cxlmemsim_server PRIVATE include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
+    target_link_libraries(cxlmemsim_server cxlmemsim cxxopts::cxxopts spdlog::spdlog rt)
 else()
     # Build full version with monitor support
-    add_executable(CXLMemSimServer ${SOURCE_FILES} src/main_server.cc)
-    include_directories(CXLMemSimServer include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR} ${runtime_SOURCE_DIR}/include)
-    target_link_libraries(CXLMemSimServer cxxopts::cxxopts spdlog::spdlog)
+    add_executable(cxlmemsim_server ${SERVER_SOURCES})
+    target_include_directories(cxlmemsim_server PRIVATE include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
+    target_link_libraries(cxlmemsim_server cxlmemsim cxxopts::cxxopts spdlog::spdlog rt)
 endif()

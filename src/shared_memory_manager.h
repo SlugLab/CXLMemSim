@@ -57,6 +57,9 @@ private:
     void* shm_base;
     size_t shm_size;
     size_t capacity_mb;
+    // Optional file backing instead of POSIX shm
+    bool use_file_backing = false;
+    std::string backing_file_path;
     
     // Memory layout:
     // [Header][Cacheline Data Area][Metadata Area]
@@ -87,6 +90,7 @@ private:
     
 public:
     explicit SharedMemoryManager(size_t capacity_mb, const std::string& shm_name = "/cxlmemsim_shared");
+    SharedMemoryManager(size_t capacity_mb, const std::string& shm_name, bool use_file, const std::string& file_path);
     ~SharedMemoryManager();
     
     // Initialize shared memory
@@ -139,6 +143,7 @@ public:
     
 private:
     bool create_shared_memory();
+    bool create_file_backing();
     bool map_shared_memory();
     void initialize_header();
     void initialize_data_area();
