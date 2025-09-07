@@ -34,3 +34,6 @@
 [submodule "lib/qemu"]
 	path = lib/qemu
 	url = https://github.com/CXLMemUring/qemu
+[submodule "workloads/tigon"]
+	path = workloads/tigon
+	url = https://github.com/CXLMemUring/tigon
