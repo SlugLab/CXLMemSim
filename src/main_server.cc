@@ -28,9 +28,11 @@
 #include <atomic>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <signal.h>
 #include <cstring>
+#include <errno.h>
 #include <sstream>
 #include <algorithm>
 #include <chrono>
@@ -143,7 +145,7 @@ public:
     bool start();
     void run();
     void stop();
-    void handle_client(int client_fd);
+    void handle_client(int client_fd, int thread_id);
     
 private:
     // Coherency protocol methods
@@ -334,7 +336,8 @@ void ThreadPerConnectionServer::run() {
         
         {
             std::lock_guard<std::mutex> lock(thread_list_mutex);
-            client_threads.emplace_back(&ThreadPerConnectionServer::handle_client, this, client_fd);
+            // Pass thread_id to handle_client
+            client_threads.emplace_back(&ThreadPerConnectionServer::handle_client, this, client_fd, thread_id);
             client_threads.back().detach();  // Detach to allow independent execution
         }
         
@@ -498,8 +501,8 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     const char* op_name = (req.op_type == 0) ? "CXL_TYPE3_READ" : "CXL_TYPE3_WRITE";
     
     // Log incoming request details
-    SPDLOG_INFO("Thread {}: {} request - addr=0x{:x}, size={}, cacheline=0x{:x}", 
-                thread_id, op_name, req.addr, req.size, cacheline_addr);
+    // SPDLOG_INFO("Thread {}: {} request - addr=0x{:x}, size={}, cacheline=0x{:x}", 
+    //             thread_id, op_name, req.addr, req.size, cacheline_addr);
     
     if (req.op_type == 1) {  // WRITE
         // Log first 16 bytes of write data
@@ -508,17 +511,17 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             data_str << std::hex << std::setfill('0') << std::setw(2) 
                     << static_cast<int>(req.data[i]) << " ";
         }
-        SPDLOG_INFO("Thread {}: WRITE data (first 16 bytes): {}", 
-                   thread_id, data_str.str());
+        // SPDLOG_INFO("Thread {}: WRITE data (first 16 bytes): {}", 
+        //            thread_id, data_str.str());
     }
     
     // Check if address is valid in shared memory
-    if (!shm_manager->is_valid_address(req.addr)) {
-        SPDLOG_ERROR("Thread {}: Invalid address 0x{:x} not in CXL memory range", 
-                    thread_id, req.addr);
-        resp.status = 1;
-        return;
-    }
+    // if (!shm_manager->is_valid_address(req.addr)) {
+    //     SPDLOG_ERROR("Thread {}: Invalid address 0x{:x} not in CXL memory range", 
+    //                 thread_id, req.addr);
+    //     resp.status = 1;
+    //     return;
+    // }
     
     // Increment active requests
     congestion_info.active_requests++;
@@ -550,8 +553,8 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
         
         // Check if we need coherency actions
         if (req.op_type == 0) {  // READ
-            SPDLOG_DEBUG("Thread {}: CXL_TYPE3_READ processing - checking coherency for cacheline 0x{:x}", 
-                        thread_id, cacheline_addr);
+            // SPDLOG_DEBUG("Thread {}: CXL_TYPE3_READ processing - checking coherency for cacheline 0x{:x}", 
+            //             thread_id, cacheline_addr);
             
             // First check for back invalidations
             bool had_back_invalidation = check_and_apply_back_invalidations(cacheline_addr, thread_id, info);
@@ -697,9 +700,20 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     //             thread_id, cacheline_addr, req.addr - cacheline_addr, req.size);
 }
 
-void ThreadPerConnectionServer::handle_client(int client_fd) {
-    int thread_id = next_thread_id - 1;  // Get our thread ID
-    SPDLOG_INFO("Thread {}: Client connected", thread_id);
+void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
+    // Thread ID is now passed as parameter
+    
+    // Get client information for debugging
+    struct sockaddr_in client_addr;
+    socklen_t addr_len = sizeof(client_addr);
+    if (getpeername(client_fd, (struct sockaddr*)&client_addr, &addr_len) == 0) {
+        char client_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
+        SPDLOG_INFO("Thread {}: Client connected from {}:{} (fd={})", 
+                   thread_id, client_ip, ntohs(client_addr.sin_port), client_fd);
+    } else {
+        SPDLOG_INFO("Thread {}: Client connected (fd={})", thread_id, client_fd);
+    }
     
     while (running) {
         ServerRequest req;
@@ -707,9 +721,34 @@ void ThreadPerConnectionServer::handle_client(int client_fd) {
         
         if (received != sizeof(req)) {
             if (received == 0) {
-                SPDLOG_INFO("Thread {}: Client disconnected", thread_id);
+                // This might be a probe connection - don't log as error
+                SPDLOG_DEBUG("Thread {}: Client disconnected (probe connection?)", thread_id);
+            } else if (received < 0) {
+                int err = errno;
+                if (err == ECONNRESET) {
+                    SPDLOG_INFO("Thread {}: Connection reset by peer", thread_id);
+                } else if (err == ETIMEDOUT) {
+                    SPDLOG_INFO("Thread {}: Connection timed out", thread_id);
+                } else if (err == EAGAIN || err == EWOULDBLOCK) {
+                    // Non-blocking socket, no data available
+                    continue;
+                } else {
+                    SPDLOG_ERROR("Thread {}: recv() failed with error: {} ({})", 
+                                thread_id, strerror(err), err);
+                }
             } else {
-                SPDLOG_ERROR("Thread {}: Failed to receive request", thread_id);
+                SPDLOG_ERROR("Thread {}: Incomplete request - received {} bytes, expected {}", 
+                            thread_id, received, sizeof(req));
+                // Dump what we received for debugging
+                if (received > 0) {
+                    std::stringstream hex_dump;
+                    unsigned char* buf = (unsigned char*)&req;
+                    for (ssize_t i = 0; i < received && i < 32; i++) {
+                        hex_dump << std::hex << std::setfill('0') << std::setw(2) 
+                                << (int)buf[i] << " ";
+                    }
+                    SPDLOG_DEBUG("Thread {}: Partial data: {}", thread_id, hex_dump.str());
+                }
             }
             break;
         }
