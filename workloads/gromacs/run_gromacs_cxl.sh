@@ -150,7 +150,7 @@ fi
 
 # Run GROMACS with MPI
 echo "Running: mpirun -np $NUM_PROCS $GMX_MPI $@"
-mpirun -np "$NUM_PROCS" "$GMX_MPI" "$@"
+mpirun --allow-run-as-root -np "$NUM_PROCS" "$GMX_MPI" "$@"
 
 exit_code=$?
 echo

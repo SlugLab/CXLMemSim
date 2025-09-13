@@ -26,7 +26,7 @@ list(APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR})
 find_package(cxxopts REQUIRED)
 find_package(spdlog REQUIRED)
 file(GLOB_RECURSE SOURCE_FILES src/cxl*.cpp src/policy.cpp src/helper.cpp src/incore.cpp src/uncore.cpp src/perf.cpp)
-set(SERVER_SOURCES src/main_server.cc src/shared_memory_manager.cc)
+set(SERVER_SOURCES src/main_server.cc src/shared_memory_manager.cc src/shm_communication.cpp)
 
 execute_process(COMMAND uname -r OUTPUT_VARIABLE arch OUTPUT_STRIP_TRAILING_WHITESPACE)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fPIC -pthread")

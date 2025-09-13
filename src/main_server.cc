@@ -13,6 +13,7 @@
 #include "helper.h"
 #include "policy.h"
 #include "shared_memory_manager.h"
+#include "../include/shm_communication.h"
 #include <cerrno>
 #include <cxxopts.hpp>
 #include <spdlog/cfg/env.h>
@@ -85,6 +86,12 @@ struct BackInvalidationEntry {
     std::vector<uint8_t> dirty_data;
 };
 
+// Communication mode enum
+enum class CommMode {
+    TCP,
+    SHM  // Shared Memory via /dev/shm
+};
+
 // Thread-per-connection server class
 class ThreadPerConnectionServer {
 private:
@@ -93,6 +100,10 @@ private:
     CXLController* controller;
     std::atomic<bool> running;
     std::atomic<int> next_thread_id;
+    
+    // Communication mode
+    CommMode comm_mode;
+    std::unique_ptr<ShmCommunicationManager> shm_comm_manager;
     
     // Shared memory manager for real memory allocation
     std::unique_ptr<SharedMemoryManager> shm_manager;
@@ -127,8 +138,10 @@ private:
     std::atomic<uint64_t> back_invalidations{0};
     
 public:
-    ThreadPerConnectionServer(int port, CXLController* ctrl, size_t capacity_mb, const std::string& backing_file = "")
-        : port(port), controller(ctrl), running(true), next_thread_id(0), backing_file_(backing_file) {
+    ThreadPerConnectionServer(int port, CXLController* ctrl, size_t capacity_mb, 
+                            const std::string& backing_file = "", CommMode mode = CommMode::TCP)
+        : port(port), controller(ctrl), running(true), next_thread_id(0), 
+          backing_file_(backing_file), comm_mode(mode) {
         congestion_info.active_requests = 0;
         congestion_info.total_bandwidth_used = 0;
         congestion_info.last_reset = std::chrono::steady_clock::now();
@@ -146,6 +159,10 @@ public:
     void run();
     void stop();
     void handle_client(int client_fd, int thread_id);
+    
+    // Shared memory mode methods
+    void run_shm_mode();
+    void handle_shm_requests();
     
 private:
     // Coherency protocol methods
@@ -193,7 +210,8 @@ int main(int argc, char *argv[]) {
         ("capacity", "Capacity of CXL expander in MB", cxxopts::value<int>()->default_value("256"))
         ("p,port", "Server port", cxxopts::value<int>()->default_value("9999"))
         ("t,topology", "Topology file", cxxopts::value<std::string>()->default_value("topology.txt"))
-        ("backing-file", "Back CXL memory with a regular file (shared across VMs)", cxxopts::value<std::string>()->default_value(""));
+        ("backing-file", "Back CXL memory with a regular file (shared across VMs)", cxxopts::value<std::string>()->default_value(""))
+        ("comm-mode", "Communication mode: tcp or shm (shared memory)", cxxopts::value<std::string>()->default_value("tcp"));
 
     auto result = options.parse(argc, argv);
     
@@ -209,6 +227,16 @@ int main(int argc, char *argv[]) {
     int capacity = result["capacity"].as<int>();
     int port = result["port"].as<int>();
     std::string topology = result["topology"].as<std::string>();
+    std::string comm_mode_str = result["comm-mode"].as<std::string>();
+    
+    // Parse communication mode
+    CommMode comm_mode = CommMode::TCP;
+    if (comm_mode_str == "shm" || comm_mode_str == "shared_memory") {
+        comm_mode = CommMode::SHM;
+    } else if (comm_mode_str != "tcp") {
+        SPDLOG_ERROR("Invalid communication mode: {}. Use 'tcp' or 'shm'", comm_mode_str);
+        return 1;
+    }
     
     // Initialize policies
     std::array<Policy *, 4> policies = {
@@ -240,6 +268,7 @@ int main(int argc, char *argv[]) {
     SPDLOG_INFO("CXLMemSim CXL Type3 Memory Server");
     SPDLOG_INFO("========================================");
     SPDLOG_INFO("Server Configuration:");
+    SPDLOG_INFO("  Communication Mode: {}", comm_mode == CommMode::TCP ? "TCP" : "Shared Memory (/dev/shm)");
     SPDLOG_INFO("  Port: {}", port);
     SPDLOG_INFO("  Topology: {}", topology);
     SPDLOG_INFO("  Capacity: {} MB", capacity);
@@ -255,7 +284,7 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, signal_handler);
     
     try {
-        ThreadPerConnectionServer server(port, controller, capacity, backing_file);
+        ThreadPerConnectionServer server(port, controller, capacity, backing_file, comm_mode);
         g_server = &server;
         
         if (!server.start()) {
@@ -287,6 +316,18 @@ bool ThreadPerConnectionServer::start() {
     SPDLOG_INFO("  Base address: 0x{:x}", shm_info.base_addr);
     SPDLOG_INFO("  Cachelines: {}", shm_info.num_cachelines);
     
+    if (comm_mode == CommMode::SHM) {
+        // Initialize shared memory communication
+        shm_comm_manager = std::make_unique<ShmCommunicationManager>("/cxlmemsim_comm", true);
+        if (!shm_comm_manager->initialize()) {
+            SPDLOG_ERROR("Failed to initialize shared memory communication");
+            return false;
+        }
+        SPDLOG_INFO("Server using shared memory communication mode");
+        return true;
+    }
+    
+    // TCP mode initialization
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
         SPDLOG_ERROR("Failed to create socket");
@@ -319,6 +360,12 @@ bool ThreadPerConnectionServer::start() {
 }
 
 void ThreadPerConnectionServer::run() {
+    if (comm_mode == CommMode::SHM) {
+        run_shm_mode();
+        return;
+    }
+    
+    // TCP mode
     while (running) {
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
@@ -853,4 +900,74 @@ bool ThreadPerConnectionServer::check_and_apply_back_invalidations(uint64_t cach
     }
     
     return had_back_invalidation;
+}
+
+// Shared memory mode implementation
+void ThreadPerConnectionServer::run_shm_mode() {
+    SPDLOG_INFO("Running in shared memory communication mode");
+    
+    // Create worker threads for handling SHM requests
+    const int num_workers = 4;  // Configurable number of worker threads
+    std::vector<std::thread> workers;
+    
+    for (int i = 0; i < num_workers; i++) {
+        workers.emplace_back(&ThreadPerConnectionServer::handle_shm_requests, this);
+    }
+    
+    // Wait for workers to finish (they won't unless stopped)
+    for (auto& worker : workers) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+}
+
+void ThreadPerConnectionServer::handle_shm_requests() {
+    while (running) {
+        uint32_t client_id;
+        ShmRequest shm_req;
+        
+        // Wait for request with 100ms timeout
+        if (!shm_comm_manager->wait_for_request(client_id, shm_req, 100)) {
+            continue;
+        }
+        
+        // Convert ShmRequest to ServerRequest format
+        ServerRequest req;
+        req.op_type = shm_req.op_type;
+        req.addr = shm_req.addr;
+        req.size = shm_req.size;
+        req.timestamp = shm_req.timestamp;
+        std::memcpy(req.data, shm_req.data, sizeof(req.data));
+        
+        // Handle special request for shared memory info
+        if (req.op_type == 2) {  // GET_SHM_INFO
+            ShmResponse shm_resp = {0};
+            auto shm_info = shm_manager->get_shm_info();
+            
+            // For SHM mode, we return the info in the data field
+            // Format: first 8 bytes = base_addr, next 8 = size, next 8 = num_cachelines
+            uint64_t* data_ptr = reinterpret_cast<uint64_t*>(shm_resp.data);
+            data_ptr[0] = shm_info.base_addr;
+            data_ptr[1] = shm_info.size;
+            data_ptr[2] = shm_info.num_cachelines;
+            shm_resp.status = 0;
+            
+            shm_comm_manager->send_response(client_id, shm_resp);
+            continue;
+        }
+        
+        // Process regular request
+        ServerResponse resp = {0};
+        handle_request(-1, client_id, req, resp);  // Use client_id as thread_id
+        
+        // Convert ServerResponse to ShmResponse
+        ShmResponse shm_resp;
+        shm_resp.status = resp.status;
+        shm_resp.latency_ns = resp.latency_ns;
+        std::memcpy(shm_resp.data, resp.data, sizeof(shm_resp.data));
+        
+        // Send response back
+        shm_comm_manager->send_response(client_id, shm_resp);
+    }
 }
