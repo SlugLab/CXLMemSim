@@ -195,89 +195,138 @@ static void unregister_mapping(void *addr) {
 
 // MPI Function Interceptions
 int MPI_Init(int *argc, char ***argv) {
+    fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Init called (PID: %d)\n", getpid());
+    fflush(stderr);
+
     if (!orig_MPI_Init) {
         orig_MPI_Init = dlsym(RTLD_NEXT, "MPI_Init");
+        fprintf(stderr, "[CXL_SHIM] HOOK: Found original MPI_Init at %p\n", orig_MPI_Init);
+        fflush(stderr);
     }
-    
+
     init_cxl_memory();
-    
+
+    fprintf(stderr, "[CXL_SHIM] HOOK: Calling original MPI_Init\n");
+    fflush(stderr);
+
     int ret = orig_MPI_Init(argc, argv);
-    
-    if (getenv("CXL_SHIM_VERBOSE")) {
-        int rank;
-        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        fprintf(stderr, "[CXL_SHIM] MPI_Init completed on rank %d\n", rank);
-    }
-    
+
+    int rank = -1;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Init completed on rank %d (return: %d)\n", rank, ret);
+    fflush(stderr);
+
     return ret;
 }
 
 int MPI_Finalize(void) {
+    fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Finalize called (PID: %d)\n", getpid());
+    fflush(stderr);
+
     if (!orig_MPI_Finalize) {
         orig_MPI_Finalize = dlsym(RTLD_NEXT, "MPI_Finalize");
+        fprintf(stderr, "[CXL_SHIM] HOOK: Found original MPI_Finalize at %p\n", orig_MPI_Finalize);
+        fflush(stderr);
     }
-    
+
     int ret = orig_MPI_Finalize();
-    
+
     if (g_cxl.initialized) {
+        fprintf(stderr, "[CXL_SHIM] HOOK: Cleaning up CXL memory\n");
         munmap(g_cxl.base, g_cxl.size);
         close(g_cxl.fd);
         g_cxl.initialized = false;
     }
-    
+
+    fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Finalize completed (return: %d)\n", ret);
+    fflush(stderr);
+
     return ret;
 }
 
 int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm) {
+    static _Atomic int send_count = 0;
+    int call_num = atomic_fetch_add(&send_count, 1);
+
+    if (getenv("CXL_SHIM_VERBOSE")) {
+        fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Send #%d called (count=%d, dest=%d, tag=%d)\n",
+                call_num, count, dest, tag);
+        fflush(stderr);
+    }
+
     if (!orig_MPI_Send) {
         orig_MPI_Send = dlsym(RTLD_NEXT, "MPI_Send");
     }
-    
+
     // Check if buffer is in CXL memory or needs to be copied
     void *cxl_buf = find_cxl_mapping(buf);
     if (!cxl_buf && g_cxl.initialized && getenv("CXL_SHIM_COPY_SEND")) {
         int size;
         MPI_Type_size(datatype, &size);
         size_t total_size = (size_t)count * size;
-        
+
         cxl_buf = allocate_cxl_memory(total_size);
         if (cxl_buf) {
             memcpy(cxl_buf, buf, total_size);
             buf = cxl_buf;
+            if (getenv("CXL_SHIM_VERBOSE")) {
+                fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Send #%d using CXL buffer at %p (size=%zu)\n",
+                        call_num, cxl_buf, total_size);
+                fflush(stderr);
+            }
         }
     }
-    
+
     return orig_MPI_Send(buf, count, datatype, dest, tag, comm);
 }
 
 int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status) {
+    static _Atomic int recv_count = 0;
+    int call_num = atomic_fetch_add(&recv_count, 1);
+
+    if (getenv("CXL_SHIM_VERBOSE")) {
+        fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Recv #%d called (count=%d, source=%d, tag=%d)\n",
+                call_num, count, source, tag);
+        fflush(stderr);
+    }
+
     if (!orig_MPI_Recv) {
         orig_MPI_Recv = dlsym(RTLD_NEXT, "MPI_Recv");
     }
-    
+
     void *cxl_buf = find_cxl_mapping(buf);
     void *recv_buf = cxl_buf ? cxl_buf : buf;
-    
+
     if (!cxl_buf && g_cxl.initialized && getenv("CXL_SHIM_COPY_RECV")) {
         int size;
         MPI_Type_size(datatype, &size);
         size_t total_size = (size_t)count * size;
-        
+
         cxl_buf = allocate_cxl_memory(total_size);
         if (cxl_buf) {
             recv_buf = cxl_buf;
+            if (getenv("CXL_SHIM_VERBOSE")) {
+                fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Recv #%d using CXL buffer at %p (size=%zu)\n",
+                        call_num, cxl_buf, total_size);
+                fflush(stderr);
+            }
         }
     }
-    
+
     int ret = orig_MPI_Recv(recv_buf, count, datatype, source, tag, comm, status);
-    
+
     if (cxl_buf && recv_buf != buf) {
         int size;
         MPI_Type_size(datatype, &size);
         size_t total_size = (size_t)count * size;
         memcpy(buf, recv_buf, total_size);
     }
-    
+
+    if (getenv("CXL_SHIM_VERBOSE")) {
+        fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Recv #%d completed (return: %d)\n", call_num, ret);
+        fflush(stderr);
+    }
+
     return ret;
 }
 
@@ -418,10 +467,33 @@ int MPI_Win_allocate_shared(MPI_Aint size, int disp_unit, MPI_Info info, MPI_Com
 __attribute__((constructor))
 static void shim_init(void) {
     pthread_mutex_init(&g_cxl.lock, NULL);
-    
-    if (getenv("CXL_SHIM_VERBOSE")) {
-        fprintf(stderr, "[CXL_SHIM] MPI CXL shim layer loaded\n");
+
+    // Always print initialization message for debugging
+    fprintf(stderr, "[CXL_SHIM] ========================================\n");
+    fprintf(stderr, "[CXL_SHIM] MPI CXL shim layer loaded successfully!\n");
+    fprintf(stderr, "[CXL_SHIM] PID: %d\n", getpid());
+    fprintf(stderr, "[CXL_SHIM] LD_PRELOAD: %s\n", getenv("LD_PRELOAD") ? getenv("LD_PRELOAD") : "(not set)");
+
+    // Print environment variables
+    fprintf(stderr, "[CXL_SHIM] Environment variables:\n");
+    fprintf(stderr, "[CXL_SHIM]   CXL_SHIM_VERBOSE: %s\n", getenv("CXL_SHIM_VERBOSE") ? "YES" : "NO");
+    fprintf(stderr, "[CXL_SHIM]   CXL_SHIM_ALLOC: %s\n", getenv("CXL_SHIM_ALLOC") ? "YES" : "NO");
+    fprintf(stderr, "[CXL_SHIM]   CXL_SHIM_WIN: %s\n", getenv("CXL_SHIM_WIN") ? "YES" : "NO");
+    fprintf(stderr, "[CXL_SHIM]   CXL_SHIM_COPY_SEND: %s\n", getenv("CXL_SHIM_COPY_SEND") ? "YES" : "NO");
+    fprintf(stderr, "[CXL_SHIM]   CXL_SHIM_COPY_RECV: %s\n", getenv("CXL_SHIM_COPY_RECV") ? "YES" : "NO");
+    fprintf(stderr, "[CXL_SHIM]   CXL_DAX_PATH: %s\n", getenv("CXL_DAX_PATH") ? getenv("CXL_DAX_PATH") : "(not set)");
+    fprintf(stderr, "[CXL_SHIM]   CXL_MEM_SIZE: %s\n", getenv("CXL_MEM_SIZE") ? getenv("CXL_MEM_SIZE") : "(not set)");
+
+    // Check if we can find MPI symbols
+    void *handle = dlopen(NULL, RTLD_LAZY);
+    if (handle) {
+        void *mpi_init_sym = dlsym(handle, "MPI_Init");
+        fprintf(stderr, "[CXL_SHIM] MPI_Init symbol found at: %p\n", mpi_init_sym);
+        dlclose(handle);
     }
+
+    fprintf(stderr, "[CXL_SHIM] ========================================\n");
+    fflush(stderr);
 }
 
 // Destructor to cleanup when library is unloaded
