@@ -12,10 +12,10 @@ export CXL_MEMSIM_MODE=shm
 exec $QEMU_BINARY \
     --enable-kvm -cpu qemu64,+xsave,+rdtscp,+avx,+avx2,+sse4.1,+sse4.2,+avx512f,+avx512dq,+avx512ifma,+avx512cd,+avx512bw,+avx512vl,+avx512vbmi,+clflushopt  \
     -kernel /root/tdx-linux/arch/x86/boot/bzImage \
-    -append "root=/dev/sda rw console=ttyS0,115200 ignore_loglevel nokaslr nokaslr nosmp nopti nospectre_v2 mem=2G" \
-    -netdev tap,id=network0,ifname=tap0,script=no,downscript=no \
-    -device e1000,netdev=network0,mac=52:54:00:00:00:01 \
-    -drive file=/home/victoryang00/CXLMemSim/build/qemu1.img,index=0,media=disk,format=raw \
+    -append "root=/dev/sda rw console=ttyS0,115200 ignore_loglevel nokaslr nokaslr nosmp nopti nospectre_v2 mem=2G memmap=256M\$0x100000000" \
+    -netdev tap,id=network0,ifname=tap1,script=no,downscript=no \
+    -device e1000,netdev=network0,mac=52:54:00:00:00:02 \
+    -drive file=/home/victoryang00/CXLMemSim/build/qemu.img,index=0,media=disk,format=raw \
     -M q35,cxl=on -m 4G,maxmem=8G,slots=8 -smp 4 \
     -device pxb-cxl,bus_nr=12,bus=pcie.0,id=cxl.1 \
     -device cxl-rp,port=0,bus=cxl.1,id=root_port13,chassis=0,slot=0 \

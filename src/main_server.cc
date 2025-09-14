@@ -630,8 +630,8 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
                 read_data_str << std::hex << std::setfill('0') << std::setw(2) 
                              << static_cast<int>(resp.data[i]) << " ";
             }
-            SPDLOG_INFO("Thread {}: READ response data (first 16 bytes): {}", 
-                       thread_id, read_data_str.str());
+            // SPDLOG_INFO("Thread {}: READ response data (first 16 bytes): {}", 
+            //            thread_id, read_data_str.str());
             
             // Add back invalidation latency penalty if we had one
             if (had_back_invalidation) {
@@ -679,8 +679,8 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
                 return;
             }
             
-            SPDLOG_INFO("Thread {}: WRITE completed successfully at addr=0x{:x}, size={}", 
-                       thread_id, req.addr, req.size);
+            // SPDLOG_INFO("Thread {}: WRITE completed successfully at addr=0x{:x}, size={}", 
+                    //    thread_id, req.addr, req.size);
             
             // Verify write by reading back
             uint8_t verify_data[64];
