@@ -15,11 +15,16 @@
 #include <unistd.h>
 #include <execinfo.h>
 #include <signal.h>
+#include <stdarg.h>
 
 #define CACHELINE_SIZE 64
 #define DEFAULT_CXL_SIZE (4UL * 1024 * 1024 * 1024)  // 4GB default
 #define CXL_ALIGNMENT 4096
 #define SHIM_VERSION "2.0"
+
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
 
 // Add color output for better visibility
 #define RED     "\x1b[31m"
@@ -109,90 +114,145 @@ static void signal_handler(int sig) {
     exit(1);
 }
 
+// Get DAX device size from sysfs
+static size_t get_dax_size(const char *dax_path) {
+    char sysfs_path[512];
+    const char *dev_name = strrchr(dax_path, '/');
+    if (!dev_name) dev_name = dax_path;
+    else dev_name++;
+
+    snprintf(sysfs_path, sizeof(sysfs_path), "/sys/bus/dax/devices/%s/size", dev_name);
+
+    FILE *f = fopen(sysfs_path, "r");
+    if (!f) {
+        LOG_WARN("Cannot read DAX size from %s, using stat\n", sysfs_path);
+        return 0;
+    }
+
+    unsigned long long size = 0;
+    if (fscanf(f, "%llu", &size) != 1) {
+        fclose(f);
+        return 0;
+    }
+    fclose(f);
+
+    LOG_DEBUG("DAX device %s size from sysfs: %llu bytes\n", dev_name, size);
+    return (size_t)size;
+}
+
 // Initialize CXL memory
 static void init_cxl_memory(void) {
     if (g_cxl.initialized) return;
-    
+
     pthread_mutex_lock(&g_cxl.lock);
     if (g_cxl.initialized) {
         pthread_mutex_unlock(&g_cxl.lock);
         return;
     }
-    
+
     const char *dax_path = getenv("CXL_DAX_PATH");
     const char *cxl_size_str = getenv("CXL_MEM_SIZE");
     size_t cxl_size = cxl_size_str ? strtoull(cxl_size_str, NULL, 0) : DEFAULT_CXL_SIZE;
-    
-    if (dax_path && access(dax_path, R_OK | W_OK) == 0) {
-        // Use DAX device
+
+    if (dax_path && strlen(dax_path) > 0) {
+        // Use DAX device - open with O_RDWR for shared access
         g_cxl.fd = open(dax_path, O_RDWR);
         if (g_cxl.fd < 0) {
             LOG_ERROR("Failed to open DAX device %s: %s\n", dax_path, strerror(errno));
             goto use_shm;
         }
-        
-        // Get actual DAX size
-        struct stat st;
-        if (fstat(g_cxl.fd, &st) == 0) {
-            cxl_size = st.st_size;
+
+        // Try to get DAX size from sysfs first
+        cxl_size = get_dax_size(dax_path);
+        if (cxl_size == 0) {
+            // Fallback to stat
+            struct stat st;
+            if (fstat(g_cxl.fd, &st) == 0) {
+                cxl_size = st.st_size;
+            }
+            if (cxl_size == 0) {
+                // Use default if still 0
+                cxl_size = DEFAULT_CXL_SIZE;
+            }
         }
-        
+
         g_cxl.base = mmap(NULL, cxl_size, PROT_READ | PROT_WRITE, MAP_SHARED, g_cxl.fd, 0);
         if (g_cxl.base == MAP_FAILED) {
-            LOG_ERROR("Failed to map DAX device: %s\n", strerror(errno));
+            LOG_ERROR("Failed to map DAX device %s: %s\n", dax_path, strerror(errno));
             close(g_cxl.fd);
             goto use_shm;
         }
-        
+
         g_cxl.type = "dax";
-        LOG_INFO("Mapped DAX device %s: %zu bytes at %p\n", dax_path, cxl_size, g_cxl.base);
+        LOG_INFO("Mapped DAX device %s: %zu bytes (%zu MB) at %p\n",
+                 dax_path, cxl_size, cxl_size / (1024*1024), g_cxl.base);
+
+        // For DAX, we need to coordinate allocation between processes
+        // Use first cacheline as allocation counter
+        if (getenv("CXL_DAX_RESET")) {
+            // Only reset if explicitly requested
+            memset(g_cxl.base, 0, CACHELINE_SIZE);
+            LOG_INFO("Reset DAX allocation counter\n");
+        }
+
+        // DAX allocation starts after first cacheline
+        g_cxl.used = CACHELINE_SIZE;
+
     } else {
 use_shm:
-        // Use shared memory fallback
-        char shm_name[256];
-        snprintf(shm_name, sizeof(shm_name), "/cxlmemsim_mpi_%d", getuid());
-        
-        // Try to unlink first in case it exists
-        shm_unlink(shm_name);
-        
-        g_cxl.fd = shm_open(shm_name, O_CREAT | O_RDWR | O_EXCL, 0600);
+        // Use shared memory fallback - create a single shared segment
+        const char *shm_name = "/cxlmemsim_mpi_shared";
+
+        // Try to open existing first
+        g_cxl.fd = shm_open(shm_name, O_RDWR, 0600);
+
         if (g_cxl.fd < 0) {
-            LOG_ERROR("Failed to create shared memory %s: %s\n", shm_name, strerror(errno));
-            pthread_mutex_unlock(&g_cxl.lock);
-            return;
+            // Create new
+            g_cxl.fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
+            if (g_cxl.fd < 0) {
+                LOG_ERROR("Failed to create/open shared memory %s: %s\n", shm_name, strerror(errno));
+                pthread_mutex_unlock(&g_cxl.lock);
+                return;
+            }
+
+            if (ftruncate(g_cxl.fd, cxl_size) != 0) {
+                LOG_ERROR("Failed to resize shared memory: %s\n", strerror(errno));
+                close(g_cxl.fd);
+                pthread_mutex_unlock(&g_cxl.lock);
+                return;
+            }
+            LOG_INFO("Created new shared memory segment %s\n", shm_name);
+        } else {
+            // Get existing size
+            struct stat st;
+            if (fstat(g_cxl.fd, &st) == 0) {
+                cxl_size = st.st_size;
+            }
+            LOG_INFO("Opened existing shared memory segment %s\n", shm_name);
         }
-        
-        if (ftruncate(g_cxl.fd, cxl_size) != 0) {
-            LOG_ERROR("Failed to resize shared memory: %s\n", strerror(errno));
-            close(g_cxl.fd);
-            shm_unlink(shm_name);
-            pthread_mutex_unlock(&g_cxl.lock);
-            return;
-        }
-        
+
         g_cxl.base = mmap(NULL, cxl_size, PROT_READ | PROT_WRITE, MAP_SHARED, g_cxl.fd, 0);
         if (g_cxl.base == MAP_FAILED) {
             LOG_ERROR("Failed to map shared memory: %s\n", strerror(errno));
             close(g_cxl.fd);
-            shm_unlink(shm_name);
             pthread_mutex_unlock(&g_cxl.lock);
             return;
         }
-        
+
         g_cxl.type = "shm";
-        LOG_INFO("Created shared memory %s: %zu bytes at %p\n", shm_name, cxl_size, g_cxl.base);
+        LOG_INFO("Mapped shared memory %s: %zu bytes (%zu MB) at %p\n",
+                 shm_name, cxl_size, cxl_size / (1024*1024), g_cxl.base);
+
+        // For shared memory, also use first cacheline for coordination
+        g_cxl.used = CACHELINE_SIZE;
     }
-    
+
     g_cxl.size = cxl_size;
-    g_cxl.used = 0;
     g_cxl.initialized = true;
-    
-    // Clear the memory
-    memset(g_cxl.base, 0, MIN(4096, cxl_size));
-    
-    LOG_INFO("CXL memory initialized: type=%s, size=%zu MB, base=%p\n", 
+
+    LOG_INFO("CXL memory initialized: type=%s, size=%zu MB, base=%p\n",
              g_cxl.type, cxl_size / (1024*1024), g_cxl.base);
-    
+
     pthread_mutex_unlock(&g_cxl.lock);
 }
 
@@ -202,28 +262,54 @@ static void *allocate_cxl_memory(size_t size) {
         init_cxl_memory();
         if (!g_cxl.initialized) return NULL;
     }
-    
+
     // Align size
     size = (size + CXL_ALIGNMENT - 1) & ~(CXL_ALIGNMENT - 1);
-    
-    pthread_mutex_lock(&g_cxl.lock);
-    
-    if (g_cxl.used + size > g_cxl.size) {
-        LOG_WARN("Out of CXL memory: requested=%zu, available=%zu\n", 
-                 size, g_cxl.size - g_cxl.used);
+
+    // For DAX/shared memory, use atomic operations on the allocation counter
+    if (strcmp(g_cxl.type, "dax") == 0 || strcmp(g_cxl.type, "shm") == 0) {
+        // Use first 8 bytes of the shared region as atomic allocation counter
+        _Atomic size_t *alloc_counter = (_Atomic size_t *)g_cxl.base;
+
+        size_t old_used = atomic_fetch_add(alloc_counter, size);
+        size_t new_used = old_used + size;
+
+        // Check if we have space (accounting for the counter itself)
+        if (new_used > g_cxl.size) {
+            // Roll back
+            atomic_fetch_sub(alloc_counter, size);
+            LOG_WARN("Out of CXL memory: requested=%zu, available=%zu\n",
+                     size, g_cxl.size - old_used);
+            return NULL;
+        }
+
+        void *ptr = (char *)g_cxl.base + old_used;
+
+        LOG_TRACE("Allocated %zu bytes at offset %zu (total used: %zu/%zu) [atomic]\n",
+                  size, old_used, new_used, g_cxl.size);
+
+        return ptr;
+    } else {
+        // Local allocation (shouldn't happen but keep for safety)
+        pthread_mutex_lock(&g_cxl.lock);
+
+        if (g_cxl.used + size > g_cxl.size) {
+            LOG_WARN("Out of CXL memory: requested=%zu, available=%zu\n",
+                     size, g_cxl.size - g_cxl.used);
+            pthread_mutex_unlock(&g_cxl.lock);
+            return NULL;
+        }
+
+        void *ptr = (char *)g_cxl.base + g_cxl.used;
+        g_cxl.used += size;
+
+        LOG_TRACE("Allocated %zu bytes at offset %zu (total used: %zu/%zu)\n",
+                  size, (size_t)((char *)ptr - (char *)g_cxl.base), g_cxl.used, g_cxl.size);
+
         pthread_mutex_unlock(&g_cxl.lock);
-        return NULL;
+
+        return ptr;
     }
-    
-    void *ptr = (char *)g_cxl.base + g_cxl.used;
-    g_cxl.used += size;
-    
-    LOG_TRACE("Allocated %zu bytes at offset %zu (total used: %zu/%zu)\n",
-              size, (size_t)((char *)ptr - (char *)g_cxl.base), g_cxl.used, g_cxl.size);
-    
-    pthread_mutex_unlock(&g_cxl.lock);
-    
-    return ptr;
 }
 
 // Mapping management
@@ -304,28 +390,30 @@ int MPI_Init(int *argc, char ***argv) {
 
 int MPI_Finalize(void) {
     LOG_INFO("=== MPI_Finalize HOOK CALLED ===\n");
-    
+
     LOAD_ORIGINAL(MPI_Finalize);
-    
+
     int ret = orig_MPI_Finalize();
-    
+
     // Cleanup CXL memory
     if (g_cxl.initialized) {
         LOG_INFO("Cleaning up CXL memory (used %zu/%zu bytes)\n", g_cxl.used, g_cxl.size);
         munmap(g_cxl.base, g_cxl.size);
         close(g_cxl.fd);
-        
-        if (strcmp(g_cxl.type, "shm") == 0) {
-            char shm_name[256];
-            snprintf(shm_name, sizeof(shm_name), "/cxlmemsim_mpi_%d", getuid());
+
+        // Don't unlink shared memory as other processes may still be using it
+        // Only unlink if explicitly requested
+        if (strcmp(g_cxl.type, "shm") == 0 && getenv("CXL_SHM_UNLINK")) {
+            const char *shm_name = "/cxlmemsim_mpi_shared";
             shm_unlink(shm_name);
+            LOG_INFO("Unlinked shared memory %s\n", shm_name);
         }
-        
+
         g_cxl.initialized = false;
     }
-    
+
     LOG_INFO("MPI_Finalize completed (total hooks: %d)\n", g_hook_count);
-    
+
     return ret;
 }
 
