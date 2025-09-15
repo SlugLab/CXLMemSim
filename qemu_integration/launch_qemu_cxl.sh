@@ -7,15 +7,21 @@ VM_MEMORY=${VM_MEMORY:-2G}
 CXL_MEMORY=${CXL_MEMORY:-4G}
 DISK_IMAGE=${DISK_IMAGE:-plucky-server-cloudimg-amd64.img}
 
-export CXL_MEMSIM_MODE=shm
+# Enable RDMA mode
+export CXL_TRANSPORT_MODE=rdma
+export CXL_MEMSIM_RDMA_SERVER=127.0.0.1
+export CXL_MEMSIM_RDMA_PORT=5555
+# Also set TCP fallback
+export CXL_MEMSIM_HOST=127.0.0.1
+export CXL_MEMSIM_PORT=9999
 
 exec $QEMU_BINARY \
     --enable-kvm -cpu qemu64,+xsave,+rdtscp,+avx,+avx2,+sse4.1,+sse4.2,+avx512f,+avx512dq,+avx512ifma,+avx512cd,+avx512bw,+avx512vl,+avx512vbmi,+clflushopt  \
-    -kernel /root/tdx-linux/arch/x86/boot/bzImage \
+    -kernel /root/bzImage \
     -append "root=/dev/sda rw console=ttyS0,115200 ignore_loglevel nokaslr nokaslr nosmp nopti nospectre_v2 mem=2G" \
     -netdev tap,id=network0,ifname=tap0,script=no,downscript=no \
     -device e1000,netdev=network0,mac=52:54:00:00:00:01 \
-    -drive file=/home/victoryang00/CXLMemSim/build/qemu1.img,index=0,media=disk,format=raw \
+    -drive file=./qemu.img,index=0,media=disk,format=raw \
     -M q35,cxl=on -m 4G,maxmem=8G,slots=8 -smp 4 \
     -device pxb-cxl,bus_nr=12,bus=pcie.0,id=cxl.1 \
     -device cxl-rp,port=0,bus=cxl.1,id=root_port13,chassis=0,slot=0 \

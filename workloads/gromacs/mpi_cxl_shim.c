@@ -13,44 +13,103 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <execinfo.h>
+#include <signal.h>
 
 #define CACHELINE_SIZE 64
 #define DEFAULT_CXL_SIZE (4UL * 1024 * 1024 * 1024)  // 4GB default
 #define CXL_ALIGNMENT 4096
+#define SHIM_VERSION "2.0"
+
+// Add color output for better visibility
+#define RED     "\x1b[31m"
+#define GREEN   "\x1b[32m"
+#define YELLOW  "\x1b[33m"
+#define BLUE    "\x1b[34m"
+#define MAGENTA "\x1b[35m"
+#define CYAN    "\x1b[36m"
+#define RESET   "\x1b[0m"
 
 typedef struct {
     void *base;
     size_t size;
+    size_t used;
     int fd;
     bool initialized;
     pthread_mutex_t lock;
+    char *type;  // "dax" or "shm"
 } cxl_mem_t;
 
-typedef struct {
+typedef struct mem_mapping {
     void *cxl_addr;
     void *orig_addr;
     size_t size;
     int ref_count;
+    struct mem_mapping *next;
 } mem_mapping_t;
 
-#define MAX_MAPPINGS 65536
-static cxl_mem_t g_cxl = {0};
-static mem_mapping_t g_mappings[MAX_MAPPINGS] = {0};
-static _Atomic size_t g_next_offset = 0;
+static cxl_mem_t g_cxl = {
+    .lock = PTHREAD_MUTEX_INITIALIZER,
+    .initialized = false
+};
+
+static mem_mapping_t *g_mappings = NULL;
 static pthread_mutex_t g_mappings_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Atomic int g_hook_count = 0;
+static _Atomic bool g_in_mpi_call = false;
 
-// Function pointers for original MPI functions
-static int (*orig_MPI_Init)(int *, char ***) = NULL;
-static int (*orig_MPI_Finalize)(void) = NULL;
-static int (*orig_MPI_Send)(const void *, int, MPI_Datatype, int, int, MPI_Comm) = NULL;
-static int (*orig_MPI_Recv)(void *, int, MPI_Datatype, int, int, MPI_Comm, MPI_Status *) = NULL;
-static int (*orig_MPI_Isend)(const void *, int, MPI_Datatype, int, int, MPI_Comm, MPI_Request *) = NULL;
-static int (*orig_MPI_Irecv)(void *, int, MPI_Datatype, int, int, MPI_Comm, MPI_Request *) = NULL;
-static int (*orig_MPI_Alloc_mem)(MPI_Aint, MPI_Info, void *) = NULL;
-static int (*orig_MPI_Free_mem)(void *) = NULL;
-static int (*orig_MPI_Win_allocate)(MPI_Aint, int, MPI_Info, MPI_Comm, void *, MPI_Win *) = NULL;
-static int (*orig_MPI_Win_allocate_shared)(MPI_Aint, int, MPI_Info, MPI_Comm, void *, MPI_Win *) = NULL;
+// Function pointers - using typeof for better type safety
+static typeof(MPI_Init) *orig_MPI_Init = NULL;
+static typeof(MPI_Finalize) *orig_MPI_Finalize = NULL;
+static typeof(MPI_Send) *orig_MPI_Send = NULL;
+static typeof(MPI_Recv) *orig_MPI_Recv = NULL;
+static typeof(MPI_Isend) *orig_MPI_Isend = NULL;
+static typeof(MPI_Irecv) *orig_MPI_Irecv = NULL;
+static typeof(MPI_Alloc_mem) *orig_MPI_Alloc_mem = NULL;
+static typeof(MPI_Free_mem) *orig_MPI_Free_mem = NULL;
+static typeof(MPI_Win_allocate) *orig_MPI_Win_allocate = NULL;
+static typeof(MPI_Win_allocate_shared) *orig_MPI_Win_allocate_shared = NULL;
+static typeof(MPI_Comm_rank) *orig_MPI_Comm_rank = NULL;
 
+// Debug output function
+static void shim_log(const char *level, const char *color, const char *format, ...) {
+    if (!getenv("CXL_SHIM_QUIET")) {
+        char hostname[256];
+        gethostname(hostname, sizeof(hostname));
+        
+        fprintf(stderr, "%s[CXL_SHIM:%s:%d:%s] ", color, hostname, getpid(), level);
+        
+        va_list args;
+        va_start(args, format);
+        vfprintf(stderr, format, args);
+        va_end(args);
+        
+        fprintf(stderr, "%s", RESET);
+        fflush(stderr);
+    }
+}
+
+#define LOG_INFO(...)    shim_log("INFO", GREEN, __VA_ARGS__)
+#define LOG_WARN(...)    shim_log("WARN", YELLOW, __VA_ARGS__)
+#define LOG_ERROR(...)   shim_log("ERROR", RED, __VA_ARGS__)
+#define LOG_DEBUG(...)   if(getenv("CXL_SHIM_VERBOSE")) shim_log("DEBUG", CYAN, __VA_ARGS__)
+#define LOG_TRACE(...)   if(getenv("CXL_SHIM_TRACE")) shim_log("TRACE", MAGENTA, __VA_ARGS__)
+
+// Signal handler for debugging
+static void signal_handler(int sig) {
+    void *array[20];
+    size_t size;
+    
+    LOG_ERROR("Caught signal %d\n", sig);
+    
+    size = backtrace(array, 20);
+    fprintf(stderr, "Backtrace:\n");
+    backtrace_symbols_fd(array, size, STDERR_FILENO);
+    
+    exit(1);
+}
+
+// Initialize CXL memory
 static void init_cxl_memory(void) {
     if (g_cxl.initialized) return;
     
@@ -64,444 +123,326 @@ static void init_cxl_memory(void) {
     const char *cxl_size_str = getenv("CXL_MEM_SIZE");
     size_t cxl_size = cxl_size_str ? strtoull(cxl_size_str, NULL, 0) : DEFAULT_CXL_SIZE;
     
-    if (!dax_path) {
-        // Use shared memory fallback
-        const char *shm_name = "/cxlmemsim_mpi_shared";
-        g_cxl.fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
+    if (dax_path && access(dax_path, R_OK | W_OK) == 0) {
+        // Use DAX device
+        g_cxl.fd = open(dax_path, O_RDWR);
         if (g_cxl.fd < 0) {
-            fprintf(stderr, "[CXL_SHIM] Failed to open shared memory: %s\n", strerror(errno));
-            goto fail;
+            LOG_ERROR("Failed to open DAX device %s: %s\n", dax_path, strerror(errno));
+            goto use_shm;
+        }
+        
+        // Get actual DAX size
+        struct stat st;
+        if (fstat(g_cxl.fd, &st) == 0) {
+            cxl_size = st.st_size;
+        }
+        
+        g_cxl.base = mmap(NULL, cxl_size, PROT_READ | PROT_WRITE, MAP_SHARED, g_cxl.fd, 0);
+        if (g_cxl.base == MAP_FAILED) {
+            LOG_ERROR("Failed to map DAX device: %s\n", strerror(errno));
+            close(g_cxl.fd);
+            goto use_shm;
+        }
+        
+        g_cxl.type = "dax";
+        LOG_INFO("Mapped DAX device %s: %zu bytes at %p\n", dax_path, cxl_size, g_cxl.base);
+    } else {
+use_shm:
+        // Use shared memory fallback
+        char shm_name[256];
+        snprintf(shm_name, sizeof(shm_name), "/cxlmemsim_mpi_%d", getuid());
+        
+        // Try to unlink first in case it exists
+        shm_unlink(shm_name);
+        
+        g_cxl.fd = shm_open(shm_name, O_CREAT | O_RDWR | O_EXCL, 0600);
+        if (g_cxl.fd < 0) {
+            LOG_ERROR("Failed to create shared memory %s: %s\n", shm_name, strerror(errno));
+            pthread_mutex_unlock(&g_cxl.lock);
+            return;
         }
         
         if (ftruncate(g_cxl.fd, cxl_size) != 0) {
-            fprintf(stderr, "[CXL_SHIM] Failed to resize shared memory: %s\n", strerror(errno));
+            LOG_ERROR("Failed to resize shared memory: %s\n", strerror(errno));
             close(g_cxl.fd);
-            goto fail;
+            shm_unlink(shm_name);
+            pthread_mutex_unlock(&g_cxl.lock);
+            return;
         }
         
         g_cxl.base = mmap(NULL, cxl_size, PROT_READ | PROT_WRITE, MAP_SHARED, g_cxl.fd, 0);
-    } else {
-        // Use DAX device
-        g_cxl.fd = open(dax_path, O_RDWR | O_CLOEXEC);
-        if (g_cxl.fd < 0) {
-            fprintf(stderr, "[CXL_SHIM] Failed to open DAX device %s: %s\n", dax_path, strerror(errno));
-            goto fail;
+        if (g_cxl.base == MAP_FAILED) {
+            LOG_ERROR("Failed to map shared memory: %s\n", strerror(errno));
+            close(g_cxl.fd);
+            shm_unlink(shm_name);
+            pthread_mutex_unlock(&g_cxl.lock);
+            return;
         }
         
-        // Try to read actual DAX size from sysfs
-        char sysfs_path[512];
-        const char *base = strrchr(dax_path, '/');
-        if (base) {
-            snprintf(sysfs_path, sizeof(sysfs_path), "/sys/bus/dax/devices/%s/size", base + 1);
-            FILE *f = fopen(sysfs_path, "r");
-            if (f) {
-                unsigned long long dax_size = 0;
-                if (fscanf(f, "%llu", &dax_size) == 1 && dax_size > 0) {
-                    cxl_size = (size_t)dax_size;
-                }
-                fclose(f);
-            }
-        }
-        
-        g_cxl.base = mmap(NULL, cxl_size, PROT_READ | PROT_WRITE, MAP_SHARED, g_cxl.fd, 0);
-    }
-    
-    if (g_cxl.base == MAP_FAILED) {
-        fprintf(stderr, "[CXL_SHIM] Failed to map CXL memory: %s\n", strerror(errno));
-        close(g_cxl.fd);
-        goto fail;
+        g_cxl.type = "shm";
+        LOG_INFO("Created shared memory %s: %zu bytes at %p\n", shm_name, cxl_size, g_cxl.base);
     }
     
     g_cxl.size = cxl_size;
+    g_cxl.used = 0;
     g_cxl.initialized = true;
-    atomic_store(&g_next_offset, 0);
     
-    if (getenv("CXL_SHIM_VERBOSE")) {
-        fprintf(stderr, "[CXL_SHIM] Initialized CXL memory: base=%p size=%zu\n", g_cxl.base, g_cxl.size);
-    }
+    // Clear the memory
+    memset(g_cxl.base, 0, MIN(4096, cxl_size));
     
-fail:
+    LOG_INFO("CXL memory initialized: type=%s, size=%zu MB, base=%p\n", 
+             g_cxl.type, cxl_size / (1024*1024), g_cxl.base);
+    
     pthread_mutex_unlock(&g_cxl.lock);
 }
 
+// Allocate from CXL memory pool
 static void *allocate_cxl_memory(size_t size) {
     if (!g_cxl.initialized) {
         init_cxl_memory();
         if (!g_cxl.initialized) return NULL;
     }
     
-    // Align size to page boundary
+    // Align size
     size = (size + CXL_ALIGNMENT - 1) & ~(CXL_ALIGNMENT - 1);
     
-    size_t offset = atomic_fetch_add(&g_next_offset, size);
-    if (offset + size > g_cxl.size) {
-        atomic_fetch_sub(&g_next_offset, size);
-        fprintf(stderr, "[CXL_SHIM] Out of CXL memory\n");
+    pthread_mutex_lock(&g_cxl.lock);
+    
+    if (g_cxl.used + size > g_cxl.size) {
+        LOG_WARN("Out of CXL memory: requested=%zu, available=%zu\n", 
+                 size, g_cxl.size - g_cxl.used);
+        pthread_mutex_unlock(&g_cxl.lock);
         return NULL;
     }
     
-    return (char *)g_cxl.base + offset;
+    void *ptr = (char *)g_cxl.base + g_cxl.used;
+    g_cxl.used += size;
+    
+    LOG_TRACE("Allocated %zu bytes at offset %zu (total used: %zu/%zu)\n",
+              size, (size_t)((char *)ptr - (char *)g_cxl.base), g_cxl.used, g_cxl.size);
+    
+    pthread_mutex_unlock(&g_cxl.lock);
+    
+    return ptr;
 }
 
-static int register_mapping(void *cxl_addr, void *orig_addr, size_t size) {
+// Mapping management
+static void register_mapping(void *cxl_addr, void *orig_addr, size_t size) {
     pthread_mutex_lock(&g_mappings_lock);
     
-    for (int i = 0; i < MAX_MAPPINGS; i++) {
-        if (g_mappings[i].cxl_addr == NULL) {
-            g_mappings[i].cxl_addr = cxl_addr;
-            g_mappings[i].orig_addr = orig_addr;
-            g_mappings[i].size = size;
-            g_mappings[i].ref_count = 1;
-            pthread_mutex_unlock(&g_mappings_lock);
-            return i;
-        }
-    }
+    mem_mapping_t *mapping = malloc(sizeof(mem_mapping_t));
+    mapping->cxl_addr = cxl_addr;
+    mapping->orig_addr = orig_addr;
+    mapping->size = size;
+    mapping->ref_count = 1;
+    mapping->next = g_mappings;
+    g_mappings = mapping;
+    
+    LOG_TRACE("Registered mapping: orig=%p -> cxl=%p (size=%zu)\n", orig_addr, cxl_addr, size);
     
     pthread_mutex_unlock(&g_mappings_lock);
-    return -1;
 }
 
 static void *find_cxl_mapping(const void *orig_addr) {
     pthread_mutex_lock(&g_mappings_lock);
     
-    for (int i = 0; i < MAX_MAPPINGS; i++) {
-        if (g_mappings[i].orig_addr == orig_addr) {
-            void *cxl_addr = g_mappings[i].cxl_addr;
+    mem_mapping_t *curr = g_mappings;
+    while (curr) {
+        if (curr->orig_addr == orig_addr) {
+            void *cxl_addr = curr->cxl_addr;
             pthread_mutex_unlock(&g_mappings_lock);
             return cxl_addr;
         }
+        curr = curr->next;
     }
     
     pthread_mutex_unlock(&g_mappings_lock);
     return NULL;
 }
 
-static void unregister_mapping(void *addr) {
-    pthread_mutex_lock(&g_mappings_lock);
-    
-    for (int i = 0; i < MAX_MAPPINGS; i++) {
-        if (g_mappings[i].cxl_addr == addr || g_mappings[i].orig_addr == addr) {
-            if (--g_mappings[i].ref_count <= 0) {
-                g_mappings[i].cxl_addr = NULL;
-                g_mappings[i].orig_addr = NULL;
-                g_mappings[i].size = 0;
-            }
-            break;
-        }
-    }
-    
-    pthread_mutex_unlock(&g_mappings_lock);
-}
+// Load original function
+#define LOAD_ORIGINAL(func) \
+    do { \
+        if (!orig_##func) { \
+            orig_##func = dlsym(RTLD_NEXT, #func); \
+            if (!orig_##func) { \
+                LOG_ERROR("Failed to load original " #func ": %s\n", dlerror()); \
+            } else { \
+                LOG_TRACE("Loaded original " #func " at %p\n", orig_##func); \
+            } \
+        } \
+    } while(0)
 
-// MPI Function Interceptions
+// MPI Function Hooks
 int MPI_Init(int *argc, char ***argv) {
-    fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Init called (PID: %d)\n", getpid());
-    fflush(stderr);
-
-    if (!orig_MPI_Init) {
-        orig_MPI_Init = dlsym(RTLD_NEXT, "MPI_Init");
-        fprintf(stderr, "[CXL_SHIM] HOOK: Found original MPI_Init at %p\n", orig_MPI_Init);
-        fflush(stderr);
-    }
-
+    atomic_fetch_add(&g_hook_count, 1);
+    LOG_INFO("=== MPI_Init HOOK CALLED (hook #%d) ===\n", g_hook_count);
+    
+    LOAD_ORIGINAL(MPI_Init);
+    LOAD_ORIGINAL(MPI_Comm_rank);
+    
+    // Initialize CXL memory before MPI
     init_cxl_memory();
-
-    fprintf(stderr, "[CXL_SHIM] HOOK: Calling original MPI_Init\n");
-    fflush(stderr);
-
+    
+    LOG_DEBUG("Calling original MPI_Init at %p\n", orig_MPI_Init);
     int ret = orig_MPI_Init(argc, argv);
-
-    int rank = -1;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Init completed on rank %d (return: %d)\n", rank, ret);
-    fflush(stderr);
-
+    
+    if (ret == MPI_SUCCESS) {
+        int rank = -1, size = -1;
+        if (orig_MPI_Comm_rank) {
+            orig_MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+            MPI_Comm_size(MPI_COMM_WORLD, &size);
+        }
+        LOG_INFO("MPI_Init completed: rank=%d/%d, CXL=%s\n", 
+                 rank, size, g_cxl.initialized ? "initialized" : "not initialized");
+    } else {
+        LOG_ERROR("MPI_Init failed with code %d\n", ret);
+    }
+    
     return ret;
 }
 
 int MPI_Finalize(void) {
-    fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Finalize called (PID: %d)\n", getpid());
-    fflush(stderr);
-
-    if (!orig_MPI_Finalize) {
-        orig_MPI_Finalize = dlsym(RTLD_NEXT, "MPI_Finalize");
-        fprintf(stderr, "[CXL_SHIM] HOOK: Found original MPI_Finalize at %p\n", orig_MPI_Finalize);
-        fflush(stderr);
-    }
-
+    LOG_INFO("=== MPI_Finalize HOOK CALLED ===\n");
+    
+    LOAD_ORIGINAL(MPI_Finalize);
+    
     int ret = orig_MPI_Finalize();
-
+    
+    // Cleanup CXL memory
     if (g_cxl.initialized) {
-        fprintf(stderr, "[CXL_SHIM] HOOK: Cleaning up CXL memory\n");
+        LOG_INFO("Cleaning up CXL memory (used %zu/%zu bytes)\n", g_cxl.used, g_cxl.size);
         munmap(g_cxl.base, g_cxl.size);
         close(g_cxl.fd);
+        
+        if (strcmp(g_cxl.type, "shm") == 0) {
+            char shm_name[256];
+            snprintf(shm_name, sizeof(shm_name), "/cxlmemsim_mpi_%d", getuid());
+            shm_unlink(shm_name);
+        }
+        
         g_cxl.initialized = false;
     }
-
-    fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Finalize completed (return: %d)\n", ret);
-    fflush(stderr);
-
+    
+    LOG_INFO("MPI_Finalize completed (total hooks: %d)\n", g_hook_count);
+    
     return ret;
 }
 
 int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm) {
     static _Atomic int send_count = 0;
     int call_num = atomic_fetch_add(&send_count, 1);
-
-    if (getenv("CXL_SHIM_VERBOSE")) {
-        fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Send #%d called (count=%d, dest=%d, tag=%d)\n",
-                call_num, count, dest, tag);
-        fflush(stderr);
-    }
-
-    if (!orig_MPI_Send) {
-        orig_MPI_Send = dlsym(RTLD_NEXT, "MPI_Send");
-    }
-
-    // Check if buffer is in CXL memory or needs to be copied
-    void *cxl_buf = find_cxl_mapping(buf);
-    if (!cxl_buf && g_cxl.initialized && getenv("CXL_SHIM_COPY_SEND")) {
+    
+    LOG_DEBUG("MPI_Send[%d]: count=%d, dest=%d, tag=%d, buf=%p\n", 
+              call_num, count, dest, tag, buf);
+    
+    LOAD_ORIGINAL(MPI_Send);
+    
+    // Optional: copy to CXL memory
+    void *send_buf = (void *)buf;
+    if (g_cxl.initialized && getenv("CXL_SHIM_COPY_SEND")) {
         int size;
         MPI_Type_size(datatype, &size);
         size_t total_size = (size_t)count * size;
-
-        cxl_buf = allocate_cxl_memory(total_size);
+        
+        void *cxl_buf = allocate_cxl_memory(total_size);
         if (cxl_buf) {
             memcpy(cxl_buf, buf, total_size);
-            buf = cxl_buf;
-            if (getenv("CXL_SHIM_VERBOSE")) {
-                fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Send #%d using CXL buffer at %p (size=%zu)\n",
-                        call_num, cxl_buf, total_size);
-                fflush(stderr);
-            }
+            send_buf = cxl_buf;
+            LOG_TRACE("MPI_Send[%d]: copied %zu bytes to CXL at %p\n", 
+                      call_num, total_size, cxl_buf);
         }
     }
-
-    return orig_MPI_Send(buf, count, datatype, dest, tag, comm);
+    
+    return orig_MPI_Send(send_buf, count, datatype, dest, tag, comm);
 }
 
-int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status) {
+int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, 
+             MPI_Comm comm, MPI_Status *status) {
     static _Atomic int recv_count = 0;
     int call_num = atomic_fetch_add(&recv_count, 1);
-
-    if (getenv("CXL_SHIM_VERBOSE")) {
-        fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Recv #%d called (count=%d, source=%d, tag=%d)\n",
-                call_num, count, source, tag);
-        fflush(stderr);
-    }
-
-    if (!orig_MPI_Recv) {
-        orig_MPI_Recv = dlsym(RTLD_NEXT, "MPI_Recv");
-    }
-
-    void *cxl_buf = find_cxl_mapping(buf);
-    void *recv_buf = cxl_buf ? cxl_buf : buf;
-
-    if (!cxl_buf && g_cxl.initialized && getenv("CXL_SHIM_COPY_RECV")) {
+    
+    LOG_DEBUG("MPI_Recv[%d]: count=%d, source=%d, tag=%d, buf=%p\n", 
+              call_num, count, source, tag, buf);
+    
+    LOAD_ORIGINAL(MPI_Recv);
+    
+    void *recv_buf = buf;
+    void *cxl_buf = NULL;
+    
+    if (g_cxl.initialized && getenv("CXL_SHIM_COPY_RECV")) {
         int size;
         MPI_Type_size(datatype, &size);
         size_t total_size = (size_t)count * size;
-
+        
         cxl_buf = allocate_cxl_memory(total_size);
         if (cxl_buf) {
             recv_buf = cxl_buf;
-            if (getenv("CXL_SHIM_VERBOSE")) {
-                fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Recv #%d using CXL buffer at %p (size=%zu)\n",
-                        call_num, cxl_buf, total_size);
-                fflush(stderr);
-            }
+            LOG_TRACE("MPI_Recv[%d]: using CXL buffer at %p (size=%zu)\n", 
+                      call_num, cxl_buf, total_size);
         }
     }
-
+    
     int ret = orig_MPI_Recv(recv_buf, count, datatype, source, tag, comm, status);
-
-    if (cxl_buf && recv_buf != buf) {
+    
+    if (cxl_buf && ret == MPI_SUCCESS) {
         int size;
         MPI_Type_size(datatype, &size);
         size_t total_size = (size_t)count * size;
-        memcpy(buf, recv_buf, total_size);
+        memcpy(buf, cxl_buf, total_size);
+        LOG_TRACE("MPI_Recv[%d]: copied %zu bytes from CXL\n", call_num, total_size);
     }
-
-    if (getenv("CXL_SHIM_VERBOSE")) {
-        fprintf(stderr, "[CXL_SHIM] HOOK: MPI_Recv #%d completed (return: %d)\n", call_num, ret);
-        fflush(stderr);
-    }
-
+    
     return ret;
 }
 
-int MPI_Isend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request) {
-    if (!orig_MPI_Isend) {
-        orig_MPI_Isend = dlsym(RTLD_NEXT, "MPI_Isend");
-    }
-    
-    void *cxl_buf = find_cxl_mapping(buf);
-    if (!cxl_buf && g_cxl.initialized && getenv("CXL_SHIM_COPY_SEND")) {
-        int size;
-        MPI_Type_size(datatype, &size);
-        size_t total_size = (size_t)count * size;
-        
-        cxl_buf = allocate_cxl_memory(total_size);
-        if (cxl_buf) {
-            memcpy(cxl_buf, buf, total_size);
-            buf = cxl_buf;
-        }
-    }
-    
-    return orig_MPI_Isend(buf, count, datatype, dest, tag, comm, request);
-}
+// Add more MPI function hooks as needed...
 
-int MPI_Irecv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Request *request) {
-    if (!orig_MPI_Irecv) {
-        orig_MPI_Irecv = dlsym(RTLD_NEXT, "MPI_Irecv");
-    }
-    
-    void *cxl_buf = find_cxl_mapping(buf);
-    void *recv_buf = cxl_buf ? cxl_buf : buf;
-    
-    if (!cxl_buf && g_cxl.initialized && getenv("CXL_SHIM_COPY_RECV")) {
-        int size;
-        MPI_Type_size(datatype, &size);
-        size_t total_size = (size_t)count * size;
-        
-        cxl_buf = allocate_cxl_memory(total_size);
-        if (cxl_buf) {
-            recv_buf = cxl_buf;
-            register_mapping(cxl_buf, buf, total_size);
-        }
-    }
-    
-    return orig_MPI_Irecv(recv_buf, count, datatype, source, tag, comm, request);
-}
-
-int MPI_Alloc_mem(MPI_Aint size, MPI_Info info, void *baseptr) {
-    if (!g_cxl.initialized || !getenv("CXL_SHIM_ALLOC")) {
-        if (!orig_MPI_Alloc_mem) {
-            orig_MPI_Alloc_mem = dlsym(RTLD_NEXT, "MPI_Alloc_mem");
-        }
-        return orig_MPI_Alloc_mem(size, info, baseptr);
-    }
-    
-    void *cxl_mem = allocate_cxl_memory((size_t)size);
-    if (!cxl_mem) {
-        return MPI_ERR_NO_MEM;
-    }
-    
-    *(void **)baseptr = cxl_mem;
-    register_mapping(cxl_mem, cxl_mem, (size_t)size);
-    
-    if (getenv("CXL_SHIM_VERBOSE")) {
-        fprintf(stderr, "[CXL_SHIM] MPI_Alloc_mem: allocated %ld bytes at %p\n", (long)size, cxl_mem);
-    }
-    
-    return MPI_SUCCESS;
-}
-
-int MPI_Free_mem(void *base) {
-    void *cxl_addr = find_cxl_mapping(base);
-    if (cxl_addr) {
-        unregister_mapping(base);
-        return MPI_SUCCESS;
-    }
-    
-    if (!orig_MPI_Free_mem) {
-        orig_MPI_Free_mem = dlsym(RTLD_NEXT, "MPI_Free_mem");
-    }
-    return orig_MPI_Free_mem(base);
-}
-
-int MPI_Win_allocate(MPI_Aint size, int disp_unit, MPI_Info info, MPI_Comm comm, void *baseptr, MPI_Win *win) {
-    if (!g_cxl.initialized || !getenv("CXL_SHIM_WIN")) {
-        if (!orig_MPI_Win_allocate) {
-            orig_MPI_Win_allocate = dlsym(RTLD_NEXT, "MPI_Win_allocate");
-        }
-        return orig_MPI_Win_allocate(size, disp_unit, info, comm, baseptr, win);
-    }
-    
-    void *cxl_mem = allocate_cxl_memory((size_t)size);
-    if (!cxl_mem) {
-        return MPI_ERR_NO_MEM;
-    }
-    
-    *(void **)baseptr = cxl_mem;
-    register_mapping(cxl_mem, cxl_mem, (size_t)size);
-    
-    // Create window with CXL memory
-    if (!orig_MPI_Win_allocate) {
-        orig_MPI_Win_allocate = dlsym(RTLD_NEXT, "MPI_Win_allocate");
-    }
-    
-    return orig_MPI_Win_allocate(0, disp_unit, info, comm, baseptr, win);
-}
-
-int MPI_Win_allocate_shared(MPI_Aint size, int disp_unit, MPI_Info info, MPI_Comm comm, void *baseptr, MPI_Win *win) {
-    if (!g_cxl.initialized || !getenv("CXL_SHIM_WIN")) {
-        if (!orig_MPI_Win_allocate_shared) {
-            orig_MPI_Win_allocate_shared = dlsym(RTLD_NEXT, "MPI_Win_allocate_shared");
-        }
-        return orig_MPI_Win_allocate_shared(size, disp_unit, info, comm, baseptr, win);
-    }
-    
-    void *cxl_mem = allocate_cxl_memory((size_t)size);
-    if (!cxl_mem) {
-        return MPI_ERR_NO_MEM;
-    }
-    
-    *(void **)baseptr = cxl_mem;
-    register_mapping(cxl_mem, cxl_mem, (size_t)size);
-    
-    if (getenv("CXL_SHIM_VERBOSE")) {
-        int rank;
-        MPI_Comm_rank(comm, &rank);
-        fprintf(stderr, "[CXL_SHIM] Rank %d: MPI_Win_allocate_shared %ld bytes at %p\n", rank, (long)size, cxl_mem);
-    }
-    
-    if (!orig_MPI_Win_allocate_shared) {
-        orig_MPI_Win_allocate_shared = dlsym(RTLD_NEXT, "MPI_Win_allocate_shared");
-    }
-    
-    return orig_MPI_Win_allocate_shared(0, disp_unit, info, comm, baseptr, win);
-}
-
-// Constructor to initialize when library is loaded
+// Library constructor
 __attribute__((constructor))
 static void shim_init(void) {
-    pthread_mutex_init(&g_cxl.lock, NULL);
-
-    // Always print initialization message for debugging
-    fprintf(stderr, "[CXL_SHIM] ========================================\n");
-    fprintf(stderr, "[CXL_SHIM] MPI CXL shim layer loaded successfully!\n");
-    fprintf(stderr, "[CXL_SHIM] PID: %d\n", getpid());
-    fprintf(stderr, "[CXL_SHIM] LD_PRELOAD: %s\n", getenv("LD_PRELOAD") ? getenv("LD_PRELOAD") : "(not set)");
-
-    // Print environment variables
-    fprintf(stderr, "[CXL_SHIM] Environment variables:\n");
-    fprintf(stderr, "[CXL_SHIM]   CXL_SHIM_VERBOSE: %s\n", getenv("CXL_SHIM_VERBOSE") ? "YES" : "NO");
-    fprintf(stderr, "[CXL_SHIM]   CXL_SHIM_ALLOC: %s\n", getenv("CXL_SHIM_ALLOC") ? "YES" : "NO");
-    fprintf(stderr, "[CXL_SHIM]   CXL_SHIM_WIN: %s\n", getenv("CXL_SHIM_WIN") ? "YES" : "NO");
-    fprintf(stderr, "[CXL_SHIM]   CXL_SHIM_COPY_SEND: %s\n", getenv("CXL_SHIM_COPY_SEND") ? "YES" : "NO");
-    fprintf(stderr, "[CXL_SHIM]   CXL_SHIM_COPY_RECV: %s\n", getenv("CXL_SHIM_COPY_RECV") ? "YES" : "NO");
-    fprintf(stderr, "[CXL_SHIM]   CXL_DAX_PATH: %s\n", getenv("CXL_DAX_PATH") ? getenv("CXL_DAX_PATH") : "(not set)");
-    fprintf(stderr, "[CXL_SHIM]   CXL_MEM_SIZE: %s\n", getenv("CXL_MEM_SIZE") ? getenv("CXL_MEM_SIZE") : "(not set)");
-
-    // Check if we can find MPI symbols
+    // Set up signal handlers for debugging
+    signal(SIGSEGV, signal_handler);
+    signal(SIGABRT, signal_handler);
+    
+    char hostname[256];
+    gethostname(hostname, sizeof(hostname));
+    
+    fprintf(stderr, "\n");
+    fprintf(stderr, "┌────────────────────────────────────────────────┐\n");
+    fprintf(stderr, "│      CXL MPI SHIM LIBRARY v%s LOADED          │\n", SHIM_VERSION);
+    fprintf(stderr, "├────────────────────────────────────────────────┤\n");
+    fprintf(stderr, "│ Host: %-40s │\n", hostname);
+    fprintf(stderr, "│ PID:  %-40d │\n", getpid());
+    fprintf(stderr, "│ Time: %-40ld │\n", time(NULL));
+    fprintf(stderr, "├────────────────────────────────────────────────┤\n");
+    fprintf(stderr, "│ LD_PRELOAD: %-34s │\n", 
+            getenv("LD_PRELOAD") ? "SET" : "NOT SET");
+    fprintf(stderr, "│ CXL_SHIM_VERBOSE: %-28s │\n", 
+            getenv("CXL_SHIM_VERBOSE") ? "YES" : "NO");
+    fprintf(stderr, "│ CXL_DAX_PATH: %-32s │\n", 
+            getenv("CXL_DAX_PATH") ? getenv("CXL_DAX_PATH") : "NOT SET");
+    fprintf(stderr, "└────────────────────────────────────────────────┘\n");
+    fprintf(stderr, "\n");
+    fflush(stderr);
+    
+    // Pre-load some functions
     void *handle = dlopen(NULL, RTLD_LAZY);
     if (handle) {
-        void *mpi_init_sym = dlsym(handle, "MPI_Init");
-        fprintf(stderr, "[CXL_SHIM] MPI_Init symbol found at: %p\n", mpi_init_sym);
+        void *mpi_init = dlsym(handle, "MPI_Init");
+        void *pmpi_init = dlsym(handle, "PMPI_Init");
+        LOG_DEBUG("Found MPI_Init at %p, PMPI_Init at %p\n", mpi_init, pmpi_init);
         dlclose(handle);
     }
-
-    fprintf(stderr, "[CXL_SHIM] ========================================\n");
-    fflush(stderr);
 }
 
-// Destructor to cleanup when library is unloaded
+// Library destructor
 __attribute__((destructor))
 static void shim_cleanup(void) {
+    LOG_INFO("CXL MPI Shim unloading (total hooks: %d)\n", g_hook_count);
+    
     if (g_cxl.initialized) {
-        munmap(g_cxl.base, g_cxl.size);
-        if (g_cxl.fd >= 0) close(g_cxl.fd);
+        LOG_INFO("Final CXL memory usage: %zu/%zu bytes (%.1f%%)\n",
+                 g_cxl.used, g_cxl.size, 100.0 * g_cxl.used / g_cxl.size);
     }
-    pthread_mutex_destroy(&g_cxl.lock);
 }
