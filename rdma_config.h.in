@@ -1,0 +1,115 @@
+/*
+ * RDMA Configuration Header Template
+ * This file is processed by CMake to generate rdma_config.h
+ */
+
+#ifndef RDMA_CONFIG_H
+#define RDMA_CONFIG_H
+
+/* Define if RDMA support is enabled */
+#cmakedefine ENABLE_RDMA
+
+/* Define if RDMA libraries are available */
+#cmakedefine HAVE_RDMA
+
+/* Define if libibverbs is available */
+#cmakedefine HAVE_LIBIBVERBS
+
+/* Define if librdmacm is available */
+#cmakedefine HAVE_LIBRDMACM
+
+/* Define if soft-RoCE is available */
+#cmakedefine HAVE_SOFT_ROCE
+
+/* RDMA library versions */
+#define RDMACM_VERSION "@RDMACM_VERSION@"
+#define IBV_VERSION "@IBV_VERSION@"
+
+/* Default RDMA configuration values */
+#define DEFAULT_RDMA_PORT 5555
+#define DEFAULT_RDMA_BUFFER_SIZE 4096
+#define DEFAULT_RDMA_CQ_SIZE 1024
+#define DEFAULT_RDMA_MAX_WR 512
+#define DEFAULT_RDMA_CACHELINE_SIZE 64
+
+/* Transport mode options */
+#define TRANSPORT_MODE_TCP 0
+#define TRANSPORT_MODE_SHM 1
+#define TRANSPORT_MODE_RDMA 2
+
+/* Default transport mode */
+#ifdef HAVE_RDMA
+    #define DEFAULT_TRANSPORT_MODE TRANSPORT_MODE_RDMA
+#else
+    #define DEFAULT_TRANSPORT_MODE TRANSPORT_MODE_TCP
+#endif
+
+/* RDMA server defaults */
+#define DEFAULT_RDMA_SERVER_ADDR "0.0.0.0"
+#define DEFAULT_RDMA_CLIENT_ADDR "127.0.0.1"
+
+/* Performance tuning parameters */
+#define RDMA_INLINE_DATA_SIZE 256
+#define RDMA_MAX_SGE 1
+#define RDMA_POLL_TIMEOUT_MS 1000
+#define RDMA_CONNECT_TIMEOUT_MS 2000
+#define RDMA_RESOLVE_TIMEOUT_MS 2000
+
+/* Statistics collection */
+#cmakedefine ENABLE_RDMA_STATS
+
+/* Debug options */
+#cmakedefine RDMA_DEBUG
+#cmakedefine RDMA_VERBOSE_DEBUG
+
+/* Compatibility options */
+#cmakedefine RDMA_COMPAT_MODE
+
+/* Feature flags */
+#cmakedefine RDMA_SUPPORT_MULTICAST
+#cmakedefine RDMA_SUPPORT_XRC
+#cmakedefine RDMA_SUPPORT_ATOMICS
+
+/* Build information */
+#define RDMA_BUILD_DATE "@BUILD_DATE@"
+#define RDMA_BUILD_HOST "@BUILD_HOST@"
+#define RDMA_COMPILER "@CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@"
+
+/* Helper macros */
+#ifdef HAVE_RDMA
+    #define RDMA_ENABLED 1
+    #define RDMA_AVAILABLE() (1)
+#else
+    #define RDMA_ENABLED 0
+    #define RDMA_AVAILABLE() (0)
+#endif
+
+#ifdef RDMA_DEBUG
+    #include <stdio.h>
+    #define RDMA_LOG(fmt, ...) \
+        fprintf(stderr, "[RDMA] " fmt "\n", ##__VA_ARGS__)
+#else
+    #define RDMA_LOG(fmt, ...) do {} while(0)
+#endif
+
+#ifdef RDMA_VERBOSE_DEBUG
+    #define RDMA_TRACE(fmt, ...) \
+        fprintf(stderr, "[RDMA TRACE] %s:%d: " fmt "\n", \
+                __FILE__, __LINE__, ##__VA_ARGS__)
+#else
+    #define RDMA_TRACE(fmt, ...) do {} while(0)
+#endif
+
+/* Error handling */
+#define RDMA_ERROR(fmt, ...) \
+    fprintf(stderr, "[RDMA ERROR] " fmt "\n", ##__VA_ARGS__)
+
+#define RDMA_WARN(fmt, ...) \
+    fprintf(stderr, "[RDMA WARNING] " fmt "\n", ##__VA_ARGS__)
+
+/* Version checking */
+#define RDMA_VERSION_CHECK(major, minor) \
+    (RDMA_VERSION_MAJOR > (major) || \
+     (RDMA_VERSION_MAJOR == (major) && RDMA_VERSION_MINOR >= (minor)))
+
+#endif /* RDMA_CONFIG_H */

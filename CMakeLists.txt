@@ -59,3 +59,62 @@ else()
     target_include_directories(cxlmemsim_server PRIVATE include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
     target_link_libraries(cxlmemsim_server cxlmemsim cxxopts::cxxopts spdlog::spdlog rt)
 endif()
+# Find RDMA libraries
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(RDMACM REQUIRED librdmacm)
+pkg_check_modules(IBV REQUIRED libibverbs)
+
+# Check if RDMA is available
+option(ENABLE_RDMA "Enable RDMA support" ON)
+
+if(ENABLE_RDMA)
+    if(RDMACM_FOUND AND IBV_FOUND)
+        message(STATUS "RDMA support enabled")
+        add_definitions(-DHAVE_RDMA)
+
+        # Add RDMA include directories
+        include_directories(${RDMACM_INCLUDE_DIRS})
+        include_directories(${IBV_INCLUDE_DIRS})
+
+        # Add RDMA libraries
+        set(RDMA_LIBRARIES ${RDMACM_LIBRARIES} ${IBV_LIBRARIES})
+
+        # Add RDMA source files
+        set(RDMA_SOURCES
+            src/rdma_communication.cpp
+            qemu_integration/src/cxlmemsim_server_rdma.cpp
+        )
+
+        # Create RDMA-enabled server executable
+        add_executable(cxlmemsim_server_rdma ${RDMA_SOURCES})
+        target_link_libraries(cxlmemsim_server_rdma
+            ${RDMA_LIBRARIES}
+            pthread
+        )
+
+        # Set RDMA-specific compile flags
+        target_compile_options(cxlmemsim_server_rdma PRIVATE
+            ${RDMACM_CFLAGS_OTHER}
+            ${IBV_CFLAGS_OTHER}
+        )
+
+    else()
+        message(WARNING "RDMA libraries not found. RDMA support disabled.")
+        set(ENABLE_RDMA OFF)
+    endif()
+endif()
+
+# Installation targets
+if(ENABLE_RDMA)
+    install(TARGETS cxlmemsim_server_rdma
+            RUNTIME DESTINATION bin)
+
+    install(FILES include/rdma_communication.h
+            DESTINATION include/cxlmemsim)
+endif()
+
+# Export RDMA configuration
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/rdma_config.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/rdma_config.h"
+)
