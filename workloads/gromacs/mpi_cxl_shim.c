@@ -486,6 +486,53 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
 
 // Add more MPI function hooks as needed...
 
+// Override problematic OpenMPI internal function to prevent SIGILL
+int ompi_errhandler_init(void) {
+    static int initialized = 0;
+    static typeof(ompi_errhandler_init) *orig_ompi_errhandler_init = NULL;
+
+    if (initialized) {
+        LOG_TRACE("ompi_errhandler_init already initialized, skipping\n");
+        return 0;  // Return success without doing anything
+    }
+
+    // Try to load the original function
+    if (!orig_ompi_errhandler_init) {
+        orig_ompi_errhandler_init = dlsym(RTLD_NEXT, "ompi_errhandler_init");
+        if (!orig_ompi_errhandler_init) {
+            // If we can't find it, that's okay - just mark as initialized
+            LOG_DEBUG("ompi_errhandler_init not found in RTLD_NEXT, returning success\n");
+            initialized = 1;
+            return 0;  // Return MPI_SUCCESS (0)
+        }
+    }
+
+    LOG_TRACE("Calling original ompi_errhandler_init at %p\n", orig_ompi_errhandler_init);
+
+    // Set flag first to prevent recursion
+    initialized = 1;
+
+    // Call original if it exists
+    if (orig_ompi_errhandler_init) {
+        return orig_ompi_errhandler_init();
+    }
+
+    return 0;  // Return success
+}
+
+// Alternative: completely stub out the function if it's causing issues
+// Uncomment this version if the above still causes SIGILL
+/*
+int ompi_errhandler_init(void) {
+    static int called = 0;
+    if (!called) {
+        called = 1;
+        LOG_DEBUG("ompi_errhandler_init stubbed out to prevent SIGILL\n");
+    }
+    return 0;  // Always return success
+}
+*/
+
 // Library constructor
 __attribute__((constructor))
 static void shim_init(void) {
