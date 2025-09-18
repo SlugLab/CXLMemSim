@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.11.0)
+cmake_minimum_required(VERSION 3.25.0)
 project(CXLMemSim VERSION 0.1.0)
 
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
