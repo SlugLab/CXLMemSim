@@ -1,4 +1,6 @@
-# CXL.mem Simulator
+# CXLMemSim and MEMU
+
+# CXLMemSim
 The CXL.mem simulator uses the target latency for simulating the CPU perspective taking ROB and different cacheline states into penalty from the application level.
 
 ## Prerequisite
@@ -40,3 +42,34 @@ SPDLOG_LEVEL=debug ./CXLMemSim -t ./microbench/ld -i 5 -c 0,2 -d 85 -c 100,100 -
   year={2023}
 }
 ```
+
+# MEMU
+
+Compute Express Link (CXL) 3.0 introduces powerful memory pooling and promises to transform datacenter architectures. However, the lack of available CXL 3.0 hardware and the complexity of multi-host configurations pose significant challenges to the community. This paper presents MEMU, a comprehensive emulation framework that enables full CXL 3.0 functionality, including multi-host memory sharing and pooling support. MEMU provides emulation of CXL 3.0 features—such as fabric management, dynamic memory allocation, and coherent memory sharing across multiple hosts—in advance of real hardware availability. An evaluation of MEMU shows that it achieves performance within about 3x of projected native CXL 3.0 speeds having complete compatibility with existing CXL software stacks. We demonstrate the utility of MEMU through a case study on Genomics Pipeline, observing up to a 15% improvement in application performance compared to traditional RDMA-based approaches. MEMU is open-source and publicly available, aiming to accelerate CXL 3.0 research and development.
+
+```bash
+sudo ip link add br0 type bridge
+sudo ip link set br0 up
+sudo ip addr add 192.168.100.1/24 dev br0
+for i in 0; do
+    sudo ip tuntap add tap$i mode tap
+    sudo ip link set tap$i up
+    sudo ip link set tap$i master br0
+done
+mkdir build
+cd build
+wget https://asplos.dev/about/qemu.img
+wget https://asplos.dev/about/bzImage
+cp qemu.img qemu1.img
+../qemu_integration/launch_qemu_cxl1.sh
+# in qemu
+vi /usr/local/bin/*.sh
+# change 192.168.100.10 to 11
+vi /etc/hostname
+# change node0 to node1
+exit
+# out of qemu
+../qemu_integration/launch_qemu_cxl.sh &
+../qemu_integration/launch_qemu_cxl1.sh &
+```
+
