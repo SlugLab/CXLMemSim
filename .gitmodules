@@ -37,3 +37,6 @@
 [submodule "workloads/tigon"]
 	path = workloads/tigon
 	url = https://github.com/CXLMemUring/tigon
+[submodule "workloads/osu"]
+	path = workloads/osu
+	url = https://github.com/forresti/osu-micro-benchmarks

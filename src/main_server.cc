@@ -690,8 +690,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
                     verify_str << std::hex << std::setfill('0') << std::setw(2) 
                               << static_cast<int>(verify_data[i]) << " ";
                 }
-                SPDLOG_INFO("Thread {}: WRITE verification - data in memory: {}", 
-                           thread_id, verify_str.str());
+
             }
             
             // Register back invalidation for threads that had this cacheline

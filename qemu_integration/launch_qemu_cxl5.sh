@@ -19,9 +19,9 @@ exec $QEMU_BINARY \
     -M q35,cxl=on \
     -kernel ./bzImage \
     -append "root=/dev/sda rw console=ttyS0,115200 nokaslr" \
-    -drive file=./qemu1.img,index=0,media=disk,format=raw \
-    -netdev tap,id=net0,ifname=tap1,script=no,downscript=no \
-    -device virtio-net-pci,netdev=net0,mac=52:54:00:00:00:02 \
+    -drive file=./qemu5.img,index=0,media=disk,format=raw \
+    -netdev tap,id=net0,ifname=tap5,script=no,downscript=no \
+    -device virtio-net-pci,netdev=net0,mac=52:54:00:00:00:06 \
     -device pxb-cxl,bus_nr=12,bus=pcie.0,id=cxl.1 \
     -device cxl-rp,port=0,bus=cxl.1,id=root_port13,chassis=0,slot=0 \
     -device cxl-rp,port=1,bus=cxl.1,id=root_port14,chassis=0,slot=1 \
