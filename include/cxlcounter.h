@@ -15,8 +15,6 @@
 #include <concepts>
 #include <cstdint>
 #include <optional>
-#include <format>
-#include <source_location>
 #include <string>
 /** TODO: Whether to using the pebs to record the state. add back invalidation migrate huge/ page and prefetch*/
 const char loadName[] = "load";
@@ -64,9 +62,10 @@ public:
     constexpr operator uint64_t() const noexcept { return get(); }
 
     // 用于可能需要记录的事件日志 (For event logs that may need to be recorded)
-    void log_increment(std::source_location loc = std::source_location::current()) const {
-        // 未来可以实现日志记录 (Logging can be implemented in the future)
-    }
+    // Note: std::source_location is C++20, but not all compilers support it yet
+    // void log_increment(std::source_location loc = std::source_location::current()) const {
+    //     // 未来可以实现日志记录 (Logging can be implemented in the future)
+    // }
 };
 // 确保AtomicCounter满足Counter概念 (Ensure AtomicCounter meets the Counter concept)
 template <const char *Name>
@@ -75,16 +74,17 @@ inline constexpr bool implements_counter_concept = requires(AtomicCounter<Name> 
     { t.increment() } -> std::same_as<void>;
 };
 
-template <const char *Name> struct std::formatter<AtomicCounter<Name>> {
-    constexpr auto parse(std::format_parse_context &ctx) -> decltype(ctx.begin()) { return ctx.end(); }
-
-    template <typename FormatContext>
-    auto format(const AtomicCounter<Name> &counter, FormatContext &ctx) const -> decltype(ctx.out()) {
-        // 简化formatter实现，避免嵌套std::format调用 (Simplify formatter implementation, avoid nested std::format
-        // calls)
-        return format_to(ctx.out(), "{}", counter.get());
-    }
-};
+// C++20 doesn't have std::formatter - this requires C++20 with fmt library
+// template <const char *Name> struct std::formatter<AtomicCounter<Name>> {
+//     constexpr auto parse(std::format_parse_context &ctx) -> decltype(ctx.begin()) { return ctx.end(); }
+//
+//     template <typename FormatContext>
+//     auto format(const AtomicCounter<Name> &counter, FormatContext &ctx) const -> decltype(ctx.out()) {
+//         // 简化formatter实现，避免嵌套std::format调用 (Simplify formatter implementation, avoid nested std::format
+//         // calls)
+//         return format_to(ctx.out(), "{}", counter.get());
+//     }
+// };
 
 // 使用C++20的enum class和强类型枚举 (Use C++20 enum class and strong-typed enumerations)
 enum class EventType { Load, Store, Conflict, MigrateIn, MigrateOut, HitOld, Local, Remote, Hitm };

@@ -180,13 +180,13 @@ int main(int argc, char *argv[]) {
     auto ncpu = helper.num_of_cpu();
     auto ncha = helper.num_of_cha();
     SPDLOG_DEBUG("tnum:{}", tnum);
-    for (auto const &[idx, value] : weight | std::views::enumerate) {
-        SPDLOG_DEBUG("weight[{}]:{}", weight_vec[idx], value);
+    for (size_t idx = 0; idx < weight.size(); idx++) {
+        SPDLOG_DEBUG("weight[{}]:{}", weight_vec[idx], weight[idx]);
     }
 
-    for (auto const &[idx, value] : capacity | std::views::enumerate) {
+    for (size_t idx = 0; idx < capacity.size(); idx++) {
         if (idx == 0) {
-            SPDLOG_DEBUG("local_memory_region capacity:{}", value);
+            SPDLOG_DEBUG("local_memory_region capacity:{}", capacity[idx]);
             controller = new CXLController({policy1, policy2, policy3, policy4}, capacity[0], mode, 100, dramlatency);
         } else {
             SPDLOG_DEBUG("memory_region:{}", (idx - 1) + 1);
@@ -284,10 +284,10 @@ int main(int argc, char *argv[]) {
 
     /* read CHA params */
     for (const auto &mon : monitors->mon) {
-        for (auto const &[idx, value] : pmu.chas | std::views::enumerate) {
+        for (size_t idx = 0; idx < pmu.chas.size(); idx++) {
             pmu.chas[idx].read_cha_elems(&mon.before->chas[idx]);
         }
-        for (auto const &[idx, value] : pmu.cpus | std::views::enumerate) {
+        for (size_t idx = 0; idx < pmu.cpus.size(); idx++) {
             pmu.cpus[idx].read_cpu_elems(&mon.before->cpus[idx]);
         }
     }
@@ -303,7 +303,8 @@ int main(int argc, char *argv[]) {
 
     while (true) {
         uint64_t calibrated_delay;
-        for (auto const &[i, mon] : monitors->mon | std::views::enumerate) {
+        for (size_t i = 0; i < monitors->mon.size(); i++) {
+            const auto &mon = monitors->mon[i];
             // check other process
             auto m_status = mon.status.load();
             if (m_status == MONITOR_DISABLE) {
@@ -336,13 +337,13 @@ int main(int argc, char *argv[]) {
                 }
                 target_llcmiss = mon.after->pebs.total - mon.before->pebs.total;
 
-                for (auto const &[idx, value] : pmu.cpus | std::views::enumerate) {
-                    value.read_cpu_elems(&mon.after->cpus[i]);
+                for (size_t idx = 0; idx < pmu.cpus.size(); idx++) {
+                    pmu.cpus[idx].read_cpu_elems(&mon.after->cpus[i]);
                     cpu_vec[idx] = mon.after->cpus[i].cpu[idx] - mon.before->cpus[i].cpu[idx];
                 }
 
-                for (auto const &[idx, value] : pmu.chas | std::views::enumerate) {
-                    value.read_cha_elems(&mon.after->chas[cha_mapping[i]]);
+                for (size_t idx = 0; idx < pmu.chas.size(); idx++) {
+                    pmu.chas[idx].read_cha_elems(&mon.after->chas[cha_mapping[i]]);
                     cha_vec[idx] = mon.after->chas[cha_mapping[i]].cha[idx] - mon.before->chas[cha_mapping[i]].cha[idx];
                 }
                 target_llchits = cpu_vec[0];

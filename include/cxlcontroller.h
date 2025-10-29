@@ -275,111 +275,110 @@ public:
     void invalidate_in_switch(CXLSwitch *switch_, uint64_t addr);
 };
 
-template <> struct std::formatter<CXLController> {
-    // Parse function to handle any format specifiers (if needed)
-    constexpr auto parse(std::format_parse_context &ctx) -> decltype(ctx.begin()) {
-        // If you have specific format specifiers, parse them here
-        // For simplicity, we'll ignore them and return the end iterator
-        return ctx.end();
-    }
+// C++20 doesn't have std::formatter - using fmt::formatter instead
+// We'll use a helper function instead
+namespace fmt {
+    template <> struct formatter<CXLController> {
+        constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
+            return ctx.end();
+        }
 
-    // Format function to output the Monitors data
+        template <typename FormatContext>
+        auto format(const CXLController &controller, FormatContext &ctx) const -> decltype(ctx.out()) {
+            std::string result;
 
-    template <typename FormatContext>
-    auto format(const CXLController &controller, FormatContext &ctx) const -> decltype(ctx.out()) {
-        std::string result;
+            // 首先打印控制器自身的计数器信息
+            result += "CXLController:\n";
+            // iterate through the topology map
+            uint64_t total_capacity = 0;
 
-        // 首先打印控制器自身的计数器信息
-        result += std::format("CXLController:\n");
-        // iterate through the topology map
-        uint64_t total_capacity = 0;
+            std::function<void(const CXLSwitch *)> dfs_capacity = [&](const CXLSwitch *node) {
+                if (!node)
+                    return;
 
-        std::function<void(const CXLSwitch *)> dfs_capacity = [&](const CXLSwitch *node) {
-            if (!node)
-                return;
-
-            // Traverse expanders and sum their capacity
-            for (const auto *expander : node->expanders) {
-                if (expander) {
-                    total_capacity += expander->capacity;
+                // Traverse expanders and sum their capacity
+                for (const auto *expander : node->expanders) {
+                    if (expander) {
+                        total_capacity += expander->capacity;
+                    }
                 }
-            }
 
-            // Recur for all connected switches
-            for (const auto *sw : node->switches) {
-                dfs_capacity(sw); // Proper recursive call
-            }
-        };
-        dfs_capacity(&controller);
+                // Recur for all connected switches
+                for (const auto *sw : node->switches) {
+                    dfs_capacity(sw); // Proper recursive call
+                }
+            };
+            dfs_capacity(&controller);
 
-        result += std::format("Total system memory capacity: {}GB\n", total_capacity);
+            result += fmt::format("Total system memory capacity: {}GB\n", total_capacity);
 
-        result += std::format("  Page Type: {}\n", [](page_type pt) {
-            switch (pt) {
-            case CACHELINE:
-                return "CACHELINE";
-            case PAGE:
-                return "PAGE";
-            case HUGEPAGE_2M:
-                return "HUGEPAGE_2M";
-            case HUGEPAGE_1G:
-                return "HUGEPAGE_1G";
-            default:
-                return "UNKNOWN";
-            }
-        }(controller.page_type_));
+            result += fmt::format("  Page Type: {}\n", [](page_type pt) {
+                switch (pt) {
+                case CACHELINE:
+                    return "CACHELINE";
+                case PAGE:
+                    return "PAGE";
+                case HUGEPAGE_2M:
+                    return "HUGEPAGE_2M";
+                case HUGEPAGE_1G:
+                    return "HUGEPAGE_1G";
+                default:
+                    return "UNKNOWN";
+                }
+            }(controller.page_type_));
 
-        // 打印全局计数器
-        result += std::format("  Global Counter:\n");
-        result += std::format("    Local: {}\n", controller.counter.local.get());
-        result += std::format("    Remote: {}\n", controller.counter.remote.get());
-        result += std::format("    HITM: {}\n", controller.counter.hitm.get());
+            // 打印全局计数器
+            result += fmt::format("  Global Counter:\n");
+            result += fmt::format("    Local: {}\n", controller.counter.local.get());
+            result += fmt::format("    Remote: {}\n", controller.counter.remote.get());
+            result += fmt::format("    HITM: {}\n", controller.counter.hitm.get());
 
-        // 打印拓扑结构（交换机和端点）
-        result += "Topology:\n";
+            // 打印拓扑结构（交换机和端点）
+            result += "Topology:\n";
 
-        // 递归打印每个交换机
-        std::function<void(const CXLSwitch *, int)> print_switch = [&result, &print_switch](const CXLSwitch *sw,
-                                                                                            int depth) {
-            std::string indent(depth * 2, ' ');
+            // 递归打印每个交换机
+            std::function<void(const CXLSwitch *, int)> print_switch = [&result, &print_switch](const CXLSwitch *sw,
+                                                                                                int depth) {
+                std::string indent(depth * 2, ' ');
 
-            // 打印交换机事件计数
-            result += std::format("{}Switch:\n", indent);
-            result += std::format("{}  Events:\n", indent);
-            result += std::format("{}    Load: {}\n", indent, sw->counter.load.get());
-            result += std::format("{}    Store: {}\n", indent, sw->counter.store.get());
-            result += std::format("{}    Conflict: {}\n", indent, sw->counter.conflict.get());
+                // 打印交换机事件计数
+                result += fmt::format("{}Switch:\n", indent);
+                result += fmt::format("{}  Events:\n", indent);
+                result += fmt::format("{}    Load: {}\n", indent, sw->counter.load.get());
+                result += fmt::format("{}    Store: {}\n", indent, sw->counter.store.get());
+                result += fmt::format("{}    Conflict: {}\n", indent, sw->counter.conflict.get());
 
-            // 递归打印子交换机
-            for (const auto &child : sw->switches) {
-                print_switch(child, depth + 1);
-            }
+                // 递归打印子交换机
+                for (const auto &child : sw->switches) {
+                    print_switch(child, depth + 1);
+                }
 
-            // 打印端点
-            for (const auto &endpoint : sw->expanders) {
-                result += std::format("{}Expander:\n", indent + "  ");
-                result += std::format("{}  Events:\n", indent + "  ");
-                result += std::format("{}    Load: {}\n", indent + "  ", endpoint->counter.load.get());
-                result += std::format("{}    Store: {}\n", indent + "  ", endpoint->counter.store.get());
-                result += std::format("{}    Migrate in: {}\n", indent + "  ", endpoint->counter.migrate_in.get());
-                result += std::format("{}    Migrate out: {}\n", indent + "  ", endpoint->counter.migrate_out.get());
-                result += std::format("{}    Hit Old: {}\n", indent + "  ", endpoint->counter.hit_old.get());
-            }
-        };
+                // 打印端点
+                for (const auto &endpoint : sw->expanders) {
+                    result += fmt::format("{}Expander:\n", indent + "  ");
+                    result += fmt::format("{}  Events:\n", indent + "  ");
+                    result += fmt::format("{}    Load: {}\n", indent + "  ", endpoint->counter.load.get());
+                    result += fmt::format("{}    Store: {}\n", indent + "  ", endpoint->counter.store.get());
+                    result += fmt::format("{}    Migrate in: {}\n", indent + "  ", endpoint->counter.migrate_in.get());
+                    result += fmt::format("{}    Migrate out: {}\n", indent + "  ", endpoint->counter.migrate_out.get());
+                    result += fmt::format("{}    Hit Old: {}\n", indent + "  ", endpoint->counter.hit_old.get());
+                }
+            };
 
-        // 从控制器开始递归打印
-        print_switch(&controller, 0);
+            // 从控制器开始递归打印
+            print_switch(&controller, 0);
 
-        // 打印额外的统计信息
-        result += "\nStatistics:\n";
-        result += std::format("  Number of Switches: {}\n", controller.num_switches);
-        result += std::format("  Number of Endpoints: {}\n", controller.num_end_points);
-        result += std::format("  Number of Threads created: {}\n", controller.thread_map.size());
-        result += std::format("  Memory Freed: {} bytes\n", controller.freed);
+            // 打印额外的统计信息
+            result += "\nStatistics:\n";
+            result += fmt::format("  Number of Switches: {}\n", controller.num_switches);
+            result += fmt::format("  Number of Endpoints: {}\n", controller.num_end_points);
+            result += fmt::format("  Number of Threads created: {}\n", controller.thread_map.size());
+            result += fmt::format("  Memory Freed: {} bytes\n", controller.freed);
 
-        return format_to(ctx.out(), "{}", result);
-    }
-};
+            return format_to(ctx.out(), "{}", result);
+        }
+    };
+}
 
 extern CXLController *controller;
 #endif // CXLMEMSIM_CXLCONTROLLER_H

@@ -19,9 +19,9 @@ void pcm_cpuid(const unsigned leaf, CPUID_INFO *info) {
 }
 
 int Incore::start() {
-    int i, r = -1;
+    int r = -1;
 
-    for (i = 0; i < this->perf.size(); i++) {
+    for (size_t i = 0; i < this->perf.size(); i++) {
         r = this->perf[i]->start();
         if (r < 0) {
             SPDLOG_ERROR("perf_start failed. i:{}\n", i);
@@ -31,9 +31,9 @@ int Incore::start() {
     return r;
 }
 int Incore::stop() {
-    int i, r = -1;
+    int r = -1;
 
-    for (i = 0; i < this->perf.size(); i++) {
+    for (size_t i = 0; i < this->perf.size(); i++) {
         r = this->perf[i]->stop();
         if (r < 0) {
             SPDLOG_ERROR("perf_stop failed. i:{}\n", i);
@@ -45,8 +45,8 @@ int Incore::stop() {
 
 ssize_t Incore::read_cpu_elems(struct CPUElem *elem) {
     ssize_t r;
-    for (auto const &[idx, value] : this->perf | std::views::enumerate) {
-        r = value->read_pmu(&elem->cpu[idx]);
+    for (size_t idx = 0; idx < this->perf.size(); idx++) {
+        r = this->perf[idx]->read_pmu(&elem->cpu[idx]);
         if (r < 0) {
             SPDLOG_ERROR("read cpu_elems[{}] failed.\n", std::get<0>(helper.perf_conf.cpu[idx]));
         }
@@ -58,7 +58,7 @@ ssize_t Incore::read_cpu_elems(struct CPUElem *elem) {
 
 Incore::Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config) : perf_config(perf_config) {
     /* reset all pmc values */
-    for (int i = 0; i < perf_config->cpu.size(); i++) {
+    for (size_t i = 0; i < perf_config->cpu.size(); i++) {
         this->perf[i] = init_incore_perf(pid, cpu, std::get<1>(perf_config->cpu[i]), std::get<2>(perf_config->cpu[i]));
     }
 }

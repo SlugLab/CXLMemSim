@@ -136,7 +136,7 @@ public:
             if (std::string(mode) == "rdma") return MODE_RDMA;
             if (std::string(mode) == "shm") return MODE_SHM;
         }
-        return MODE_RDMA
+        return MODE_RDMA;
     }
 
     static bool is_rdma_available() {

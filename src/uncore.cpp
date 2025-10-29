@@ -42,16 +42,16 @@ Uncore::Uncore(const uint32_t unc_idx, PerfConfig *perf_config) {
         throw std::runtime_error("strtoul");
     }
 
-    for (auto const &[k, v] : this->perf | std::views::enumerate) {
-        v = init_uncore_perf(-1, (int)unc_idx, std::get<1>(perf_config->cha[k]), std::get<2>(perf_config->cha[k]),
+    for (size_t k = 0; k < this->perf.size(); k++) {
+        this->perf[k] = init_uncore_perf(-1, (int)unc_idx, std::get<1>(perf_config->cha[k]), std::get<2>(perf_config->cha[k]),
                              value);
     }
 }
 
 int Uncore::read_cha_elems(struct CHAElem *elem) {
     ssize_t r;
-    for (auto const &[idx, value] : this->perf | std::views::enumerate) {
-        r = value->read_pmu(&elem->cha[idx]);
+    for (size_t idx = 0; idx < this->perf.size(); idx++) {
+        r = this->perf[idx]->read_pmu(&elem->cha[idx]);
         if (r < 0) {
             SPDLOG_ERROR("read cha_elems[{}] failed.\n", std::get<0>(helper.perf_conf.cha[idx]));
             return r;

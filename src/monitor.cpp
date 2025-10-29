@@ -277,19 +277,19 @@ int Monitors::terminate(const uint32_t tgid, const uint32_t tid, const int32_t t
             clock_gettime(CLOCK_MONOTONIC, &mon[i].end_exec_ts);
         }
         /* display results */
-        std::cout << std::format("========== Process {}[tgid={}, tid={}] statistics summary ==========\n", target,
+        std::cout << fmt::format("========== Process {}[tgid={}, tid={}] statistics summary ==========\n", target,
                                  mon[target].tgid, mon[target].tid);
         double emulated_time =
             (double)(mon[target].end_exec_ts.tv_sec - mon[target].start_exec_ts.tv_sec) +
             (double)(mon[target].end_exec_ts.tv_nsec - mon[target].start_exec_ts.tv_nsec) / 1000000000;
-        std::cout << std::format("emulated time ={}", emulated_time) << std::endl;
-        std::cout << std::format("total delay   ={}", mon[target].total_delay) << std::endl;
-        std::cout << std::format("PEBS sample total {} {}", mon[target].before->pebs.total,
+        std::cout << fmt::format("emulated time ={}", emulated_time) << std::endl;
+        std::cout << fmt::format("total delay   ={}", mon[target].total_delay) << std::endl;
+        std::cout << fmt::format("PEBS sample total {} {}", mon[target].before->pebs.total,
                                  mon[target].after->pebs.llcmiss)
                   << std::endl;
-        std::cout << std::format("LBR sample total {}", mon[target].before->lbr.total) << std::endl;
-        std::cout << std::format("bpftime sample total {}", mon[target].before->bpftime.total) << std::endl;
-        std::cout << std::format("{}", *controller) << std::endl;
+        std::cout << fmt::format("LBR sample total {}", mon[target].before->lbr.total) << std::endl;
+        std::cout << fmt::format("bpftime sample total {}", mon[target].before->bpftime.total) << std::endl;
+        std::cout << fmt::format("{}", *controller) << std::endl;
         break;
     }
 

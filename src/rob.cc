@@ -337,9 +337,9 @@ int main(int argc, char *argv[]) {
     auto *policy3 = new PagingPolicy();
     auto *policy4 = new CachingPolicy();
 
-    for (auto const &[idx, value] : capacity | std::views::enumerate) {
+    for (size_t idx = 0; idx < capacity.size(); idx++) {
         if (idx == 0) {
-            SPDLOG_DEBUG("local_memory_region capacity:{}", value);
+            SPDLOG_DEBUG("local_memory_region capacity:{}", capacity[idx]);
             controller = new CXLController({policy1, policy2, policy3, policy4}, capacity[0], mode, 100, dramlatency);
         } else {
             SPDLOG_DEBUG("memory_region:{}", (idx - 1) + 1);
@@ -374,10 +374,10 @@ int main(int argc, char *argv[]) {
     }
 
     // Now simulate issuing them into the ROB
-    for (const auto &[idx, instruction] : instructions | std::views::enumerate) {
+    for (size_t idx = 0; idx < instructions.size(); idx++) {
         bool issued = false;
         while (!issued) {
-            issued = rob.issue(instruction);
+            issued = rob.issue(instructions[idx]);
             if (!issued) {
                 rob.tick(); // If unable to issue, advance clock until space is available
             }
@@ -420,6 +420,6 @@ int main(int argc, char *argv[]) {
     std::cout << "ROB Events: " << rob.getStallEventCount() << std::endl;
     std::cout << "Generated delayed trace to: " << outputTraceFile << std::endl;
 
-    std::cout << std::format("{}", *controller) << std::endl;
+    std::cout << fmt::format("{}", *controller) << std::endl;
     return 0;
 }

@@ -9,7 +9,7 @@ endif ()
 execute_process(COMMAND uname -r OUTPUT_VARIABLE arch OUTPUT_STRIP_TRAILING_WHITESPACE)
 set(LINUX_SOURCE /lib/modules/${arch}/build/)
 
-set(CMAKE_CXX_STANDARD 26)
+set(CMAKE_CXX_STANDARD 20)
 
 # Add option for server mode (disables bpftime dependencies)
 option(SERVER_MODE "Build in server mode without bpftime dependencies" OFF)
