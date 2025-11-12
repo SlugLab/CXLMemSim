@@ -41,6 +41,7 @@
 #include <fstream>
 #include <iterator>
 #include <queue>
+#include <sys/mman.h>  // For msync
 
 #ifndef MSG_WAITALL
 #define MSG_WAITALL 0x100
@@ -543,7 +544,11 @@ uint64_t ThreadPerConnectionServer::calculate_total_latency(uint64_t base_latenc
 void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, ServerRequest& req, ServerResponse& resp) {
     uint64_t cacheline_addr = req.addr & ~(63ULL);  // 64-byte aligned
     bool had_coherency_miss = false;
-    
+
+    // CRITICAL: Memory barrier before reading from shared memory
+    // This ensures we see all updates from other guests
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+
     // Log CXL Type3 operation with detailed information
     const char* op_name = (req.op_type == 0) ? "CXL_TYPE3_READ" : "CXL_TYPE3_WRITE";
     
@@ -617,7 +622,12 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             
             // Read data from shared memory
             if (!shm_manager->read_cacheline(req.addr, resp.data, req.size)) {
-                SPDLOG_ERROR("Thread {}: Failed to read from shared memory at 0x{:x}", 
+                // Force sync before reporting failure
+                auto* metadata_ptr = shm_manager->get_cacheline_metadata(cacheline_addr);
+                if (metadata_ptr) {
+                    msync(metadata_ptr, sizeof(CachelineMetadata), MS_INVALIDATE | MS_SYNC);
+                }
+                SPDLOG_ERROR("Thread {}: Failed to read from shared memory at 0x{:x}",
                             thread_id, req.addr);
                 resp.status = 1;
                 congestion_info.active_requests--;
@@ -672,14 +682,26 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             
             // Write data to shared memory
             if (!shm_manager->write_cacheline(req.addr, req.data, req.size)) {
-                SPDLOG_ERROR("Thread {}: Failed to write to shared memory at 0x{:x}", 
+                SPDLOG_ERROR("Thread {}: Failed to write to shared memory at 0x{:x}",
                             thread_id, req.addr);
                 resp.status = 1;
                 congestion_info.active_requests--;
                 return;
             }
-            
-            // SPDLOG_INFO("Thread {}: WRITE completed successfully at addr=0x{:x}, size={}", 
+
+            // CRITICAL: Force sync to physical memory so other guests can see it
+            auto* metadata_ptr = shm_manager->get_cacheline_metadata(cacheline_addr);
+            if (metadata_ptr) {
+                msync(metadata_ptr, sizeof(CachelineMetadata), MS_SYNC);
+            }
+            // Force sync the data as well
+            void* data_ptr = shm_manager->get_data_area();
+            if (data_ptr) {
+                msync((uint8_t*)data_ptr + (cacheline_addr & ~CACHELINE_MASK), CACHELINE_SIZE, MS_SYNC);
+            }
+            std::atomic_thread_fence(std::memory_order_release);
+
+            // SPDLOG_INFO("Thread {}: WRITE completed successfully at addr=0x{:x}, size={}",
                     //    thread_id, req.addr, req.size);
             
             // Verify write by reading back

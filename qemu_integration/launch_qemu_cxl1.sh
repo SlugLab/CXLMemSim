@@ -28,9 +28,9 @@ exec $QEMU_BINARY \
     -device cxl-rp,port=0,bus=cxl.1,id=root_port13,chassis=0,slot=0 \
     -device cxl-rp,port=1,bus=cxl.1,id=root_port14,chassis=0,slot=1 \
     -device cxl-type3,bus=root_port13,persistent-memdev=cxl-mem1,lsa=cxl-lsa1,id=cxl-pmem0,sn=0x1 \
-    -device cxl-type1,bus=root_port14,size=256M,cache-size=64M \
+    -device cxl-type1,bus=root_port14,size=2G,cache-size=64M \
     -device virtio-cxl-accel-pci,bus=pcie.0 \
-    -object memory-backend-file,id=cxl-mem1,share=on,mem-path=/dev/shm/cxlmemsim_shared,size=256M \
-    -object memory-backend-file,id=cxl-lsa1,share=on,mem-path=/tmp/lsa1.raw,size=256M \
+    -object memory-backend-file,id=cxl-mem1,share=on,mem-path=/dev/shm/cxlmemsim_shared,size=2G \
+    -object memory-backend-file,id=cxl-lsa1,share=on,mem-path=/dev/shm/lsa1.raw,size=2G \
     -M cxl-fmw.0.targets.0=cxl.1,cxl-fmw.0.size=4G \
     -nographic

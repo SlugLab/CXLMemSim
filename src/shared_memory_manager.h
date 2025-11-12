@@ -110,7 +110,10 @@ public:
     uint8_t* get_cacheline_data(uint64_t cacheline_addr);
     bool read_cacheline(uint64_t addr, uint8_t* buffer, size_t size);
     bool write_cacheline(uint64_t addr, const uint8_t* data, size_t size);
-    
+
+    // Direct access to data area (for msync)
+    void* get_data_area() { return data_area; }
+
     // Metadata access (uses local cache)
     CachelineMetadata* get_cacheline_metadata(uint64_t cacheline_addr);
     
