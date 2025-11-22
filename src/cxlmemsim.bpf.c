@@ -77,9 +77,8 @@ int uprobe_mmap(struct pt_regs *ctx) {
     }
 
     // 记录请求的大小
-    struct alloc_info info = {
-        .size = size,
-    };
+    struct alloc_info info = {};
+    info.size = size;
     bpf_map_update_elem(&allocs_map, &pid_tgid, &info, BPF_ANY);
     return 0;
 }
@@ -775,7 +774,7 @@ int pthread_create_probe(struct pt_regs *ctx)
 	if (thread_ptr) {
 		// 创建新的线程信息
 		struct thread_create_args thread_info = {
-			.thread_ptr = thread_ptr,
+			.thread_ptr = (void **)thread_ptr,
 			.attr = NULL,
 			.start_routine = NULL,
 			.arg = NULL,

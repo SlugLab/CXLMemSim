@@ -10,6 +10,8 @@
  */
 
 #include "lbr.h"
+#include <cstddef>
+#include <spdlog/spdlog.h>
 
 /*
  * struct {
@@ -63,36 +65,21 @@
 
 LBR::LBR(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_period) {
     // Configure perf_event_attr struct
+    // Use same basic config as PEBS for reliability
     perf_event_attr pe = {
         .type = PERF_TYPE_RAW,
         .size = sizeof(perf_event_attr),
         .config = 0x20d1, // mem_load_retired.l3_miss
-        .sample_freq = sample_period,
-        .sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_CPU | PERF_SAMPLE_TIME | PERF_SAMPLE_BRANCH_STACK,
+        .sample_period = sample_period,
+        .sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_TIME | PERF_SAMPLE_ADDR | PERF_SAMPLE_READ |
+                       PERF_SAMPLE_PHYS_ADDR | PERF_SAMPLE_CPU,
         .read_format = PERF_FORMAT_TOTAL_TIME_ENABLED,
         .disabled = 1, // Event is initially disabled
         .exclude_user = 0,
         .exclude_kernel = 1,
         .exclude_hv = 1,
-        .precise_ip = 3,
+        .precise_ip = 1,
         .config1 = 3,
-        .branch_sample_type = PERF_SAMPLE_BRANCH_USER | PERF_SAMPLE_BRANCH_ANY | (1 << 19),
-    };
-
-    perf_event_attr pe2 = {
-        .type = PERF_TYPE_RAW,
-        .size = sizeof(perf_event_attr),
-        .config = 0x20d1, // mem_load_retired.l3_miss
-        .sample_freq = sample_period,
-        .sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_CPU | PERF_SAMPLE_TIME | PERF_SAMPLE_BRANCH_STACK,
-        .read_format = PERF_FORMAT_TOTAL_TIME_ENABLED,
-        .disabled = 1, // Event is initially disabled
-        .exclude_user = 0,
-        .exclude_kernel = 1,
-        .exclude_hv = 1,
-        .precise_ip = 3,
-        .config1 = 3,
-        .branch_sample_type = PERF_SAMPLE_BRANCH_USER | PERF_SAMPLE_BRANCH_ANY,
     };
 
     int cpu = -1; // measure on any cpu
@@ -101,37 +88,43 @@ LBR::LBR(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_per
 
     this->fd = perf_event_open(&pe, pid, cpu, group_fd, flags);
     if (this->fd == -1) {
-        // Print more specific error info and try fallback options
-        fprintf(stderr, "perf_event_open error: %s\n", strerror(errno));
-
-        // Try fallback with even more basic settings
-        if (errno == EINVAL) {
-            pe.precise_ip = 0;
-            pe.config1 = 0;
-            pe.branch_sample_type = PERF_SAMPLE_BRANCH_USER;
-            this->fd = perf_event_open(&pe2, pid, cpu, group_fd, flags);
-
-            if (this->fd == -1) {
-                perror("perf_event_open fallback also failed");
-                exit(EXIT_FAILURE);
-            }
-            use_pe2 = true;
-        } else {
-            exit(EXIT_FAILURE);
-        }
+        SPDLOG_ERROR("LBR perf_event_open failed: {}", strerror(errno));
+        // Don't exit - allow PEBS to continue working
+        this->fd = -1;
+        return;
     }
     this->mplen = MMAP_SIZE;
     this->mp = (perf_event_mmap_page *)mmap(nullptr, MMAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd, 0);
 
     if (this->mp == MAP_FAILED) {
-        perror("mmap");
-        throw;
+        SPDLOG_ERROR("LBR mmap failed: {}", strerror(errno));
+        close(this->fd);
+        this->fd = -1;
+        return;
     }
     if (this->start() < 0) {
-        perror("start");
-        throw;
+        SPDLOG_ERROR("LBR start failed");
+        munmap(this->mp, this->mplen);
+        this->mp = static_cast<perf_event_mmap_page *>(MAP_FAILED);
+        close(this->fd);
+        this->fd = -1;
+        return;
     }
 }
+
+// Simple sample structure matching our perf_event_attr configuration
+struct lbr_simple_sample {
+    perf_event_header header;
+    uint32_t pid;
+    uint32_t tid;
+    uint64_t timestamp;
+    uint64_t addr;
+    uint64_t value;
+    uint64_t time_enabled;
+    uint64_t phys_addr;
+    uint32_t cpu;
+    uint32_t res;
+};
 
 int LBR::read(CXLController *controller, LBRElem *elem) {
     if (this->fd < 0) {
@@ -142,7 +135,6 @@ int LBR::read(CXLController *controller, LBRElem *elem) {
         return -1;
 
     int r = 0;
-    lbr_sample *data;
     char *dp = (char *)mp + PAGE_SIZE;
 
     do {
@@ -152,39 +144,34 @@ int LBR::read(CXLController *controller, LBRElem *elem) {
         while (this->rdlen < last_head) {
             const auto *header = reinterpret_cast<perf_event_header *>(dp + this->rdlen % DATA_SIZE);
 
-            // printf("read lbr\n");
             switch (header->type) {
             case PERF_RECORD_LOST:
                 SPDLOG_DEBUG("received PERF_RECORD_LOST");
                 break;
-            case PERF_RECORD_SAMPLE:
-                data = reinterpret_cast<lbr_sample *>(dp + this->rdlen % DATA_SIZE);
+            case PERF_RECORD_SAMPLE: {
+                auto *data = reinterpret_cast<lbr_simple_sample *>(dp + this->rdlen % DATA_SIZE);
 
-                if (header->size < sizeof(*data)) {
-                    SPDLOG_DEBUG("size too small. size:{}", header->size);
-                    r = -1;
-                    return r;
+                if (header->size < sizeof(lbr_simple_sample)) {
+                    SPDLOG_DEBUG("LBR sample size too small: {} < {}", header->size, sizeof(lbr_simple_sample));
+                    break;
                 }
-                if (header->size > sizeof(*data)) {
-                    SPDLOG_DEBUG("size too big. size:{} / {}", header->size, sizeof(*data));
-                }
+
                 if (this->pid == data->pid) {
-                    SPDLOG_DEBUG("pid:{} tid:{} size:{} nr2:{} data-size:{} cpu:{} timestamp:{} hw_idx: lbrs:{} "
-                                 "counters:{} {} {}",
-                                 data->pid, data->tid, header->size, data->nr2, sizeof(*data), data->cpu,
-                                 data->timestamp, data->lbrs[0].from, data->counters[0].counters,
-                                 data->counters[1].counters, data->counters[2].counters);
+                    SPDLOG_DEBUG("LBR pid:{} tid:{} cpu:{} timestamp:{} addr:{:x} phys_addr:{:x}",
+                                 data->pid, data->tid, data->cpu, data->timestamp, data->addr, data->phys_addr);
 
-                    memcpy(&elem->branch_stack,
-                           (char *)&data->counters + (32 * 8), // Cast to char* before arithmetic
-                           92 * 8);
-                    controller->insert(data->timestamp, data->tid, data->lbrs, data->counters);
+                    // Insert with empty LBR data since we're not collecting branch stacks
+                    lbr empty_lbrs[32] = {};
+                    cntr empty_counters[32] = {};
+                    controller->insert(data->timestamp, data->tid, empty_lbrs, empty_counters);
+
                     elem->tid = data->tid;
-
+                    elem->time = data->timestamp;
                     elem->total++;
                     r = 1;
                 }
                 break;
+            }
             case PERF_RECORD_THROTTLE:
                 SPDLOG_DEBUG("received PERF_RECORD_THROTTLE\n");
                 break;

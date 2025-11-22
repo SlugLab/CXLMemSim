@@ -173,7 +173,7 @@ int Monitors::enable(uint32_t tgid, uint32_t tid, bool is_process, uint64_t pebs
         mon[target].pebs_ctx = new PEBS(tgid, pebs_sample_period);
         SPDLOG_DEBUG("{}Process [tgid={}, tid={}]: enable to pebs.", target, mon[target].tgid,
                      mon[target].tid); // multiple tid multiple pid
-        mon[target].lbr_ctx = new LBR(tgid, 1000);
+        mon[target].lbr_ctx = new LBR(tgid, pebs_sample_period);
         new std::jthread(mon[target].wait, &mon, target);
     }
     SPDLOG_INFO("pid {}[tgid={}, tid={}] monitoring start", target, mon[target].tgid, mon[target].tid);
