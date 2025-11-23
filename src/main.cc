@@ -237,42 +237,17 @@ int main(int argc, char *argv[]) {
         std::vector<std::string> env_strings; // Keep strings alive
         std::vector<const char *> envp;
 
-        // Set LD_PRELOAD for bpftime agent - check multiple possible paths
-        const char* bpftime_paths[] = {
-            "/root/.bpftime/libbpftime-agent.so",
-            "/usr/local/lib/libbpftime-agent.so",
-            "/usr/lib/libbpftime-agent.so",
-            nullptr
-        };
-
-        std::string ld_preload_path;
-        for (int i = 0; bpftime_paths[i] != nullptr; i++) {
-            if (access(bpftime_paths[i], F_OK) == 0) {
-                ld_preload_path = bpftime_paths[i];
-                break;
-            }
-        }
-
-        if (!ld_preload_path.empty()) {
-            env_strings.push_back("LD_PRELOAD=" + ld_preload_path);
-            envp.emplace_back(env_strings.back().c_str());
-            SPDLOG_INFO("Using bpftime agent: {}", ld_preload_path);
-        } else {
-            SPDLOG_WARN("bpftime agent not found, bpftime sampling will not work");
-        }
 
         // Inherit current environment and add our variables
         // This ensures child processes inherit LD_PRELOAD
         extern char **environ;
         for (char **env_var = environ; *env_var != nullptr; env_var++) {
             // Skip if we're overriding it
-            if (strncmp(*env_var, "LD_PRELOAD=", 11) != 0 &&
-                strncmp(*env_var, "OMP_NUM_THREADS=", 16) != 0) {
-                envp.emplace_back(*env_var);
-            }
+            envp.emplace_back(*env_var);
         }
 
         envp.emplace_back("OMP_NUM_THREADS=4");
+        envp.emplace_back("LD_PRELOAD=/root/.bpftime/libbpftime-agent.so");
 
         // Add user-specified environment variables
         while (!env.empty()) {

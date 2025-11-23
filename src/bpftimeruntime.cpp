@@ -41,32 +41,54 @@ int BpfTimeRuntime::read(CXLController *controller, BPFTimeRuntimeElem *elem) {
     proc_info proc_info1;
     proc_info thread_info1;
 
-    for (int i = 6; i < 11; i++) {
-        uint64_t key = 0; // 改为8字节
-        uint64_t key1 = 0; // 改为8字节
-        void *item2 = (void *)1;
-        while (item2) {
-            int ret = bpftime_map_get_next_key(i, &key1, &key); // 获取key
+    // Map FDs from cxlmemsim.json:
+    // FD 6: stats_map (key_size: 4)
+    // FD 7: allocs_map (key_size: 8) - skip, different key size
+    // FD 8: process_map (key_size: 4) - updated by clone/fork
+    // FD 9: thread_map (key_size: 4)
+    // FD 10: locks (key_size: 4)
+
+    // Only iterate maps with 4-byte keys that we care about
+    int maps_to_read[] = {6, 8, 9};
+
+    for (int i : maps_to_read) {
+        uint32_t key = 0;
+        uint32_t prev_key = 0;
+        bool first = true;
+
+        while (true) {
+            // First call: pass NULL to get first key
+            // Subsequent calls: pass pointer to previous key
+            int ret = bpftime_map_get_next_key(i, first ? nullptr : &prev_key, &key);
             if (ret != 0) {
-                SPDLOG_DEBUG("Failed to get next key for map {}", i);
+                SPDLOG_DEBUG("No more keys for map {}", i);
                 break;
             }
+            first = false;
 
-            item2 = (void *)bpftime_map_lookup_elem(i, &key);
-            SPDLOG_DEBUG("Process map key: {} {} thread_id:{}", key1, key,
-                         std::this_thread::get_id()); // 使用std::this_thread获取当前线程ID
+            void *item2 = (void *)bpftime_map_lookup_elem(i, &key);
+            SPDLOG_DEBUG("Map {} key: {} thread_id:{}", i, key,
+                         std::this_thread::get_id());
 
-            if (i == 7 && item2 != nullptr) {
+            if (i == 6 && item2 != nullptr) {
+                // stats_map
                 stats = *((mem_stats *)item2);
                 controller->set_stats(stats);
                 elem->total++;
             }
+            if (i == 8 && item2 != nullptr) {
+                // process_map - updated by clone/fork probes
+                proc_info1 = *((proc_info *)item2);
+                controller->set_thread_info(proc_info1);
+                elem->total++;
+            }
             if (i == 9 && item2 != nullptr) {
+                // thread_map
                 thread_info1 = *((proc_info *)item2);
                 controller->set_thread_info(thread_info1);
                 elem->total++;
             }
-            key1 = key; // 更新key1为当前key
+            prev_key = key;
         }
     }
     return 0;

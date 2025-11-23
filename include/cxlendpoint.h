@@ -31,7 +31,7 @@ struct occupation_info {
 };
 struct rob_info {
     std::map<int, int64_t> m_bandwidth, m_count;
-    int64_t llcm_base, llcm_count, ins_count;
+    int64_t llcm_base{}, llcm_count{}, ins_count{};
 };
 struct thread_info {
     rob_info rob;

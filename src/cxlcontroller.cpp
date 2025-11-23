@@ -85,11 +85,21 @@ void CXLController::set_process_info(const proc_info &process_info) {
 }
 
 void CXLController::set_thread_info(const proc_info &thread_info) {
+    // Only process threads that belong to our target process
     if (thread_info.current_pid == monitors->mon[0].tgid) {
-        monitors->enable(thread_info.current_pid, thread_info.current_tid, false, 0, helper.num_of_cpu());
-        auto lbr_ = new lbr{.from = 0, .to = 0, .flags = 0};
-        this->insert_one(thread_map[thread_info.current_tid], *lbr_);
-        delete lbr_;
+        // Note: current_tid should be kernel tid, not pthread_t
+        // For threads created via clone(), this will be correct
+        // For pthread_create, this may be incorrect (pthread_t != kernel tid)
+        uint64_t tid = thread_info.current_tid;
+
+        // Enable monitoring for this thread
+        monitors->enable(thread_info.current_pid, tid, false, 0, helper.num_of_cpu());
+
+        // Initialize thread_map entry with empty LBR
+        lbr empty_lbr{.from = 0, .to = 0, .flags = 0};
+        this->insert_one(thread_map[tid], empty_lbr);
+
+        SPDLOG_INFO("Registered thread tid={} for pid={}", tid, thread_info.current_pid);
     }
 }
 

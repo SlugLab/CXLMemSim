@@ -112,7 +112,7 @@ int uretprobe_mmap(struct pt_regs *ctx) {
 }
 
 // munmap的uprobe钩子
-SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:munmap")
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:munmap")
 int uprobe_munmap(struct pt_regs *ctx) {
     void *address = (void *)PT_REGS_PARM1(ctx);  // 第一个参数是地址
     u64 size = PT_REGS_PARM2(ctx);              // 第二个参数是大小
@@ -147,7 +147,7 @@ int uprobe_munmap(struct pt_regs *ctx) {
 }
 
 // malloc的uprobe钩子
-SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:malloc")
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:malloc")
 int uprobe_malloc(struct pt_regs *ctx) {
     u64 size = PT_REGS_PARM1(ctx);  // 第一个参数是大小
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -162,7 +162,7 @@ int uprobe_malloc(struct pt_regs *ctx) {
 }
 
 // malloc的uretprobe钩子
-SEC("uretprobe//usr/lib/x86_64-linux-gnu/libc.so.6:malloc")
+SEC("uretprobe//lib/x86_64-linux-gnu/libc.so.6:malloc")
 int uretprobe_malloc(struct pt_regs *ctx) {
     void *address = (void *)PT_REGS_RC(ctx);  // 返回值是分配的地址
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -190,7 +190,7 @@ int uretprobe_malloc(struct pt_regs *ctx) {
 }
 
 // free的uprobe钩子
-SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:free")
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:free")
 int uprobe_free(struct pt_regs *ctx) {
     void *address = (void *)PT_REGS_PARM1(ctx);  // 第一个参数是地址
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -217,7 +217,7 @@ int uprobe_free(struct pt_regs *ctx) {
 }
 
 // calloc的uprobe钩子
-SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:calloc")
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:calloc")
 int uprobe_calloc(struct pt_regs *ctx) {
     u64 nmemb = PT_REGS_PARM1(ctx);  // 第一个参数是元素数量
     u64 size = PT_REGS_PARM2(ctx);   // 第二个参数是每个元素的大小
@@ -234,7 +234,7 @@ int uprobe_calloc(struct pt_regs *ctx) {
 }
 
 // calloc的uretprobe钩子（与malloc返回类似）
-SEC("uretprobe//usr/lib/x86_64-linux-gnu/libc.so.6:calloc")
+SEC("uretprobe//lib/x86_64-linux-gnu/libc.so.6:calloc")
 int uretprobe_calloc(struct pt_regs *ctx) {
     void *address = (void *)PT_REGS_RC(ctx);
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -262,7 +262,7 @@ int uretprobe_calloc(struct pt_regs *ctx) {
 }
 
 // realloc的uprobe钩子
-SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:realloc")
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:realloc")
 int uprobe_realloc(struct pt_regs *ctx) {
     void *ptr = (void *)PT_REGS_PARM1(ctx);  // 第一个参数是原指针
     u64 size = PT_REGS_PARM2(ctx);           // 第二个参数是新大小
@@ -292,7 +292,7 @@ int uprobe_realloc(struct pt_regs *ctx) {
 }
 
 // realloc的uretprobe钩子
-SEC("uretprobe//usr/lib/x86_64-linux-gnu/libc.so.6:realloc")
+SEC("uretprobe//lib/x86_64-linux-gnu/libc.so.6:realloc")
 int uretprobe_realloc(struct pt_regs *ctx) {
     void *new_addr = (void *)PT_REGS_RC(ctx);
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -338,7 +338,7 @@ int uretprobe_realloc(struct pt_regs *ctx) {
 }
 
 // 处理sbrk作为brk的用户空间接口
-SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:sbrk")
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:sbrk")
 int uprobe_sbrk(struct pt_regs *ctx) {
     long increment = (long)PT_REGS_PARM1(ctx);
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -361,22 +361,24 @@ int uprobe_sbrk(struct pt_regs *ctx) {
     }
 
     // 记录增量信息用于返回探针
-    bpf_map_update_elem(&allocs_map, &pid_tgid, &increment, BPF_ANY);
+    struct alloc_info info = {.size = increment, .address = 0};
+    bpf_map_update_elem(&allocs_map, &pid_tgid, &info, BPF_ANY);
     return 0;
 }
 
 // sbrk的uretprobe钩子
-SEC("uretprobe//usr/lib/x86_64-linux-gnu/libc.so.6:sbrk")
+SEC("uretprobe//lib/x86_64-linux-gnu/libc.so.6:sbrk")
 int uretprobe_sbrk(struct pt_regs *ctx) {
     void *brk = (void *)PT_REGS_RC(ctx);
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 pid = pid_tgid >> 32;
 
     // 获取增量信息
-    long *increment = bpf_map_lookup_elem(&allocs_map, &pid_tgid);
-    if (!increment) {
+    struct alloc_info *info = bpf_map_lookup_elem(&allocs_map, &pid_tgid);
+    if (!info) {
         return 0;
     }
+    long increment = (long)info->size;
 
     // 获取进程信息
     struct proc_info *proc_info = bpf_map_lookup_elem(&process_map, &pid);
@@ -386,12 +388,12 @@ int uretprobe_sbrk(struct pt_regs *ctx) {
             proc_info->mem_info.current_brk = (u64)brk;
         } else {
             // 更新内存统计
-            if (*increment > 0) {
+            if (increment > 0) {
                 // 分配内存
-                proc_info->mem_info.total_allocated += *increment;
-            } else if (*increment < 0) {
+                proc_info->mem_info.total_allocated += increment;
+            } else if (increment < 0) {
                 // 释放内存
-                proc_info->mem_info.total_freed += -(*increment);
+                proc_info->mem_info.total_freed += -increment;
             }
             proc_info->mem_info.current_brk = (u64)brk;
         }
@@ -403,30 +405,26 @@ int uretprobe_sbrk(struct pt_regs *ctx) {
 }
 
 // fork的uprobe钩子
-SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:fork")
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:fork")
 int uprobe_fork(struct pt_regs *ctx) {
     u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 pid = pid_tgid >> 32;
 
-    // 记录当前进程信息供返回探针使用
-    struct proc_info temp_info = {
-        .parent_pid = pid,
-        .create_time = bpf_ktime_get_ns(),
-    };
-    bpf_map_update_elem(&allocs_map, &pid_tgid, &temp_info, BPF_ANY);
+    // 记录创建时间供返回探针使用 (使用alloc_info结构存储)
+    struct alloc_info info = {.size = bpf_ktime_get_ns(), .address = 0};
+    bpf_map_update_elem(&allocs_map, &pid_tgid, &info, BPF_ANY);
     return 0;
 }
 
 // fork的uretprobe钩子
-SEC("uretprobe//usr/lib/x86_64-linux-gnu/libc.so.6:fork")
+SEC("uretprobe//lib/x86_64-linux-gnu/libc.so.6:fork")
 int uretprobe_fork(struct pt_regs *ctx) {
     u32 child_pid = (u32)PT_REGS_RC(ctx);
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 parent_pid = pid_tgid >> 32;
 
     // 获取前面保存的信息
-    struct proc_info *temp_info = bpf_map_lookup_elem(&allocs_map, &pid_tgid);
-    if (!temp_info) {
+    struct alloc_info *info = bpf_map_lookup_elem(&allocs_map, &pid_tgid);
+    if (!info) {
         return 0;
     }
 
@@ -434,7 +432,7 @@ int uretprobe_fork(struct pt_regs *ctx) {
         // 为子进程创建新的进程信息
         struct proc_info proc_info = {
             .parent_pid = parent_pid,
-            .create_time = temp_info->create_time,
+            .create_time = info->size,
             .thread_count = 1,  // 初始只有主线程
             .current_pid = child_pid,
             .current_tid = child_pid,
@@ -446,7 +444,6 @@ int uretprobe_fork(struct pt_regs *ctx) {
         // 为子进程创建新的内存统计
         struct mem_stats new_stats = {};
         bpf_map_update_elem(&stats_map, &child_pid, &new_stats, BPF_ANY);
-
     }
 
     // 清理临时状态
@@ -455,59 +452,45 @@ int uretprobe_fork(struct pt_regs *ctx) {
 }
 
 // clone的uprobe钩子
-SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:clone")
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:clone")
 int uprobe_clone(struct pt_regs *ctx) {
     unsigned long flags = PT_REGS_PARM1(ctx);  // 第一个参数是标志
-    void *stack = (void *)PT_REGS_PARM2(ctx);  // 第二个参数是栈
     u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 pid = pid_tgid >> 32;
 
-    // 记录当前进程信息和标志供返回探针使用
-    struct {
-        struct proc_info info;
-        unsigned long flags;
-    } clone_data = {
-        .info = {
-            .parent_pid = pid,
-            .create_time = bpf_ktime_get_ns(),
-        },
-        .flags = flags,
-    };
-
-    bpf_map_update_elem(&allocs_map, &pid_tgid, &clone_data, BPF_ANY);
+    // 记录标志供返回探针使用 (使用alloc_info结构存储flags)
+    struct alloc_info info = {.size = flags, .address = 0};
+    bpf_map_update_elem(&allocs_map, &pid_tgid, &info, BPF_ANY);
     return 0;
 }
 
 // clone的uretprobe钩子
-SEC("uretprobe//usr/lib/x86_64-linux-gnu/libc.so.6:clone")
+SEC("uretprobe//lib/x86_64-linux-gnu/libc.so.6:clone")
 int uretprobe_clone(struct pt_regs *ctx) {
     u32 child_id = (u32)PT_REGS_RC(ctx);
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 parent_pid = pid_tgid >> 32;
 
-    // 获取前面保存的信息和标志
-    void *clone_data_ptr = bpf_map_lookup_elem(&allocs_map, &pid_tgid);
-    if (!clone_data_ptr) {
+    // 获取前面保存的标志
+    struct alloc_info *info = bpf_map_lookup_elem(&allocs_map, &pid_tgid);
+    if (!info) {
         return 0;
     }
 
-    // 假设我们能够访问clone_data结构
-    // 这里是个简化，在真实代码中可能需要通过读取相应偏移量来获取数据
-    struct {
-        struct proc_info info;
-        unsigned long flags;
-    } *clone_data = clone_data_ptr;
+    unsigned long flags = info->size;
 
     if (child_id > 0) {
         // 确定是线程还是进程
         // CLONE_THREAD标志表示创建线程
-        int is_thread = clone_data->flags & 0x00010000;  // CLONE_THREAD
+        int is_thread = flags & 0x00010000;  // CLONE_THREAD
 
         if (is_thread) {
             // 这是一个线程，更新线程映射
-            struct proc_info thread_info = clone_data->info;
-            thread_info.current_tid = child_id;
-            thread_info.current_pid = parent_pid;
+            struct proc_info thread_info = {
+                .parent_pid = parent_pid,
+                .create_time = bpf_ktime_get_ns(),
+                .current_tid = child_id,
+                .current_pid = parent_pid,
+            };
 
             bpf_map_update_elem(&thread_map, &child_id, &thread_info, BPF_ANY);
 
@@ -515,22 +498,23 @@ int uretprobe_clone(struct pt_regs *ctx) {
             struct proc_info *parent_info = bpf_map_lookup_elem(&process_map, &parent_pid);
             if (parent_info) {
                 parent_info->thread_count++;
-                bpf_map_update_elem(&process_map, &parent_pid, parent_info, BPF_ANY);
             }
 
         } else {
             // 这是一个进程，更新进程映射
-            struct proc_info proc_info = clone_data->info;
-            proc_info.current_pid = child_id;
-            proc_info.current_tid = child_id;
-            proc_info.thread_count = 1;
+            struct proc_info proc_info = {
+                .parent_pid = parent_pid,
+                .create_time = bpf_ktime_get_ns(),
+                .current_pid = child_id,
+                .current_tid = child_id,
+                .thread_count = 1,
+            };
 
             bpf_map_update_elem(&process_map, &child_id, &proc_info, BPF_ANY);
 
             // 为新进程创建内存统计
             struct mem_stats new_stats = {};
             bpf_map_update_elem(&stats_map, &child_id, &new_stats, BPF_ANY);
-
         }
     }
 
@@ -540,7 +524,7 @@ int uretprobe_clone(struct pt_regs *ctx) {
 }
 
 // execve的uprobe钩子
-SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:execve")
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:execve")
 int uprobe_execve(struct pt_regs *ctx) {
     const char *filename = (const char *)PT_REGS_PARM1(ctx);
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -571,7 +555,7 @@ int uprobe_execve(struct pt_regs *ctx) {
 }
 
 // execve的uretprobe钩子
-SEC("uretprobe//usr/lib/x86_64-linux-gnu/libc.so.6:execve")
+SEC("uretprobe//lib/x86_64-linux-gnu/libc.so.6:execve")
 int uretprobe_execve(struct pt_regs *ctx) {
     int ret = (int)PT_REGS_RC(ctx);
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -595,7 +579,7 @@ int uretprobe_execve(struct pt_regs *ctx) {
 }
 
 // 进程/线程退出的探针
-SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:exit")
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:exit")
 int uprobe_exit(struct pt_regs *ctx) {
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 tid = (u32)pid_tgid;
@@ -625,7 +609,7 @@ int uprobe_exit(struct pt_regs *ctx) {
 }
 
 // 进程组退出的探针
-SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:_exit")
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:_exit")
 int uprobe_exit_group(struct pt_regs *ctx) {
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 tid = (u32)pid_tgid;
@@ -652,7 +636,7 @@ int uprobe_exit_group(struct pt_regs *ctx) {
 }
 
 // pthread_mutex_lock的uretprobe钩子
-SEC("uretprobe//usr/lib/x86_64-linux-gnu/libc.so.6:pthread_mutex_lock")
+SEC("uretprobe//lib/x86_64-linux-gnu/libc.so.6:pthread_mutex_lock")
 int uretprobe_pthread_mutex_lock(struct pt_regs *ctx) {
     int ret = (int)PT_REGS_RC(ctx);
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -673,7 +657,7 @@ int uretprobe_pthread_mutex_lock(struct pt_regs *ctx) {
     return 0;
 }
 // pthread_mutex_lock 的 uprobe 钩子
-SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:pthread_mutex_lock")
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:pthread_mutex_lock")
 int uprobe_pthread_mutex_lock(struct pt_regs *ctx) {
     void *mutex = (void *)PT_REGS_PARM1(ctx);  // 使用 void* 代替 pthread_mutex_t*
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -693,7 +677,7 @@ int uprobe_pthread_mutex_lock(struct pt_regs *ctx) {
 }
 
 // pthread_mutex_unlock 的 uprobe 钩子
-SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:pthread_mutex_unlock")
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:pthread_mutex_unlock")
 int uprobe_pthread_mutex_unlock(struct pt_regs *ctx) {
     void *mutex = (void *)PT_REGS_PARM1(ctx);  // 使用 void* 代替 pthread_mutex_t*
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -713,7 +697,7 @@ int uprobe_pthread_mutex_unlock(struct pt_regs *ctx) {
 }
 
 // pthread_mutex_trylock 的 uprobe 钩子
-SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:pthread_mutex_trylock")
+SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:pthread_mutex_trylock")
 int uprobe_pthread_mutex_trylock(struct pt_regs *ctx) {
     void *mutex = (void *)PT_REGS_PARM1(ctx);  // 使用 void* 代替 pthread_mutex_t*
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -727,7 +711,7 @@ int uprobe_pthread_mutex_trylock(struct pt_regs *ctx) {
 }
 
 // pthread_mutex_trylock的uretprobe钩子
-SEC("uretprobe//usr/lib/x86_64-linux-gnu/libc.so.6:pthread_mutex_trylock")
+SEC("uretprobe//lib/x86_64-linux-gnu/libc.so.6:pthread_mutex_trylock")
 int uretprobe_pthread_mutex_trylock(struct pt_regs *ctx) {
     int ret = (int)PT_REGS_RC(ctx);
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -759,7 +743,7 @@ int uretprobe_pthread_mutex_trylock(struct pt_regs *ctx) {
     return 0;
 }
 
-SEC("uprobe//lib/x86_64-linux-gnu/libc.so.6:pthread_create")
+SEC("uprobe//usr/lib/x86_64-linux-gnu/libc.so.6:pthread_create")
 int pthread_create_probe(struct pt_regs *ctx)
 {
 	u64 pid_tgid = bpf_get_current_pid_tgid();
