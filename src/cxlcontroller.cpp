@@ -323,6 +323,30 @@ int CXLController::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, 
         }
         request_counter = 0;
     }
+
+    // Calculate latency from endpoints
+    auto all_access = get_access(timestamp);
+
+    // 对每个endpoint计算延迟并累加
+    double total_latency = 0.0;
+    std::function<void(CXLSwitch *)> dfs_calculate = [&](CXLSwitch *node) {
+        // 处理当前节点的expanders
+        for (auto *expander : node->expanders) {
+            total_latency += get_endpoint_rob_latency(expander, all_access, t_info, dramlatency);
+        }
+
+        // 递归处理子节点
+        for (auto *switch_ : node->switches) {
+            dfs_calculate(switch_);
+        }
+    };
+
+    // 从当前controller开始DFS遍历
+    dfs_calculate(this);
+
+    latency_lat += std::max(total_latency + std::get<0>(calculate_congestion()), 0.0);
+    bandwidth_lat += std::max(calculate_bandwidth(all_access), 0.0);
+
     // 更新最后的索引和时间戳
     last_index = index > 0 ? index : last_index;
     last_timestamp = timestamp;
