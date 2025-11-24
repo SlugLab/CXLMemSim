@@ -12,6 +12,10 @@ set(LINUX_SOURCE /lib/modules/${arch}/build/)
 set(CMAKE_CXX_STANDARD 26)
 add_subdirectory(lib/bpftime)
 add_subdirectory(microbench)
+
+# Find fmt library for llama.cpp workload
+find_package(fmt REQUIRED)
+
 add_subdirectory(workloads)
 
 list(APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR})
