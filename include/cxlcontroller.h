@@ -234,6 +234,7 @@ public:
     double latency_lat{};
     double bandwidth_lat{};
     double dramlatency;
+    double switch_latency;  // Configurable switch latency per level
     std::unordered_map<int, CXLMemExpander *> device_map;
     // ring buffer
     std::queue<lbr> ring_buffer;
@@ -243,7 +244,7 @@ public:
     LRUCache lru_cache;
 
     explicit CXLController(std::array<Policy *, 4> p, int capacity, page_type page_type_, int epoch,
-                           double dramlatency);
+                           double dramlatency, double switch_latency = 0.00005, int cache_size_kb = 32768);
     void construct_topo(std::string_view newick_tree);
     void insert_end_point(CXLMemExpander *end_point);
     std::vector<std::string> tokenize(const std::string_view &s);
@@ -256,13 +257,15 @@ public:
     void insert_one(thread_info &t_info, lbr &lbr);
     int insert(uint64_t timestamp, uint64_t tid, lbr lbrs[32], cntr counters[32]);
     int insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint64_t virt_addr, int index) override;
+    // Update ROB model directly with instruction and LLC miss counts
+    void update_rob(uint64_t tid, uint64_t ins_count, uint64_t llcm_count);
     void delete_entry(uint64_t addr, uint64_t length) override;
     void set_stats(mem_stats stats);
     void set_process_info(const proc_info &process_info);
     void set_thread_info(const proc_info &thread_info);
     void perform_migration();
-    // 添加缓存访问方法
-    std::optional<uint64_t> access_cache(uint64_t addr, uint64_t timestamp) { return lru_cache.get(addr, timestamp); }
+    // 添加缓存访问方法 - use peek() to avoid write lock contention on LRU update
+    std::optional<uint64_t> access_cache(uint64_t addr, uint64_t timestamp) { return lru_cache.peek(addr); }
 
     // 添加缓存更新方法
     void update_cache(uint64_t addr, uint64_t value, uint64_t timestamp) { lru_cache.put(addr, value, timestamp); }

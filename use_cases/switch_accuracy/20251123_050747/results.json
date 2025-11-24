@@ -1,0 +1,105 @@
+{
+  "timestamp": "20251123_050747",
+  "args": {
+    "topology": [
+      "no_switch",
+      "two_level"
+    ],
+    "workload": [
+      "ptr-chasing"
+    ],
+    "bandwidth": [
+      "50gbps"
+    ],
+    "switch_latency": [
+      "50ns"
+    ],
+    "skip_build": false,
+    "verbose": false,
+    "quick": false
+  },
+  "results": [
+    {
+      "config": {
+        "name": "no_switch_ptr-chasing_50gbps_50ns",
+        "topology_name": "no_switch",
+        "topology": "(1)",
+        "topology_description": "Direct connection (0 switch levels)",
+        "num_switches": 0,
+        "workload_name": "ptr-chasing",
+        "workload_binary": "ptr-chasing",
+        "workload_type": "random",
+        "bandwidth_name": "50gbps",
+        "bandwidth": [
+          50,
+          50
+        ],
+        "switch_latency_name": "50ns",
+        "switch_latency": 5e-05,
+        "capacity": [
+          0,
+          20
+        ],
+        "latency": [
+          200,
+          250
+        ],
+        "dram_latency": 85,
+        "cpuset": "0,1,2,3",
+        "timeout": 300
+      },
+      "command": "/home/5iri/CXLMemSim/build/CXLMemSim -t /home/5iri/CXLMemSim/build/microbench/ptr-chasing -c 0,1,2,3 -d 85 -o (1) -q 0,20 -l 200,250 -b 50,50 -s 5e-05 -p 10",
+      "start_time": "2025-11-23T05:07:47.432299",
+      "success": false,
+      "error": "Timeout",
+      "duration": 300.1084043979645,
+      "end_time": "2025-11-23T05:12:47.540715"
+    },
+    {
+      "config": {
+        "name": "two_level_ptr-chasing_50gbps_50ns",
+        "topology_name": "two_level",
+        "topology": "(1,(2,3))",
+        "topology_description": "Two levels of switching",
+        "num_switches": 2,
+        "workload_name": "ptr-chasing",
+        "workload_binary": "ptr-chasing",
+        "workload_type": "random",
+        "bandwidth_name": "50gbps",
+        "bandwidth": [
+          50,
+          50,
+          50,
+          50,
+          50,
+          50
+        ],
+        "switch_latency_name": "50ns",
+        "switch_latency": 5e-05,
+        "capacity": [
+          0,
+          20,
+          20,
+          20
+        ],
+        "latency": [
+          200,
+          250,
+          200,
+          250,
+          200,
+          250
+        ],
+        "dram_latency": 85,
+        "cpuset": "0,1,2,3",
+        "timeout": 300
+      },
+      "command": "/home/5iri/CXLMemSim/build/CXLMemSim -t /home/5iri/CXLMemSim/build/microbench/ptr-chasing -c 0,1,2,3 -d 85 -o (1,(2,3)) -q 0,20,20,20 -l 200,250,200,250,200,250 -b 50,50,50,50,50,50 -s 5e-05 -p 10",
+      "start_time": "2025-11-23T05:12:47.541113",
+      "success": false,
+      "error": "Timeout",
+      "duration": 300.04373121261597,
+      "end_time": "2025-11-23T05:17:47.584851"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+======================================================================
+SWITCH ACCURACY EXPERIMENT REPORT
+Section 5.2.3: CXL Switch Modeling Accuracy
+======================================================================
+
+Timestamp: 20251123_050747
+Results directory: /home/5iri/CXLMemSim/experiments/results/switch_accuracy/20251123_050747
+
+----------------------------------------------------------------------
+SUMMARY
+----------------------------------------------------------------------
+Total experiments: 2
+Successful: 0
+Failed: 2
+
+----------------------------------------------------------------------
+KEY FINDINGS
+----------------------------------------------------------------------
+
+1. Impact of Switch Levels:
+
+2. Workload Sensitivity to Switch Hops:
+
+3. Bandwidth Scaling Effect:
+
+4. Switch Latency Impact:
+
+----------------------------------------------------------------------
+EXPECTED BEHAVIOR (from paper)
+----------------------------------------------------------------------
+- Each switch level adds 40-70ns latency
+- Random-access workloads more sensitive to switch hops
+- Higher bandwidth partially compensates for deeper hierarchies
+- XSim should capture incremental cost within 10-12%
+
+======================================================================
+END OF REPORT
+======================================================================

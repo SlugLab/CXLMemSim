@@ -1,0 +1,33 @@
+Switch Accuracy Experiment Summary
+======================================================================
+
+no_switch + ld64:
+  Avg Emulated Time: 97.235s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 367
+
+no_switch + ld_serial64:
+  Avg Emulated Time: 173.284s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 516
+
+no_switch + ptr-chasing:
+  Avg Emulated Time: 35.012s
+  Avg Total Delay: 1.885
+  Avg PEBS Samples: 48704
+
+one_level + ld64:
+  Avg Emulated Time: 91.491s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 301
+
+one_level + ld_serial64:
+  Avg Emulated Time: 186.454s
+  Avg Total Delay: 1.339
+  Avg PEBS Samples: 517
+
+one_level + ptr-chasing:
+  Avg Emulated Time: 16.732s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 17610
+

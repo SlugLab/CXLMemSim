@@ -23,18 +23,20 @@ struct perf_sample {
 };
 
 PEBS::PEBS(pid_t pid, uint64_t sample_period) : pid(pid), sample_period(sample_period) {
-    // Configure perf_event_attr struct
+    // Configure perf_event_attr struct - combined PEBS + LBR
     perf_event_attr pe = {
         .type = PERF_TYPE_RAW,
         .size = sizeof(struct perf_event_attr),
         .config = 0x20d1, // mem_load_retired.l3_miss
         .sample_period = sample_period,
-        .sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_TIME | PERF_SAMPLE_ADDR | PERF_SAMPLE_READ | PERF_SAMPLE_PHYS_ADDR,
+        .sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_TIME | PERF_SAMPLE_ADDR | PERF_SAMPLE_READ |
+                       PERF_SAMPLE_PHYS_ADDR | PERF_SAMPLE_BRANCH_STACK,
         .read_format = PERF_FORMAT_TOTAL_TIME_ENABLED,
         .disabled = 1, // Event is initially disabled
         .exclude_kernel = 1,
         .precise_ip = 1,
         .config1 = 3,
+        .branch_sample_type = PERF_SAMPLE_BRANCH_USER | PERF_SAMPLE_BRANCH_ANY,
     }; // excluding events that happen in the kernel-space
 
     int cpu = -1; // measure on any cpu
@@ -97,7 +99,24 @@ int PEBS::read(CXLController *controller, PEBSElem *elem) {
                     SPDLOG_TRACE("pid:{} tid:{} time:{} addr:{} phys_addr:{} llc_miss:{} timestamp={}\n", data->pid,
                                  data->tid, data->time_enabled, data->addr, data->phys_addr, data->value,
                                  data->timestamp);
+
+                    // Parse LBR branch stack (follows fixed fields)
+                    char *lbr_ptr = (char *)data + sizeof(perf_sample);
+                    uint64_t nr = *(uint64_t *)lbr_ptr;
+                    lbr_ptr += sizeof(uint64_t);
+
+                    lbr lbrs[32] = {};
+                    cntr cntrs[32] = {};
+                    for (uint64_t i = 0; i < nr && i < 32; i++) {
+                        lbrs[i].from = *(uint64_t *)lbr_ptr; lbr_ptr += 8;
+                        lbrs[i].to = *(uint64_t *)lbr_ptr; lbr_ptr += 8;
+                        lbrs[i].flags = *(uint64_t *)lbr_ptr; lbr_ptr += 8;
+                    }
+
+                    // Call both insert methods for full processing
                     controller->insert(data->timestamp, data->tid, data->phys_addr, data->addr, data->value);
+                    controller->insert(data->timestamp, data->tid, lbrs, cntrs);
+
                     elem->total++;
                     elem->llcmiss = data->value; // this is the number of llc miss
                 }

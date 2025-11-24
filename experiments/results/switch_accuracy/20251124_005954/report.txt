@@ -1,0 +1,57 @@
+======================================================================
+SWITCH ACCURACY EXPERIMENT REPORT
+Section 5.2.3: CXL Switch Modeling Accuracy
+======================================================================
+
+Timestamp: 20251124_005954
+Results directory: /home/5iri/CXLMemSim/experiments/results/switch_accuracy/20251124_005954
+
+----------------------------------------------------------------------
+SUMMARY
+----------------------------------------------------------------------
+Total experiments: 168
+Successful: 123
+Failed: 45
+
+----------------------------------------------------------------------
+KEY FINDINGS
+----------------------------------------------------------------------
+
+1. Impact of Switch Levels (Deep Hierarchies):
+   no_switch: 18 runs, avg duration: 104.06s
+   one_level: 18 runs, avg duration: 106.50s
+   two_level: 17 runs, avg duration: 104.44s
+   three_level: 18 runs, avg duration: 96.28s
+   four_level: 17 runs, avg duration: 98.52s
+
+2. Impact of Switch Topology (Wide Trees):
+   two_level_wide: 17 runs, avg duration: 99.60s
+   three_level_wide: 18 runs, avg duration: 92.04s
+
+3. Workload Sensitivity to Switch Hops:
+   random: 21 runs, avg duration: 29.47s
+   streaming: 102 runs, avg duration: 114.75s
+
+4. Bandwidth Scaling Effect:
+   25gbps: 61 runs, avg duration: 100.04s
+   50gbps: 62 runs, avg duration: 100.34s
+
+5. Switch Latency Impact:
+   40ns: 35 runs, avg duration: 94.19s
+   60ns: 36 runs, avg duration: 90.64s
+   50ns: 29 runs, avg duration: 110.92s
+   70ns: 23 runs, avg duration: 110.73s
+
+----------------------------------------------------------------------
+EXPECTED BEHAVIOR (from paper)
+----------------------------------------------------------------------
+- Each switch level adds 40-70ns latency
+- Random-access workloads more sensitive to switch hops
+- Higher bandwidth partially compensates for deeper hierarchies
+- XSim should capture incremental cost within 10-12%
+- Deep hierarchies (3-4 levels) should show cumulative latency
+- Wide vs deep topologies may show different access patterns
+
+======================================================================
+END OF REPORT
+======================================================================

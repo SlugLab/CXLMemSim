@@ -169,11 +169,12 @@ int Monitors::enable(uint32_t tgid, uint32_t tid, bool is_process, uint64_t pebs
 
     if (pebs_sample_period) {
         mon[target].bpftime_ctx = new BpfTimeRuntime(tid, "../src/cxlmemsim.json");
-        /* pebs start */
-        mon[target].pebs_ctx = new PEBS(tgid, pebs_sample_period);
-        SPDLOG_DEBUG("{}Process [tgid={}, tid={}]: enable to pebs.", target, mon[target].tgid,
+        /* pebs start - now includes LBR in single event */
+        mon[target].pebs_lbr_ctx = new PEBS(tgid, pebs_sample_period);
+        /* instruction counter for ROB model */
+        mon[target].ins_counter = new InstructionCounter(tgid);
+        SPDLOG_DEBUG("{}Process [tgid={}, tid={}]: enable to pebs+lbr+inscounter.", target, mon[target].tgid,
                      mon[target].tid); // multiple tid multiple pid
-        mon[target].lbr_ctx = new LBR(tgid, pebs_sample_period);
         new std::jthread(mon[target].wait, &mon, target);
     }
     SPDLOG_INFO("pid {}[tgid={}, tid={}] monitoring start", target, mon[target].tgid, mon[target].tid);
@@ -192,23 +193,20 @@ void Monitors::disable(const uint32_t target) {
     mon[target].injected_delay.tv_nsec = 0;
     mon[target].end_exec_ts.tv_sec = 0;
     mon[target].end_exec_ts.tv_nsec = 0;
-    if (mon[target].pebs_ctx != nullptr) {
-        mon[target].pebs_ctx->fd = -1;
-        mon[target].pebs_ctx->pid = -1;
-        mon[target].pebs_ctx->seq = 0;
-        mon[target].pebs_ctx->rdlen = 0;
-        mon[target].pebs_ctx->seq = 0;
-        mon[target].pebs_ctx->mp = nullptr;
-        mon[target].pebs_ctx->sample_period = 0;
+    if (mon[target].pebs_lbr_ctx != nullptr) {
+        mon[target].pebs_lbr_ctx->fd = -1;
+        mon[target].pebs_lbr_ctx->pid = -1;
+        mon[target].pebs_lbr_ctx->seq = 0;
+        mon[target].pebs_lbr_ctx->rdlen = 0;
+        mon[target].pebs_lbr_ctx->seq = 0;
+        mon[target].pebs_lbr_ctx->mp = nullptr;
+        mon[target].pebs_lbr_ctx->sample_period = 0;
     }
-    if (mon[target].lbr_ctx != nullptr) {
-        mon[target].lbr_ctx->fd = -1;
-        mon[target].lbr_ctx->pid = -1;
-        mon[target].lbr_ctx->seq = 0;
-        mon[target].lbr_ctx->rdlen = 0;
-        mon[target].lbr_ctx->seq = 0;
-        mon[target].lbr_ctx->mp = nullptr;
-        mon[target].lbr_ctx->sample_period = 0;
+    if (mon[target].ins_counter != nullptr) {
+        mon[target].ins_counter->fd = -1;
+        mon[target].ins_counter->pid = -1;
+        mon[target].ins_counter->last_count = 0;
+        mon[target].ins_counter->current_count = 0;
     }
     if (mon[target].bpftime_ctx != nullptr) {
         mon[target].bpftime_ctx->tid = -1;
@@ -260,8 +258,7 @@ int Monitors::terminate(const uint32_t tgid, const uint32_t tid, const int32_t t
         }
         target = i;
         /* pebs stop */
-        delete mon[target].pebs_ctx;
-        delete mon[target].lbr_ctx;
+        delete mon[target].pebs_lbr_ctx;
         delete mon[target].bpftime_ctx;
 
         /* Save end time */

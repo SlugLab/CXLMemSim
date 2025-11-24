@@ -65,7 +65,11 @@ int main(int argc, char *argv[]) {
         "k,policy", "The policy of CXL memory controller",
         cxxopts::value<std::vector<std::string>>()->default_value("none,none,none,none"))(
         "e,env", "The environment variable for the CXL memory controller",
-        cxxopts::value<std::vector<std::string>>()->default_value("OMP_NUM_THREADS=24"));
+        cxxopts::value<std::vector<std::string>>()->default_value("OMP_NUM_THREADS=24"))(
+        "s,switchlatency", "The latency per CXL switch level in nanoseconds (default 50ns)",
+        cxxopts::value<double>()->default_value("0.00005"))(
+        "a,cachesize", "The LRU cache size in KB for CXL controller (default 32768 = 32MB)",
+        cxxopts::value<int>()->default_value("32768"));
     ;
 
     auto result = options.parse(argc, argv);
@@ -90,6 +94,8 @@ int main(int argc, char *argv[]) {
     auto page_ = result["mode"].as<std::string>();
     auto policy = result["policy"].as<std::vector<std::string>>();
     auto env = result["env"].as<std::vector<std::string>>();
+    auto switchlatency = result["switchlatency"].as<double>();
+    auto cachesize = result["cachesize"].as<int>();
 
     page_type mode;
     if (page_ == "hugepage_2M") {
@@ -184,7 +190,8 @@ int main(int argc, char *argv[]) {
     for (auto const &[idx, value] : capacity | std::views::enumerate) {
         if (idx == 0) {
             SPDLOG_DEBUG("local_memory_region capacity:{}", value);
-            controller = new CXLController({policy1, policy2, policy3, policy4}, capacity[0], mode, 100, dramlatency);
+            SPDLOG_DEBUG("switch_latency:{}", switchlatency);
+            controller = new CXLController({policy1, policy2, policy3, policy4}, capacity[0], mode, 100, dramlatency, switchlatency, cachesize);
         } else {
             SPDLOG_DEBUG("memory_region:{}", (idx - 1) + 1);
             SPDLOG_DEBUG(" capacity:{}", capacity[(idx - 1) + 1]);
@@ -335,13 +342,16 @@ int main(int argc, char *argv[]) {
                         SPDLOG_ERROR("[{}:{}:{}] Warning: Failed BPFTIMERUNTIME read", i, mon.tgid, mon.tid);
                     }
 
-                    /* read PEBS sample */
-                    if (mon.pebs_ctx->read(controller, &mon.after->pebs) < 0) {
-                        SPDLOG_ERROR("[{}:{}:{}] Warning: Failed PEBS read", i, mon.tgid, mon.tid);
+                    /* read PEBS+LBR sample (combined in single event) */
+                    if (mon.pebs_lbr_ctx->read(controller, &mon.after->pebs) < 0) {
+                        SPDLOG_ERROR("[{}:{}:{}] Warning: Failed PEBS+LBR read", i, mon.tgid, mon.tid);
                     }
-                    /* read LBR sample */
-                    if (mon.lbr_ctx->read(controller, &mon.after->lbr) < 0) {
-                        SPDLOG_ERROR("[{}:{}:{}] Warning: Failed LBR read", i, mon.tgid, mon.tid);
+
+                    /* read instruction counter and update ROB model */
+                    if (mon.ins_counter) {
+                        uint64_t ins_delta = mon.ins_counter->read_delta();
+                        uint64_t llcm_delta = mon.after->pebs.llcmiss - mon.before->pebs.llcmiss;
+                        controller->update_rob(mon.tid, ins_delta, llcm_delta);
                     }
                 }
                 target_llcmiss = mon.after->pebs.total - mon.before->pebs.total;
@@ -368,8 +378,14 @@ int main(int argc, char *argv[]) {
                 writeback_latency = (double)target_l2stall * avg_weight *
                                     (wb_cnt * target_llcmiss / (all_llcmiss + all_prefetch + 1) /
                                      (target_llchits + avg_weight * target_llcmiss + 1));
-                uint64_t emul_delay =
-                    std::min(controller->latency_lat + controller->bandwidth_lat + writeback_latency, 1.) * 1000000;
+                double modeled_delay = controller->latency_lat + controller->bandwidth_lat + writeback_latency;
+                uint64_t emul_delay = std::min(modeled_delay, 1.) * 1000000;
+
+                SPDLOG_DEBUG(
+                    "[{}:{}:{}] modeled_delay={:.6f} ms (latency={:.6f} ms, bandwidth={:.6f} ms, writeback={:.6f} ms)"
+                    " clamp={} ns",
+                    i, mon.tgid, mon.tid, modeled_delay, controller->latency_lat, controller->bandwidth_lat,
+                    writeback_latency, emul_delay);
 
                 SPDLOG_DEBUG("[{}:{}:{}] pebs: total={}, ", i, mon.tgid, mon.tid, mon.after->pebs.total);
 
@@ -384,6 +400,10 @@ int main(int argc, char *argv[]) {
                 diff_nsec += (end_ts.tv_sec - start_ts.tv_sec) * 1000000000 + (end_ts.tv_nsec - start_ts.tv_nsec);
                 SPDLOG_DEBUG("diff_nsec:{}", diff_nsec);
 
+                if (diff_nsec > emul_delay) {
+                    SPDLOG_DEBUG("[{}:{}:{}] bookkeeping exceeded modeled delay by {} ns", i, mon.tgid, mon.tid,
+                                 diff_nsec - emul_delay);
+                }
                 calibrated_delay = diff_nsec > emul_delay ? 0 : emul_delay - diff_nsec;
                 mon.total_delay += (double)calibrated_delay / 1000000000;
                 diff_nsec = 0;

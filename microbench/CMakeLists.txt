@@ -146,3 +146,6 @@ add_executable(st_serial128 st_serial.cpp)
 target_compile_definitions(st_serial128 PRIVATE -DFENCE_COUNT=128)
 add_executable(st_serial256 st_serial.cpp)
 target_compile_definitions(st_serial256 PRIVATE -DFENCE_COUNT=256)
+
+# Pointer chasing for random access patterns
+add_executable(ptr-chasing ptr-chasing.cpp)

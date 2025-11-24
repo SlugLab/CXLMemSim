@@ -15,6 +15,7 @@
 #include "bpftimeruntime.h"
 #include "cxlcontroller.h"
 #include "helper.h"
+#include "inscounter.h"
 #include "pebs.h"
 #include <atomic>
 #include <mutex>
@@ -67,8 +68,8 @@ public:
     double total_delay;
     timespec start_exec_ts, end_exec_ts;
     bool is_process;
-    PEBS *pebs_ctx{};
-    LBR *lbr_ctx{};
+    PEBS *pebs_lbr_ctx{};  // Combined PEBS+LBR sampler
+    InstructionCounter *ins_counter{};  // Instruction counter for ROB model
     BpfTimeRuntime *bpftime_ctx{};
 
     Monitor(const Monitor &other)
@@ -77,8 +78,8 @@ public:
           before(nullptr), // Will be set after copying elements
           after(nullptr), // Will be set after copying elements
           total_delay(other.total_delay), start_exec_ts(other.start_exec_ts), end_exec_ts(other.end_exec_ts),
-          is_process(other.is_process), pebs_ctx(other.pebs_ctx ? new PEBS(*other.pebs_ctx) : nullptr),
-          lbr_ctx(other.lbr_ctx ? new LBR(*other.lbr_ctx) : nullptr),
+          is_process(other.is_process), pebs_lbr_ctx(other.pebs_lbr_ctx ? new PEBS(*other.pebs_lbr_ctx) : nullptr),
+          ins_counter(other.ins_counter ? new InstructionCounter(*other.ins_counter) : nullptr),
           bpftime_ctx(other.bpftime_ctx ? new BpfTimeRuntime(*other.bpftime_ctx) : nullptr) {
         status.store(other.status.load());
         std::copy(std::begin(other.elem), std::end(other.elem), std::begin(elem));

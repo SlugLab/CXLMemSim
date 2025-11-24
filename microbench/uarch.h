@@ -722,11 +722,11 @@ void chasing_storeclwb(char *start_addr, long size, long skip, long count, uint6
     KERNEL_BEGIN
     asm volatile("xor	%%r8, %%r8 \n" /* r8: access offset */
                  "xor	%%r11, %%r11 \n" /* r11: counter */
-                 "LOOP_CHASING_STCLWB_OUTER: \n" /* outer (counter) loop */
+                 "1: \n" /* outer (counter) loop */
                  "lea	(%[start_addr], %%r8), %%r9 \n" /* r9: access loc */
                  "xor	%%r10, %%r10 \n" /* r10: accessed size */
                  "xor	%%r12, %%r12 \n" /* r12: chasing index addr */
-                 "LOOP_CHASING_STCLWB_INNER: \n"
+                 "2: \n"
                  "movq	(%[cindex], %%r12, 8), %%xmm0\n"
                  "shl    $0x06, %%r12\n"
                  "vmovdqa64	%%zmm0,  0x0(%%r9, %%r12) \n"
@@ -735,7 +735,7 @@ void chasing_storeclwb(char *start_addr, long size, long skip, long count, uint6
                  "movq	%%xmm0, %%r12\n" /* Update to next chasing element */
 
                  "cmp	%[accesssize], %%r10 \n"
-                 "jl		LOOP_CHASING_STCLWB_INNER \n" SIZEBTST_FENCE
+                 "jl		2b \n" SIZEBTST_FENCE
 
                  "xor	%%r10, %%r10 \n"
 
@@ -743,7 +743,7 @@ void chasing_storeclwb(char *start_addr, long size, long skip, long count, uint6
                  "inc	%%r11 \n"
                  "cmp	%[count], %%r11 \n"
 
-                 "jl		LOOP_CHASING_STCLWB_OUTER \n"
+                 "jl		1b \n"
 
                  :
                  : [start_addr] "r"(start_addr), [accesssize] "r"(size), [count] "r"(count), [skip] "r"(skip),
@@ -756,25 +756,25 @@ void chasing_loadnt(char *start_addr, long size, long skip, long count, uint64_t
     KERNEL_BEGIN
     asm volatile("xor    %%r8, %%r8 \n" /* r8: access offset */
                  "xor    %%r11, %%r11 \n" /* r11: counter */
-                 "LOOP_CHASING_STRIDENT_OUTER: \n" /* outer (counter) loop */
+                 "3: \n" /* outer (counter) loop */
                  "lea    (%[start_addr], %%r8), %%r9 \n" /* r9: access loc */
                  "xor    %%r10, %%r10 \n" /* r10: accessed size */
                  "xor	%%r12, %%r12 \n" /* r12: chasing index addr */
-                 "LOOP_CHASING_STRIDENT_INNER: \n"
+                 "4: \n"
                  "shl    $0x06, %%r12\n"
                  "vmovntdqa 0x0(%%r9, %%r12), %%zmm0\n"
                  "movq   %%xmm0, %%r12\n" /* Update to next chasing element */
                  "add    $0x40, %%r10 \n"
 
                  "cmp    %[accesssize], %%r10 \n"
-                 "jl     LOOP_CHASING_STRIDENT_INNER \n" SIZEBTLD_FENCE
+                 "jl     4b \n" SIZEBTLD_FENCE
 
                  //"mfence \n"  /* !!!! */
                  "add    %[skip], %%r8 \n"
                  "inc    %%r11 \n"
                  "cmp    %[count], %%r11 \n"
 
-                 "jl     LOOP_CHASING_STRIDENT_OUTER \n"
+                 "jl     3b \n"
 
                  :
                  : [start_addr] "r"(start_addr), [accesssize] "r"(size), [count] "r"(count), [skip] "r"(skip),
@@ -787,33 +787,33 @@ void cachefence(char *start_addr, long size, long cache, long fence) {
     KERNEL_BEGIN
     asm volatile("movq %[start_addr], %%xmm0 \n"
                  "xor %%r9, %%r9 \n" /* r9: offset of write */
-                 "CACHEFENCE_FENCEBEGIN: \n"
+                 "5: \n"
                  "xor %%r11, %%r11 \n" /* r11: fence counter */
-                 "CACHEFENCE_FLUSHBEGIN: \n"
+                 "6: \n"
                  "xor %%r10, %%r10 \n" /* r10: clwb counter */
                  //		"movq %%r9, %%rdx \n"				/* rdx: flush start offset */
                  "leaq (%[start_addr], %%r9), %%rdx \n"
-                 "CACHEFENCE_WRITEONE: \n"
+                 "7: \n"
                  "vmovdqa64  %%zmm0, 0x0(%[start_addr], %%r9) \n" /* Write one addr */
                  "add $0x40, %%r9 \n"
                  "add $0x40, %%r10 \n"
                  "add $0x40, %%r11 \n"
                  "cmp %[cache], %%r10 \n" /* check clwb */
-                 "jl CACHEFENCE_WRITEONE \n"
+                 "jl 7b \n"
 
                  "leaq (%[start_addr], %%r9), %%rcx \n" /* rcx: flush end offset, rdx->rcx */
                  //		"add %[start_addr], %%rcx"
-                 "CACHEFENCE_FLUSHONE: \n"
+                 "8: \n"
                  "clwb (%%rdx) \n" /* Flush from rdx to rcx */
                  "add $0x40, %%rdx \n"
                  "cmp %%rcx, %%rdx \n"
-                 "jl CACHEFENCE_FLUSHONE \n"
+                 "jl 8b \n"
 
                  "cmp %[fence], %%r11 \n"
-                 "jl CACHEFENCE_FLUSHBEGIN \n" CACHEFENCE_FENCE
+                 "jl 6b \n" CACHEFENCE_FENCE
 
                  "cmp %[accesssize], %%r9 \n"
-                 "jl CACHEFENCE_FENCEBEGIN \n"
+                 "jl 5b \n"
 
                  ::[start_addr] "r"(start_addr),
                  [accesssize] "r"(size), [cache] "r"(cache), [fence] "r"(fence)

@@ -26,6 +26,8 @@ void CXLController::construct_topo(std::string_view newick_tree) {
         } else if (token == "(") {
             /** if is not on the top level */
             auto cur = new CXLSwitch(num_switches++);
+            // Apply the configurable switch latency to new switches
+            cur->congestion_latency = this->switch_latency;
             stk.back()->switches.push_back(cur);
             stk.push_back(cur);
         } else if (token == ")") {
@@ -44,13 +46,16 @@ void CXLController::construct_topo(std::string_view newick_tree) {
 }
 
 CXLController::CXLController(std::array<Policy *, 4> p, int capacity, page_type page_type_, int epoch,
-                             double dramlatency)
+                             double dramlatency, double switch_latency, int cache_size_kb)
     : CXLSwitch(0), capacity(capacity), allocation_policy(dynamic_cast<AllocationPolicy *>(p[0])),
       migration_policy(dynamic_cast<MigrationPolicy *>(p[1])), paging_policy(dynamic_cast<PagingPolicy *>(p[2])),
       caching_policy(dynamic_cast<CachingPolicy *>(p[3])), page_type_(page_type_), dramlatency(dramlatency),
-      lru_cache(32 * 1024 * 1024 / 64) {
+      switch_latency(switch_latency), lru_cache(cache_size_kb * 1024 / 64) {
+    // Set the switch latency for the root controller (which is also a switch)
+    this->congestion_latency = switch_latency;
     for (auto switch_ : this->switches) {
         switch_->set_epoch(epoch);
+        switch_->congestion_latency = switch_latency;
     }
     for (auto expander : this->expanders) {
         expander->set_epoch(epoch);
@@ -396,6 +401,24 @@ int CXLController::insert(uint64_t timestamp, uint64_t tid, lbr lbrs[32], cntr c
 
     return 0;
 }
+
+void CXLController::update_rob(uint64_t tid, uint64_t ins_count, uint64_t llcm_count) {
+    auto &t_info = thread_map[tid];
+    auto &rob = t_info.rob;
+
+    // Update ROB counters directly with epoch-level counts
+    rob.ins_count = ins_count;
+    rob.llcm_count = llcm_count;
+
+    // Manage ROB overflow - keep within ROB_SIZE
+    while (rob.ins_count > ROB_SIZE) {
+        // Scale down proportionally to fit within ROB
+        double scale = static_cast<double>(ROB_SIZE) / rob.ins_count;
+        rob.ins_count = ROB_SIZE;
+        rob.llcm_count = static_cast<uint64_t>(rob.llcm_count * scale);
+    }
+}
+
 std::vector<std::string> CXLController::tokenize(const std::string_view &s) {
     std::vector<std::string> res;
     std::string tmp;
