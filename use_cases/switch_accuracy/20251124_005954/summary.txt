@@ -1,0 +1,108 @@
+Switch Accuracy Experiment Summary
+======================================================================
+
+four_level + ld64:
+  Avg Emulated Time: 86.444s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 370
+
+four_level + ld_serial64:
+  Avg Emulated Time: 138.865s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 285
+
+four_level + ptr-chasing:
+  Avg Emulated Time: 31.331s
+  Avg Total Delay: 1.177
+  Avg PEBS Samples: 27138
+
+no_switch + ld64:
+  Avg Emulated Time: 94.424s
+  Avg Total Delay: 1.336
+  Avg PEBS Samples: 562
+
+no_switch + ld_serial64:
+  Avg Emulated Time: 138.780s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 536
+
+no_switch + ptr-chasing:
+  Avg Emulated Time: 32.481s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 46362
+
+one_level + ld64:
+  Avg Emulated Time: 87.879s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 508
+
+one_level + ld_serial64:
+  Avg Emulated Time: 145.476s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 400
+
+one_level + ptr-chasing:
+  Avg Emulated Time: 23.181s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 15500
+
+three_level + ld64:
+  Avg Emulated Time: 89.013s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 477
+
+three_level + ld_serial64:
+  Avg Emulated Time: 136.614s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 348
+
+three_level + ptr-chasing:
+  Avg Emulated Time: 19.255s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 15100
+
+three_level_wide + ld64:
+  Avg Emulated Time: 86.908s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 475
+
+three_level_wide + ld_serial64:
+  Avg Emulated Time: 139.372s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 432
+
+three_level_wide + ptr-chasing:
+  Avg Emulated Time: 30.330s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 21417
+
+two_level + ld64:
+  Avg Emulated Time: 96.209s
+  Avg Total Delay: 0.371
+  Avg PEBS Samples: 471
+
+two_level + ld_serial64:
+  Avg Emulated Time: 142.490s
+  Avg Total Delay: 1.294
+  Avg PEBS Samples: 380
+
+two_level + ptr-chasing:
+  Avg Emulated Time: 33.614s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 20252
+
+two_level_wide + ld64:
+  Avg Emulated Time: 89.975s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 412
+
+two_level_wide + ld_serial64:
+  Avg Emulated Time: 138.164s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 365
+
+two_level_wide + ptr-chasing:
+  Avg Emulated Time: 30.884s
+  Avg Total Delay: 0.000
+  Avg PEBS Samples: 22448
+

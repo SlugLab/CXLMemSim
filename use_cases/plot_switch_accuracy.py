@@ -127,34 +127,38 @@ def plot_by_topology(results, output_dir):
     ax.set_xticklabels(topos, rotation=45)
     ax.legend()
 
-    # PEBS samples
+    # PEBS samples (log scale)
     ax = axes[0, 1]
     for i, wl in enumerate(workloads):
         samples = []
         for topo in topos:
             vals = [r['pebs_samples'] for r in by_topo[topo] if r['workload'] == wl]
-            samples.append(np.mean(vals) if vals else 0)
+            avg = np.mean(vals) if vals else 0
+            samples.append(max(avg, 1))  # Avoid log(0)
         ax.bar(x + i * width, samples, width, label=wl)
 
     ax.set_xlabel('Topology')
-    ax.set_ylabel('PEBS Samples')
+    ax.set_ylabel('PEBS Samples (log scale)')
     ax.set_title('PEBS Samples by Topology and Workload')
+    ax.set_yscale('log')
     ax.set_xticks(x + width * (len(workloads) - 1) / 2)
     ax.set_xticklabels(topos, rotation=45)
     ax.legend()
 
-    # HITM (cache hits)
+    # HITM (cache hits) - log scale
     ax = axes[1, 0]
     for i, wl in enumerate(workloads):
         hitm = []
         for topo in topos:
             vals = [r['hitm'] for r in by_topo[topo] if r['workload'] == wl]
-            hitm.append(np.mean(vals) if vals else 0)
+            avg = np.mean(vals) if vals else 0
+            hitm.append(max(avg, 1))  # Avoid log(0)
         ax.bar(x + i * width, hitm, width, label=wl)
 
     ax.set_xlabel('Topology')
-    ax.set_ylabel('HITM Count')
+    ax.set_ylabel('HITM Count (log scale)')
     ax.set_title('Cache HITM by Topology and Workload')
+    ax.set_yscale('log')
     ax.set_xticks(x + width * (len(workloads) - 1) / 2)
     ax.set_xticklabels(topos, rotation=45)
     ax.legend()
@@ -165,20 +169,24 @@ def plot_by_topology(results, output_dir):
         delays = []
         for topo in topos:
             vals = [r['total_delay'] for r in by_topo[topo] if r['workload'] == wl]
-            delays.append(np.mean(vals) if vals else 0)
+            avg = np.mean(vals) if vals else 0
+            delays.append(max(avg, 0.001))  # Small minimum for visibility
         ax.bar(x + i * width, delays, width, label=wl)
 
     ax.set_xlabel('Topology')
-    ax.set_ylabel('Total Delay')
+    ax.set_ylabel('Total Delay (s)')
     ax.set_title('Total Delay by Topology and Workload')
+    # Use log scale if values vary significantly
+    if any(delays) and max(max(delays) for delays in [delays] if delays) > 10 * min(d for d in [delays] if d for d in delays if d > 0):
+        ax.set_yscale('log')
     ax.set_xticks(x + width * (len(workloads) - 1) / 2)
     ax.set_xticklabels(topos, rotation=45)
     ax.legend()
 
     plt.tight_layout()
-    plt.savefig(output_dir / 'topology_comparison.png', dpi=150)
+    plt.savefig(output_dir / 'topology_comparison.pdf', dpi=150)
     plt.close()
-    print(f"Saved: {output_dir / 'topology_comparison.png'}")
+    print(f"Saved: {output_dir / 'topology_comparison.pdf'}")
 
 def plot_by_switch_latency(results, output_dir):
     """Plot metrics grouped by switch latency."""
@@ -218,9 +226,9 @@ def plot_by_switch_latency(results, output_dir):
     ax.legend()
 
     plt.tight_layout()
-    plt.savefig(output_dir / 'switch_latency_impact.png', dpi=150)
+    plt.savefig(output_dir / 'switch_latency_impact.pdf', dpi=150)
     plt.close()
-    print(f"Saved: {output_dir / 'switch_latency_impact.png'}")
+    print(f"Saved: {output_dir / 'switch_latency_impact.pdf'}")
 
 def plot_by_bandwidth(results, output_dir):
     """Plot metrics grouped by bandwidth."""
@@ -258,9 +266,9 @@ def plot_by_bandwidth(results, output_dir):
     ax.legend()
 
     plt.tight_layout()
-    plt.savefig(output_dir / 'bandwidth_impact.png', dpi=150)
+    plt.savefig(output_dir / 'bandwidth_impact.pdf', dpi=150)
     plt.close()
-    print(f"Saved: {output_dir / 'bandwidth_impact.png'}")
+    print(f"Saved: {output_dir / 'bandwidth_impact.pdf'}")
 
 def plot_summary_table(results, output_dir):
     """Create a summary table of results."""
