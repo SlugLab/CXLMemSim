@@ -10,7 +10,16 @@ execute_process(COMMAND uname -r OUTPUT_VARIABLE arch OUTPUT_STRIP_TRAILING_WHIT
 set(LINUX_SOURCE /lib/modules/${arch}/build/)
 
 set(CMAKE_CXX_STANDARD 26)
+set(BPFTIME_BUILD_STATIC_LIB ON CACHE BOOL "Build bpftime as a single static archive" FORCE)
+# Disable ccache in subprojects to avoid runtime permission issues in some environments
+set(CCACHE_FOUND CCACHE_FOUND-NOTFOUND CACHE FILEPATH "Force-disable ccache lookup for subprojects" FORCE)
+set(ENV{CCACHE_DISABLE} 1)
+set(BPFTIME_ENABLE_CCACHE OFF CACHE BOOL "Disable ccache in bpftime" FORCE)
+set(GGML_CCACHE OFF CACHE BOOL "Disable ccache in ggml" FORCE)
 add_subdirectory(lib/bpftime)
+# Ensure no global launcher wraps compiler/linker (disables ccache even if discovered)
+set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "")
+set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK "")
 add_subdirectory(microbench)
 
 # Find fmt library for llama.cpp workload
@@ -31,19 +40,19 @@ set(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -latomic")
 add_executable(CXLMemSim ${SOURCE_FILES} src/main.cc)
 
 include_directories(CXLMemSim include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR} ${runtime_SOURCE_DIR}/include)
-target_link_libraries(CXLMemSim cxxopts::cxxopts ${CMAKE_BINARY_DIR}/lib/bpftime/runtime/libruntime.a bpftime_vm bpftime-object bpftime_base_attach_impl bpftime-agent spdlog::spdlog)
+target_link_libraries(CXLMemSim cxxopts::cxxopts bpftime_static bpftime-agent spdlog::spdlog)
 
 add_executable(CXLMemSimRoB ${SOURCE_FILES} src/rob.cc)
 include_directories(CXLMemSimRoB include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR} ${runtime_SOURCE_DIR}/include)
-target_link_libraries(CXLMemSimRoB cxxopts::cxxopts ${CMAKE_BINARY_DIR}/lib/bpftime/runtime/libruntime.a bpftime_vm bpftime-object bpftime_base_attach_impl bpftime-agent spdlog::spdlog)
+target_link_libraries(CXLMemSimRoB cxxopts::cxxopts bpftime_static bpftime-agent spdlog::spdlog)
 
 add_executable(CXLMemSimTest ${SOURCE_FILES} src/test_rob.cc)
 include_directories(CXLMemSimTest include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR} ${runtime_SOURCE_DIR}/include)
-target_link_libraries(CXLMemSimTest cxxopts::cxxopts ${CMAKE_BINARY_DIR}/lib/bpftime/runtime/libruntime.a bpftime_vm bpftime-object bpftime_base_attach_impl bpftime-agent spdlog::spdlog)
+target_link_libraries(CXLMemSimTest cxxopts::cxxopts bpftime_static bpftime-agent spdlog::spdlog)
 
 add_executable(CXLMemSimTest2 ${SOURCE_FILES} src/test_mem_stall.cc)
 include_directories(CXLMemSimTest2 include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR} ${runtime_SOURCE_DIR}/include)
-target_link_libraries(CXLMemSimTest2 cxxopts::cxxopts ${CMAKE_BINARY_DIR}/lib/bpftime/runtime/libruntime.a bpftime_vm bpftime-object bpftime_base_attach_impl bpftime-agent spdlog::spdlog)
+target_link_libraries(CXLMemSimTest2 cxxopts::cxxopts bpftime_static bpftime-agent spdlog::spdlog)
 
 
 function(bpf prefix)
