@@ -23,7 +23,7 @@ CXL_TYPE2_MEM_SIZE=${CXL_TYPE2_MEM_SIZE:-4G}
 GPU_DEVICE=${GPU_DEVICE:-""}
 
 # Communication mode: tcp or shm (shared memory)
-export CXL_TRANSPORT_MODE=${CXL_TRANSPORT_MODE:-shm}
+export CXL_TRANSPORT_MODE=shm
 export CXL_MEMSIM_HOST=$CXL_MEMSIM_HOST
 export CXL_MEMSIM_PORT=$CXL_MEMSIM_PORT
 
@@ -37,12 +37,18 @@ echo "Type 2 Device Memory: $CXL_TYPE2_MEM_SIZE"
 echo "GPU Device: ${GPU_DEVICE:-'Not configured (simulation mode)'}"
 echo "==================================================================="
 
-# Build QEMU command
-QEMU_CMD="$QEMU_BINARY \
+# Add GPU device parameter if specified
+if [ -n "$GPU_DEVICE" ]; then
+    QEMU_CMD="$QEMU_CMD,gpu-device=$GPU_DEVICE"
+    echo "GPU passthrough enabled for: $GPU_DEVICE"
+fi
+
+# Add traditional Type 3 memory device for comparison
+exec $QEMU_BINARY \
     --enable-kvm \
     -cpu qemu64,+xsave,+rdtscp,+avx,+avx2,+sse4.1,+sse4.2,+avx512f,+avx512dq,+avx512ifma,+avx512cd,+avx512bw,+avx512vl,+avx512vbmi,+clflushopt \
     -kernel ./bzImage \
-    -append \"root=/dev/sda rw console=ttyS0,115200 ignore_loglevel nokaslr nosmp nopti nospectre_v2 mem=2G\" \
+    -append "root=/dev/sda rw console=ttyS0,115200 ignore_loglevel nokaslr nosmp nopti nospectre_v2" \
     -netdev tap,id=network0,ifname=tap1,script=no,downscript=no \
     -device e1000,netdev=network0,mac=52:54:00:00:00:02 \
     -netdev user,id=netssh0,hostfwd=tcp::10022-:22 \
@@ -54,36 +60,17 @@ QEMU_CMD="$QEMU_BINARY \
     -smp 4 \
     -device pxb-cxl,bus_nr=12,bus=pcie.0,id=cxl.1 \
     -device cxl-rp,port=0,bus=cxl.1,id=root_port13,chassis=0,slot=0 \
-    -device cxl-rp,port=1,bus=cxl.1,id=root_port14,chassis=0,slot=1"
-
-# Add CXL Type 2 device with coherent memory and GPU passthrough support
-QEMU_CMD="$QEMU_CMD \
+    -device cxl-rp,port=1,bus=cxl.1,id=root_port14,chassis=0,slot=1 \
     -device cxl-type2,bus=root_port13,\
-cache-size=$CXL_TYPE2_CACHE_SIZE,\
-mem-size=$CXL_TYPE2_MEM_SIZE,\
-sn=0x2,\
-cxlmemsim-addr=$CXL_MEMSIM_HOST,\
-cxlmemsim-port=$CXL_MEMSIM_PORT,\
-coherency-enabled=true,\
-id=cxl-type2-gpu0"
-
-# Add GPU device parameter if specified
-if [ -n "$GPU_DEVICE" ]; then
-    QEMU_CMD="$QEMU_CMD,gpu-device=$GPU_DEVICE"
-    echo "GPU passthrough enabled for: $GPU_DEVICE"
-fi
-
-# Add traditional Type 3 memory device for comparison
-QEMU_CMD="$QEMU_CMD \
+    cache-size=$CXL_TYPE2_CACHE_SIZE,\
+    mem-size=$CXL_TYPE2_MEM_SIZE,\
+    sn=0x2,\
+    cxlmemsim-addr=$CXL_MEMSIM_HOST,\
+    cxlmemsim-port=$CXL_MEMSIM_PORT,\
+    coherency-enabled=true,\
+    id=cxl-type2-gpu0 \
     -device cxl-type3,bus=root_port14,persistent-memdev=cxl-mem1,lsa=cxl-lsa1,id=cxl-pmem0,sn=0x3 \
     -object memory-backend-file,id=cxl-mem1,share=on,mem-path=/tmp/cxltest.raw,size=128G \
     -object memory-backend-file,id=cxl-lsa1,share=on,mem-path=/tmp/lsa.raw,size=256M \
     -M cxl-fmw.0.targets.0=cxl.1,cxl-fmw.0.size=4G \
-    -nographic"
-
-echo ""
-echo "Starting QEMU with CXL Type 2 device..."
-echo ""
-
-# Execute QEMU
-exec $QEMU_CMD
+    -nographic

@@ -7,11 +7,9 @@ VM_MEMORY=${VM_MEMORY:-2G}
 CXL_MEMORY=${CXL_MEMORY:-4G}
 DISK_IMAGE=${DISK_IMAGE:-plucky-server-cloudimg-amd64.img}
 
-# Enable RDMA mode
+# Enable SHM mode with lock-free coherency
 export CXL_TRANSPORT_MODE=shm
-# Also set TCP fallback
-export CXL_MEMSIM_HOST=127.0.0.1
-export CXL_MEMSIM_PORT=9999
+export CXL_HOST_ID=0
 exec $QEMU_BINARY \
     --enable-kvm -cpu qemu64,+xsave,+rdtscp,+avx,+avx2,+sse4.1,+sse4.2,+avx512f,+avx512dq,+avx512ifma,+avx512cd,+avx512bw,+avx512vl,+avx512vbmi,+clflushopt  \
     -m 16G,maxmem=32G,slots=8 \
@@ -28,9 +26,9 @@ exec $QEMU_BINARY \
     -device cxl-rp,port=0,bus=cxl.1,id=root_port13,chassis=0,slot=0 \
     -device cxl-rp,port=1,bus=cxl.1,id=root_port14,chassis=0,slot=1 \
     -device cxl-type3,bus=root_port13,persistent-memdev=cxl-mem1,lsa=cxl-lsa1,id=cxl-pmem0,sn=0x1 \
-    -device cxl-type1,bus=root_port14,size=2G,cache-size=64M \
+    -device cxl-type1,bus=root_port14,size=1G,cache-size=64M \
     -device virtio-cxl-accel-pci,bus=pcie.0 \
-    -object memory-backend-file,id=cxl-mem1,share=on,mem-path=/dev/shm/cxlmemsim_shared,size=2G \
-    -object memory-backend-file,id=cxl-lsa1,share=on,mem-path=/dev/shm/lsa0.raw,size=2G \
+    -object memory-backend-file,id=cxl-mem1,share=on,mem-path=/dev/shm/cxlmemsim_shared,size=1G \
+    -object memory-backend-file,id=cxl-lsa1,share=on,mem-path=/dev/shm/lsa0.raw,size=1G \
     -M cxl-fmw.0.targets.0=cxl.1,cxl-fmw.0.size=4G \
     -nographic

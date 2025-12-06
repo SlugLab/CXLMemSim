@@ -13,6 +13,66 @@ extern "C" {
 #define CXL_READ_OP 0
 #define CXL_WRITE_OP 1
 
+/* ============================================================================
+ * Shared Memory Coherency Protocol
+ * ============================================================================
+ * Lock-free MESI coherency via shared memory for low-latency communication.
+ * Layout: /dev/shm/cxlmemsim_coherency
+ */
+
+#define CXL_SHM_COHERENCY_PATH "/dev/shm/cxlmemsim_coherency"
+#define CXL_SHM_COHERENCY_MAGIC 0x43584C4D  /* "CXLM" */
+#define CXL_SHM_COHERENCY_VERSION 1
+#define CXL_SHM_MAX_HOSTS 16
+#define CXL_SHM_MAX_CACHELINES (16 * 1024 * 1024)  /* 16M cachelines = 1GB memory */
+
+/* MESI states */
+#define CXL_MESI_INVALID   0
+#define CXL_MESI_SHARED    1
+#define CXL_MESI_EXCLUSIVE 2
+#define CXL_MESI_MODIFIED  3
+
+/* Per-cacheline coherency state (8 bytes, atomically accessible) */
+typedef struct __attribute__((packed, aligned(8))) {
+    uint8_t  state;           /* MESI state */
+    uint8_t  owner_id;        /* Current owner host ID (0-15) */
+    uint16_t sharers_bitmap;  /* Bitmap of hosts sharing this line */
+    uint32_t version;         /* Version counter for ABA prevention */
+} CXLCachelineState;
+
+/* Shared memory coherency header */
+typedef struct __attribute__((aligned(64))) {
+    uint32_t magic;           /* CXL_SHM_COHERENCY_MAGIC */
+    uint32_t version;         /* Protocol version */
+    uint64_t num_cachelines;  /* Number of cacheline entries */
+    uint64_t memory_size;     /* Total memory size being tracked */
+    uint8_t  num_hosts;       /* Number of registered hosts */
+    uint8_t  reserved[7];
+
+    /* Per-host statistics (cache-line aligned) */
+    struct __attribute__((aligned(64))) {
+        uint64_t reads;
+        uint64_t writes;
+        uint64_t invalidations_sent;
+        uint64_t invalidations_received;
+        uint64_t state_transitions;
+        uint64_t reserved[3];
+    } host_stats[CXL_SHM_MAX_HOSTS];
+
+    /* Cacheline state array follows header (variable size) */
+    /* CXLCachelineState cachelines[num_cachelines]; */
+} CXLCoherencyHeader;
+
+/* Get pointer to cacheline state array */
+static inline CXLCachelineState* cxl_shm_get_cachelines(CXLCoherencyHeader *hdr) {
+    return (CXLCachelineState*)((char*)hdr + sizeof(CXLCoherencyHeader));
+}
+
+/* Get cacheline index from address */
+static inline uint64_t cxl_shm_addr_to_index(uint64_t addr) {
+    return (addr / CACHELINE_SIZE) % CXL_SHM_MAX_CACHELINES;
+}
+
 typedef struct {
     char host[256];
     int port;
