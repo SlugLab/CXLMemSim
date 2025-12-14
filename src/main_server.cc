@@ -11,6 +11,7 @@
 #include "cxlcontroller.h"
 #include "cxlendpoint.h"
 #include "helper.h"
+#include "monitor.h"
 #include "policy.h"
 #include "shared_memory_manager.h"
 #include "../include/shm_communication.h"
@@ -39,6 +40,7 @@
 #include <chrono>
 #include <set>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <queue>
 #include <sys/mman.h>  // For msync
@@ -50,6 +52,7 @@
 // Global variables
 Helper helper{};
 CXLController* controller = nullptr;
+Monitors* monitors = nullptr;  // Required by helper.cpp signal handlers
 
 // Server request/response structures (matching qemu_integration)
 struct ServerRequest {
@@ -218,7 +221,7 @@ int main(int argc, char *argv[]) {
     
     std::string backing_file = result["backing-file"].as<std::string>();
     if (result.count("help")) {
-        fmt::print("{}\n", options.help());
+        std::cout << options.help() << std::endl;
         return 0;
     }
 

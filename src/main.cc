@@ -11,9 +11,7 @@
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_OFF
 #include "cxlendpoint.h"
 #include "helper.h"
-#ifndef SERVER_MODE
 #include "monitor.h"
-#endif
 #include "policy.h"
 #include <cerrno>
 #include <cmath>
@@ -29,9 +27,7 @@
 #include <unistd.h>
 Helper helper{};
 CXLController *controller;
-#ifndef SERVER_MODE
 Monitors *monitors;
-#endif
 auto cha_mapping = std::vector{0, 1, 2, 3, 4, 5, 6, 7, 8};
 int main(int argc, char *argv[]) {
     spdlog::cfg::load_env_levels();
@@ -209,9 +205,7 @@ int main(int argc, char *argv[]) {
         helper.used_cpu.push_back(cpuset[j]);
         helper.used_cha.push_back(cpuset[j]);
     }
-#ifndef SERVER_MODE
     monitors = new Monitors{tnum, &use_cpuset};
-#endif
 
     /** Reinterpret the input for the argv argc */
     char cmd_buf[1024] = {0};
@@ -240,7 +234,6 @@ int main(int argc, char *argv[]) {
     if (t_process == 0) {
         sleep(1);
         std::vector<const char *> envp;
-        envp.emplace_back("LD_PRELOAD=/root/.bpftime/libbpftime-agent.so");
         envp.emplace_back("OMP_NUM_THREADS=4");
         while (!env.empty()) {
             envp.emplace_back(env.back().c_str());
@@ -320,12 +313,8 @@ int main(int argc, char *argv[]) {
                 uint64_t wb_cnt = 0, target_l2stall = 0, target_llcmiss = 0, target_llchits = 0, target_l2miss = 0,
                          all_llcmiss = 0, all_prefetch = 0;
                 double writeback_latency;
-                /* read BPFTIMERUNTIME sample */
+                /* read PEBS and LBR samples */
                 if (mon.is_process) {
-                    if (mon.bpftime_ctx->read(controller, &mon.after->bpftime) < 0) {
-                        SPDLOG_ERROR("[{}:{}:{}] Warning: Failed BPFTIMERUNTIME read", i, mon.tgid, mon.tid);
-                    }
-
                     /* read PEBS sample */
                     if (mon.pebs_ctx->read(controller, &mon.after->pebs) < 0) {
                         SPDLOG_ERROR("[{}:{}:{}] Warning: Failed PEBS read", i, mon.tgid, mon.tid);
@@ -366,7 +355,6 @@ int main(int argc, char *argv[]) {
 
                 mon.before->pebs.total = mon.after->pebs.total;
                 mon.before->lbr.total = mon.after->lbr.total;
-                mon.before->bpftime.total = mon.after->bpftime.total;
 
                 SPDLOG_DEBUG("delay={}", emul_delay);
 

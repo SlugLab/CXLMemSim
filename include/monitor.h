@@ -11,9 +11,6 @@
 
 #ifndef CXLMEMSIM_MONITOR_H
 #define CXLMEMSIM_MONITOR_H
-#ifdef SERVER_MODE
-#include "bpftimeruntime.h"
-#endif
 #include "cxlcontroller.h"
 #include "helper.h"
 #include "pebs.h"
@@ -70,9 +67,6 @@ public:
     bool is_process;
     PEBS *pebs_ctx{};
     LBR *lbr_ctx{};
-#ifdef SERVER_MODE
-    BpfTimeRuntime *bpftime_ctx{};
-#endif
 
     Monitor(const Monitor &other)
         : tgid(other.tgid), tid(other.tid), cpu_core(other.cpu_core), wanted_delay(other.wanted_delay),
@@ -81,11 +75,7 @@ public:
           after(nullptr), // Will be set after copying elements
           total_delay(other.total_delay), start_exec_ts(other.start_exec_ts), end_exec_ts(other.end_exec_ts),
           is_process(other.is_process), pebs_ctx(other.pebs_ctx ? new PEBS(*other.pebs_ctx) : nullptr),
-          lbr_ctx(other.lbr_ctx ? new LBR(*other.lbr_ctx) : nullptr)
-#ifdef SERVER_MODE
-          , bpftime_ctx(other.bpftime_ctx ? new BpfTimeRuntime(*other.bpftime_ctx) : nullptr)
-#endif
-          {
+          lbr_ctx(other.lbr_ctx ? new LBR(*other.lbr_ctx) : nullptr) {
         status.store(other.status.load());
         std::copy(std::begin(other.elem), std::end(other.elem), std::begin(elem));
         before = &elem[0];
@@ -113,7 +103,8 @@ template <> struct std::formatter<Monitors> {
         std::string result;
 
         if (p.print_flag) {
-            for (const auto &[mon_id, mon] : p.mon | std::views::enumerate) {
+            for (size_t mon_id = 0; mon_id < p.mon.size(); ++mon_id) {
+                const auto &mon = p.mon[mon_id];
                 for (size_t core_idx = 0; core_idx < helper.used_cha.size(); ++core_idx) {
                     for (size_t cha_idx = 0; cha_idx < helper.perf_conf.cha.size(); ++cha_idx) {
                         result += std::format("mon{}_{}_{}_{},", mon_id, std::get<0>(helper.perf_conf.cha[cha_idx]),
@@ -136,7 +127,8 @@ template <> struct std::formatter<Monitors> {
                 }
             }
         } else { // Visitor mode
-            for (const auto &[mon_id, mon] : p.mon | std::views::enumerate) {
+            for (size_t mon_id = 0; mon_id < p.mon.size(); ++mon_id) {
+                const auto &mon = p.mon[mon_id];
                 for (size_t core_idx = 0; core_idx < helper.used_cha.size(); ++core_idx) {
                     for (size_t cha_idx = 0; cha_idx < helper.perf_conf.cha.size(); ++cha_idx) {
                         int cha_diff = mon.after->chas[core_idx].cha[cha_idx] - mon.before->chas[core_idx].cha[cha_idx];

@@ -10,7 +10,6 @@
  */
 
 #include "monitor.h"
-#include "bpftimeruntime.h"
 #include <csignal>
 #include <ctime>
 #include <iostream>
@@ -170,9 +169,6 @@ int Monitors::enable(uint32_t tgid, uint32_t tid, bool is_process, uint64_t pebs
     mon[target].is_process = is_process;
 
     if (pebs_sample_period) {
-#ifdef SERVER_MODE
-        mon[target].bpftime_ctx = new BpfTimeRuntime(tid, "../src/cxlmemsim.json");
-#endif
         /* pebs start */
         mon[target].pebs_ctx = new PEBS(tgid, pebs_sample_period);
         SPDLOG_DEBUG("{}Process [tgid={}, tid={}]: enable to pebs.", target, mon[target].tgid,
@@ -214,22 +210,12 @@ void Monitors::disable(const uint32_t target) {
         mon[target].lbr_ctx->mp = nullptr;
         mon[target].lbr_ctx->sample_period = 0;
     }
-#ifdef SERVER_MODE
-    if (mon[target].bpftime_ctx != nullptr) {
-        mon[target].bpftime_ctx->tid = -1;
-    }
-#endif
     for (auto &j : mon[target].elem) {
         j.pebs.total = 0;
         j.pebs.llcmiss = 0;
         j.lbr.total = 0;
         j.lbr.tid = 0;
         j.lbr.time = 0;
-        j.bpftime.total = 0;
-        j.bpftime.va = 0;
-        j.bpftime.pa = 0;
-        j.bpftime.pid = 0;
-        j.bpftime.tid = 0;
     }
 }
 bool Monitors::check_all_terminated(const uint32_t processes) {
@@ -268,28 +254,24 @@ int Monitors::terminate(const uint32_t tgid, const uint32_t tid, const int32_t t
         /* pebs stop */
         delete mon[target].pebs_ctx;
         delete mon[target].lbr_ctx;
-#ifdef SERVER_MODE
-        delete mon[target].bpftime_ctx;
-#endif
 
         /* Save end time */
         if (mon[target].end_exec_ts.tv_sec == 0 && mon[target].end_exec_ts.tv_nsec == 0) {
             clock_gettime(CLOCK_MONOTONIC, &mon[i].end_exec_ts);
         }
         /* display results */
-        std::cout << fmt::format("========== Process {}[tgid={}, tid={}] statistics summary ==========\n", target,
+        std::cout << std::format("========== Process {}[tgid={}, tid={}] statistics summary ==========\n", target,
                                  mon[target].tgid, mon[target].tid);
         double emulated_time =
             (double)(mon[target].end_exec_ts.tv_sec - mon[target].start_exec_ts.tv_sec) +
             (double)(mon[target].end_exec_ts.tv_nsec - mon[target].start_exec_ts.tv_nsec) / 1000000000;
-        std::cout << fmt::format("emulated time ={}", emulated_time) << std::endl;
-        std::cout << fmt::format("total delay   ={}", mon[target].total_delay) << std::endl;
-        std::cout << fmt::format("PEBS sample total {} {}", mon[target].before->pebs.total,
+        std::cout << std::format("emulated time ={}", emulated_time) << std::endl;
+        std::cout << std::format("total delay   ={}", mon[target].total_delay) << std::endl;
+        std::cout << std::format("PEBS sample total {} {}", mon[target].before->pebs.total,
                                  mon[target].after->pebs.llcmiss)
                   << std::endl;
-        std::cout << fmt::format("LBR sample total {}", mon[target].before->lbr.total) << std::endl;
-        std::cout << fmt::format("bpftime sample total {}", mon[target].before->bpftime.total) << std::endl;
-        std::cout << fmt::format("{}", *controller) << std::endl;
+        std::cout << std::format("LBR sample total {}", mon[target].before->lbr.total) << std::endl;
+        std::cout << std::format("{}", *controller) << std::endl;
         break;
     }
 
@@ -418,12 +400,7 @@ void Monitor::wait(std::vector<Monitor> *mons, int target) {
         sleep_target = start_ts + wanted_delay * prev_wanted_delay;
         target_nsec = wanted_delay - prev_wanted_delay;
         interval_target = end_ts + interval_delay;
-#ifdef SERVER_MODE
-        if (mon.bpftime_ctx && mon.bpftime_ctx->updater->get(mon.tid))
-            mon.bpftime_ctx->updater->update(mon.tgid, prev_wanted_delay.tv_nsec - mon.wanted_delay.tv_nsec);
-        else
-#endif
-            clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &interval_target, nullptr);
+        clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &interval_target, nullptr);
         // start time before we ask them to sleep
         clock_gettime(CLOCK_MONOTONIC, &start_ts);
         mon.stop();

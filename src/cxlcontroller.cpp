@@ -11,10 +11,7 @@
 
 #include "cxlcontroller.h"
 #include "lbr.h"
-#ifndef SERVER_MODE
-#include "bpftimeruntime.h"
 #include "monitor.h"
-#endif
 
 void CXLController::insert_end_point(CXLMemExpander *end_point) { this->cur_expanders.emplace_back(end_point); }
 
@@ -66,36 +63,6 @@ double CXLController::calculate_latency(const std::vector<std::tuple<uint64_t, u
 double CXLController::calculate_bandwidth(const std::vector<std::tuple<uint64_t, uint64_t>> &elem) {
     return CXLSwitch::calculate_bandwidth(elem);
 }
-
-#ifndef SERVER_MODE
-void CXLController::set_stats(mem_stats stats) {
-    // SPDLOG_INFO("stats: {} {} {} {} {}", stats.total_allocated, stats.total_freed, stats.current_usage,
-    // stats.allocation_count, stats.free_count);
-    if (stats.total_allocated < 100000000000) {
-        for (auto switch_ : this->switches) {
-            switch_->free_stats((stats.total_freed - this->freed) / num_end_points);
-        }
-        for (auto expander_ : this->expanders) {
-            expander_->free_stats((stats.total_freed - this->freed) / num_end_points);
-        }
-    }
-    if (stats.total_freed > this->freed)
-        this->freed = stats.total_freed;
-}
-
-void CXLController::set_process_info(const proc_info &process_info) {
-    monitors->enable(process_info.current_pid, process_info.current_tid, true, 1000, helper.num_of_cpu());
-}
-
-void CXLController::set_thread_info(const proc_info &thread_info) {
-    if (thread_info.current_pid == monitors->mon[0].tgid) {
-        monitors->enable(thread_info.current_pid, thread_info.current_tid, false, 0, helper.num_of_cpu());
-        auto lbr_ = new lbr{.from = 0, .to = 0, .flags = 0};
-        this->insert_one(thread_map[thread_info.current_tid], *lbr_);
-        delete lbr_;
-    }
-}
-#endif
 
 void CXLController::perform_migration() {
     if (!migration_policy)
@@ -212,7 +179,6 @@ void CXLController::perform_migration() {
 
 void CXLController::delete_entry(uint64_t addr, uint64_t length) { CXLSwitch::delete_entry(addr, length); }
 
-#ifndef SERVER_MODE
 void CXLController::insert_one(thread_info &t_info, lbr &lbr) {
     auto &rob = t_info.rob;
     auto llcm_count = (lbr.flags & LBR_DATA_MASK) >> LBR_DATA_SHIFT;
@@ -249,12 +215,9 @@ void CXLController::insert_one(thread_info &t_info, lbr &lbr) {
         ring_buffer.pop();
     }
 }
-#endif
 
 int CXLController::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint64_t virt_addr, int index) {
-#ifndef SERVER_MODE
     auto &t_info = thread_map[tid];
-#endif
 
     // 计算时间步长
     uint64_t time_step = 0;
@@ -274,9 +237,7 @@ int CXLController::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, 
         if (cache_result.has_value()) {
             // 缓存命中
             this->counter.inc_hitm();
-#ifndef SERVER_MODE
             t_info.llcm_type.push(0); // 本地访问类型
-#endif
             continue;
         }
 
@@ -302,9 +263,7 @@ int CXLController::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, 
             // 本地访问
             this->occupation.emplace(current_timestamp, occupation_info{phys_addr, 1, current_timestamp + ptw_latency});
             this->counter.inc_local();
-#ifndef SERVER_MODE
             t_info.llcm_type.push(0);
-#endif
 
             // 更新缓存
             update_cache(phys_addr, phys_addr, current_timestamp);
@@ -317,9 +276,7 @@ int CXLController::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, 
             for (auto expander_ : this->expanders) {
                 res &= expander_->insert(current_timestamp + ptw_latency, tid, phys_addr, virt_addr, numa_policy);
             }
-#ifndef SERVER_MODE
             t_info.llcm_type.push(1); // 远程访问类型
-#endif
 
             // 如果缓存策略允许缓存远程访问的数据
             if (caching_policy->should_cache(phys_addr, current_timestamp)) {
@@ -343,7 +300,7 @@ int CXLController::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, 
     last_timestamp = timestamp;
     return res;
 }
-#ifndef SERVER_MODE
+
 int CXLController::insert(uint64_t timestamp, uint64_t tid, lbr lbrs[32], cntr counters[32]) {
     // 处理LBR记录
     for (int i = 0; i < 32; i++) {
@@ -378,7 +335,7 @@ int CXLController::insert(uint64_t timestamp, uint64_t tid, lbr lbrs[32], cntr c
 
     return 0;
 }
-#endif
+
 std::vector<std::string> CXLController::tokenize(const std::string_view &s) {
     std::vector<std::string> res;
     std::string tmp;

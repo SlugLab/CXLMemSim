@@ -13,9 +13,6 @@
 [submodule "workloads/vectordb"]
 	path = workloads/vectordb
 	url = https://github.com/jina-ai/vectordb
-[submodule "lib/bpftime"]
-	path = lib/bpftime
-	url = https://github.com/victoryang00/bpftime
 [submodule "workloads/llama.cpp"]
 	path = workloads/llama.cpp
 	url = https://github.com/ggml-org/llama.cpp
