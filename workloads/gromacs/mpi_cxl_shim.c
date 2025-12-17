@@ -40,6 +40,26 @@ typedef uint64_t cxl_rptr_t;
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
+// Safe memory copy for CXL memory - avoids AVX-512/SIMD instructions that may crash on CXL
+// Uses volatile to prevent compiler from optimizing into SIMD memcpy
+static inline void cxl_safe_memcpy(void *dst, const void *src, size_t n) {
+    volatile unsigned char *d = (volatile unsigned char *)dst;
+    const volatile unsigned char *s = (const volatile unsigned char *)src;
+
+    // Copy 8 bytes at a time for better performance while staying safe
+    while (n >= 8) {
+        *(volatile uint64_t *)d = *(const volatile uint64_t *)s;
+        d += 8;
+        s += 8;
+        n -= 8;
+    }
+    // Copy remaining bytes
+    while (n > 0) {
+        *d++ = *s++;
+        n--;
+    }
+}
+
 // Add color output for better visibility
 #define RED     "\x1b[31m"
 #define GREEN   "\x1b[32m"
@@ -678,40 +698,26 @@ static cxl_rptr_t allocate_cxl_rptr(size_t size) {
 // CXL Collective Synchronization
 // ============================================================================
 
-// Flush a cache line to ensure visibility on DAX devices
-static inline void cxl_clflush(const void *addr) {
-    __asm__ volatile("clflush (%0)" :: "r"(addr) : "memory");
-}
-
-// Flush a range of memory
+// Memory fence to ensure visibility - MPI_Barrier handles cross-node sync
 static inline void cxl_flush_range(const void *addr, size_t size) {
-    const char *p = (const char *)((uintptr_t)addr & ~(CACHELINE_SIZE - 1));
-    const char *end = (const char *)addr + size;
-    while (p < end) {
-        cxl_clflush(p);
-        p += CACHELINE_SIZE;
-    }
-    __asm__ volatile("sfence" ::: "memory");
+    (void)addr;
+    (void)size;
+    // Use memory fence instead of clflush - MPI_Barrier ensures cross-node visibility
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
 }
 
-// Sense-reversing barrier using CXL shared memory
+// Sense-reversing barrier using CXL shared memory (not used - MPI_Barrier preferred)
 // Returns the phase number after the barrier (for collective data coordination)
 static uint32_t cxl_collective_barrier(int num_ranks) {
     if (!g_cxl.header || num_ranks <= 0) return 0;
 
-    // Memory fence and flush before entering barrier
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
-    cxl_clflush(&g_cxl.header->coll_barrier_count);
-    cxl_clflush(&g_cxl.header->coll_barrier_sense);
-    __asm__ volatile("sfence" ::: "memory");
 
     // Get current sense value
     uint32_t my_sense = atomic_load(&g_cxl.header->coll_barrier_sense);
 
     // Increment barrier count
     uint32_t count = atomic_fetch_add(&g_cxl.header->coll_barrier_count, 1) + 1;
-    cxl_clflush(&g_cxl.header->coll_barrier_count);
-    __asm__ volatile("sfence" ::: "memory");
 
     LOG_TRACE("Barrier: rank=%d, count=%u/%d, sense=%u\n",
               g_cxl.my_rank, count, num_ranks, my_sense);
@@ -719,16 +725,10 @@ static uint32_t cxl_collective_barrier(int num_ranks) {
     if (count == (uint32_t)num_ranks) {
         // Last one in - reset count and flip sense
         atomic_store(&g_cxl.header->coll_barrier_count, 0);
-        // Increment phase for collective coordination
         uint32_t new_phase = atomic_fetch_add(&g_cxl.header->coll_phase, 1) + 1;
-        // Flip sense to release all waiters
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
         atomic_store(&g_cxl.header->coll_barrier_sense, 1 - my_sense);
-        // Flush to ensure other nodes see the update
-        cxl_clflush(&g_cxl.header->coll_barrier_count);
-        cxl_clflush(&g_cxl.header->coll_barrier_sense);
-        cxl_clflush(&g_cxl.header->coll_phase);
-        __asm__ volatile("sfence" ::: "memory");
+        __atomic_thread_fence(__ATOMIC_SEQ_CST);
         LOG_TRACE("Barrier: rank=%d is LAST, new_phase=%u\n", g_cxl.my_rank, new_phase);
         return new_phase;
     } else {
@@ -736,10 +736,8 @@ static uint32_t cxl_collective_barrier(int num_ranks) {
         int spin_count = 0;
         while (atomic_load(&g_cxl.header->coll_barrier_sense) == my_sense) {
             __asm__ volatile("pause" ::: "memory");
-            if (++spin_count % 1000000 == 0) {
-                // Periodically re-flush to pick up updates from other nodes
-                cxl_clflush(&g_cxl.header->coll_barrier_sense);
-                __asm__ volatile("lfence" ::: "memory");
+            if (++spin_count % 10000000 == 0) {
+                LOG_TRACE("Barrier WAIT: rank=%d, sense=%u\n", g_cxl.my_rank, my_sense);
             }
         }
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
@@ -753,20 +751,14 @@ static void cxl_collective_register_buffer(int rank, void *buf) {
     if (!g_cxl.header || rank < 0 || rank >= CXL_MAX_RANKS) return;
     cxl_rptr_t rptr = ptr_to_rptr(buf);
     g_cxl.header->coll_data_rptr[rank] = rptr;
-    __atomic_thread_fence(__ATOMIC_RELEASE);
-    // Flush to ensure other nodes see this registration
-    cxl_clflush(&g_cxl.header->coll_data_rptr[rank]);
-    __asm__ volatile("sfence" ::: "memory");
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
     LOG_TRACE("Registered buffer: rank=%d, buf=%p, rptr=0x%lx\n", rank, buf, (unsigned long)rptr);
 }
 
 // Get another rank's buffer for a collective operation
 static void *cxl_collective_get_buffer(int rank) {
     if (!g_cxl.header || rank < 0 || rank >= CXL_MAX_RANKS) return NULL;
-    // Flush to ensure we see updates from other nodes
-    cxl_clflush(&g_cxl.header->coll_data_rptr[rank]);
-    __asm__ volatile("lfence" ::: "memory");
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
     cxl_rptr_t rptr = g_cxl.header->coll_data_rptr[rank];
     void *ptr = rptr_to_ptr(rptr);
     LOG_TRACE("Get buffer: rank=%d, rptr=0x%lx, ptr=%p\n", rank, (unsigned long)rptr, ptr);
@@ -1857,13 +1849,8 @@ int MPI_Barrier(MPI_Comm comm) {
 
     LOAD_ORIGINAL(MPI_Barrier);
 
-    // For CXL-enabled runs with COMM_WORLD, use optimized barrier
-    if (g_cxl.cxl_comm_enabled && g_cxl.header && comm == MPI_COMM_WORLD &&
-        g_cxl.world_size <= 64) {
-        cxl_collective_barrier(g_cxl.world_size);
-        LOG_DEBUG("MPI_Barrier[%d]: CXL optimized\n", call_num);
-        return MPI_SUCCESS;
-    }
+    // Note: CXL barrier disabled due to cache coherency issues across nodes
+    // Always use original MPI_Barrier for reliable synchronization
 
     return orig_MPI_Barrier(comm);
 }
@@ -1884,20 +1871,23 @@ int MPI_Bcast(void *buffer, int count, MPI_Datatype datatype, int root, MPI_Comm
     if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD && total_size <= 4096 &&
         g_cxl.world_size <= 64) {
 
+        LOAD_ORIGINAL(MPI_Barrier);
+
         // Root allocates buffer and writes data
         void *root_buf = NULL;
         if (g_cxl.my_rank == root) {
             root_buf = allocate_cxl_memory(total_size);
             if (root_buf) {
-                memcpy(root_buf, buffer, total_size);
+                cxl_safe_memcpy(root_buf, buffer, total_size);
+                cxl_flush_range(root_buf, total_size);
             }
         }
 
         // Root registers its buffer (or NULL for non-root)
         cxl_collective_register_buffer(g_cxl.my_rank, root_buf);
 
-        // Barrier to ensure root has registered
-        cxl_collective_barrier(g_cxl.world_size);
+        // Use MPI_Barrier for reliable synchronization across nodes
+        orig_MPI_Barrier(comm);
 
         // All non-root ranks get root's buffer address and read
         if (g_cxl.my_rank != root) {
@@ -1906,11 +1896,11 @@ int MPI_Bcast(void *buffer, int count, MPI_Datatype datatype, int root, MPI_Comm
                 LOG_WARN("MPI_Bcast[%d]: Root buffer unavailable, fallback\n", call_num);
                 goto bcast_fallback;
             }
-            memcpy(buffer, bcast_buf, total_size);
+            cxl_safe_memcpy(buffer, bcast_buf, total_size);
         }
 
         // Final barrier before returning
-        cxl_collective_barrier(g_cxl.world_size);
+        orig_MPI_Barrier(comm);
 
         LOG_DEBUG("MPI_Bcast[%d]: CXL optimized (%zu bytes from root %d)\n",
                   call_num, total_size, root);
@@ -1951,17 +1941,20 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype da
         (datatype == MPI_DOUBLE || datatype == MPI_FLOAT || datatype == MPI_INT ||
          datatype == MPI_LONG || datatype == MPI_LONG_LONG)) {
 
+        LOAD_ORIGINAL(MPI_Barrier);
+
         // Allocate per-rank buffer in shared memory
         void *my_buf = allocate_cxl_memory(total_size);
         if (my_buf) {
-            // Copy my data to shared buffer
-            memcpy(my_buf, sendbuf, total_size);
+            // Copy my data to shared buffer (use safe copy for CXL)
+            cxl_safe_memcpy(my_buf, sendbuf, total_size);
+            cxl_flush_range(my_buf, total_size);
 
             // Register my buffer location so other ranks can find it
             cxl_collective_register_buffer(g_cxl.my_rank, my_buf);
 
-            // Barrier to ensure all ranks have registered and data is visible
-            cxl_collective_barrier(g_cxl.world_size);
+            // Use MPI_Barrier for reliable synchronization across nodes
+            orig_MPI_Barrier(comm);
 
             // Initialize result with my own data
             memcpy(recvbuf, sendbuf, total_size);
@@ -2013,7 +2006,7 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype da
             }
 
             // Final barrier before returning (ensure all ranks finished reading)
-            cxl_collective_barrier(g_cxl.world_size);
+            orig_MPI_Barrier(comm);
 
             LOG_DEBUG("MPI_Allreduce[%d]: CXL optimized SUM (%zu bytes)\n", call_num, total_size);
             return MPI_SUCCESS;
@@ -2041,17 +2034,20 @@ int MPI_Allgather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
     if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD && send_bytes <= 4096 &&
         g_cxl.world_size <= 64) {
 
+        LOAD_ORIGINAL(MPI_Barrier);
+
         // Each rank allocates its own contribution buffer
         void *my_buf = allocate_cxl_memory(send_bytes);
         if (my_buf) {
-            // Copy my contribution to shared memory
-            memcpy(my_buf, sendbuf, send_bytes);
+            // Copy my contribution to shared memory (use safe copy for CXL)
+            cxl_safe_memcpy(my_buf, sendbuf, send_bytes);
+            cxl_flush_range(my_buf, send_bytes);
 
             // Register my buffer location
             cxl_collective_register_buffer(g_cxl.my_rank, my_buf);
 
-            // Barrier to ensure all ranks have registered and data is visible
-            cxl_collective_barrier(g_cxl.world_size);
+            // Use MPI_Barrier for reliable synchronization across nodes
+            orig_MPI_Barrier(comm);
 
             // Each rank reads all contributions in order
             for (int r = 0; r < g_cxl.world_size; r++) {
@@ -2062,11 +2058,11 @@ int MPI_Allgather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
                     goto allgather_fallback;
                 }
                 void *dst = (char *)recvbuf + r * send_bytes;
-                memcpy(dst, their_buf, send_bytes);
+                cxl_safe_memcpy(dst, their_buf, send_bytes);
             }
 
             // Final barrier before returning
-            cxl_collective_barrier(g_cxl.world_size);
+            orig_MPI_Barrier(comm);
 
             LOG_DEBUG("MPI_Allgather[%d]: CXL optimized (%zu bytes each)\n", call_num, send_bytes);
             return MPI_SUCCESS;
@@ -2099,18 +2095,21 @@ int MPI_Alltoall(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
         int n = g_cxl.world_size;
         size_t row_size = send_bytes * n;  // Total data this rank sends
 
+        LOAD_ORIGINAL(MPI_Barrier);
+
         // Each rank allocates buffer for its outgoing row
         void *my_row = allocate_cxl_memory(row_size);
 
         if (my_row) {
-            // Copy my send data to shared memory
-            memcpy(my_row, sendbuf, row_size);
+            // Copy my send data to shared memory (use safe copy for CXL)
+            cxl_safe_memcpy(my_row, sendbuf, row_size);
+            cxl_flush_range(my_row, row_size);
 
             // Register my row buffer
             cxl_collective_register_buffer(g_cxl.my_rank, my_row);
 
-            // Barrier to ensure all ranks have registered and data is visible
-            cxl_collective_barrier(n);
+            // Use MPI_Barrier for reliable synchronization across nodes
+            orig_MPI_Barrier(comm);
 
             // Read my column - element [r][my_rank] from each rank r
             for (int r = 0; r < n; r++) {
@@ -2123,11 +2122,11 @@ int MPI_Alltoall(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
                 // Element [r][my_rank] = data rank r sends to me
                 void *src = (char *)their_row + g_cxl.my_rank * send_bytes;
                 void *dst = (char *)recvbuf + r * recv_bytes;
-                memcpy(dst, src, recv_bytes);
+                cxl_safe_memcpy(dst, src, recv_bytes);
             }
 
             // Final barrier before returning
-            cxl_collective_barrier(n);
+            orig_MPI_Barrier(comm);
 
             int cxl_num = atomic_fetch_add(&cxl_alltoall_count, 1);
             LOG_DEBUG("MPI_Alltoall[%d]: CXL direct #%d (%zu bytes per rank)\n",
@@ -2157,18 +2156,21 @@ int MPI_Gather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
         size_t send_bytes = (size_t)sendcount * send_size;
 
         if (send_bytes <= 4096) {
+            LOAD_ORIGINAL(MPI_Barrier);
+
             // Each rank allocates its own contribution buffer
             void *my_buf = allocate_cxl_memory(send_bytes);
 
             if (my_buf) {
-                // Copy my contribution to shared memory
-                memcpy(my_buf, sendbuf, send_bytes);
+                // Copy my contribution to shared memory (use safe copy for CXL)
+                cxl_safe_memcpy(my_buf, sendbuf, send_bytes);
+                cxl_flush_range(my_buf, send_bytes);
 
                 // Register my buffer location
                 cxl_collective_register_buffer(g_cxl.my_rank, my_buf);
 
-                // Barrier to ensure all ranks have registered
-                cxl_collective_barrier(g_cxl.world_size);
+                // Use MPI_Barrier for reliable synchronization across nodes
+                orig_MPI_Barrier(comm);
 
                 // Root reads all contributions
                 if (g_cxl.my_rank == root) {
@@ -2180,12 +2182,12 @@ int MPI_Gather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
                             goto gather_fallback;
                         }
                         void *dst = (char *)recvbuf + r * send_bytes;
-                        memcpy(dst, their_buf, send_bytes);
+                        cxl_safe_memcpy(dst, their_buf, send_bytes);
                     }
                 }
 
                 // Final barrier before returning
-                cxl_collective_barrier(g_cxl.world_size);
+                orig_MPI_Barrier(comm);
 
                 LOG_DEBUG("MPI_Gather[%d]: CXL optimized\n", call_num);
                 return MPI_SUCCESS;
@@ -2216,20 +2218,23 @@ int MPI_Scatter(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
         if (send_bytes <= 4096) {
             size_t total_size = send_bytes * g_cxl.world_size;
 
+            LOAD_ORIGINAL(MPI_Barrier);
+
             // Root allocates buffer and writes all data
             void *root_buf = NULL;
             if (g_cxl.my_rank == root) {
                 root_buf = allocate_cxl_memory(total_size);
                 if (root_buf) {
-                    memcpy(root_buf, sendbuf, total_size);
+                    cxl_safe_memcpy(root_buf, sendbuf, total_size);
+                    cxl_flush_range(root_buf, total_size);
                 }
             }
 
             // Root registers its buffer (or NULL for non-root)
             cxl_collective_register_buffer(g_cxl.my_rank, root_buf);
 
-            // Barrier to ensure root has registered
-            cxl_collective_barrier(g_cxl.world_size);
+            // Use MPI_Barrier for reliable synchronization across nodes
+            orig_MPI_Barrier(comm);
 
             // All ranks get root's buffer address and read their portion
             void *scatter_buf = cxl_collective_get_buffer(root);
@@ -2239,10 +2244,10 @@ int MPI_Scatter(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
             }
 
             void *my_slot = (char *)scatter_buf + g_cxl.my_rank * send_bytes;
-            memcpy(recvbuf, my_slot, send_bytes);
+            cxl_safe_memcpy(recvbuf, my_slot, send_bytes);
 
             // Final barrier before returning
-            cxl_collective_barrier(g_cxl.world_size);
+            orig_MPI_Barrier(comm);
 
             LOG_DEBUG("MPI_Scatter[%d]: CXL optimized\n", call_num);
             return MPI_SUCCESS;
