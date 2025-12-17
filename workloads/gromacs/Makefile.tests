@@ -1,0 +1,153 @@
+# Makefile for MPI CXL Shim Tests
+#
+# Usage:
+#   make -f Makefile.tests all      # Build all tests
+#   make -f Makefile.tests clean    # Clean test binaries
+#   make -f Makefile.tests run      # Run tests without CXL shim
+#   make -f Makefile.tests run-cxl  # Run tests with CXL shim
+
+MPICC = mpicc
+CFLAGS = -Wall -O2
+LDFLAGS = -lm
+
+# Test programs
+TESTS = test_onesided test_collectives test_p2p
+
+# CXL Shim library
+SHIM_LIB = mpi_cxl_shim.so
+SHIM_SRC = mpi_cxl_shim.c
+
+# MPI run settings
+MPIRUN = mpirun
+NP = 2
+HOSTS = node0,node1
+
+# CXL settings
+CXL_DAX_PATH ?= /dev/dax0.0
+CXL_SHM_NAME ?= /cxl_mpi_shim
+
+.PHONY: all clean run run-cxl shim
+
+all: $(TESTS)
+
+test_onesided: test_onesided.c
+	$(MPICC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+test_collectives: test_collectives.c
+	$(MPICC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+test_p2p: test_p2p.c
+	$(MPICC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+# Build the CXL shim library
+shim: $(SHIM_LIB)
+
+$(SHIM_LIB): $(SHIM_SRC)
+	gcc -Wall -Wextra -fPIC -shared -o $@ $< -ldl -lpthread -I/usr/lib/x86_64-linux-gnu/openmpi/include
+
+# Run tests without CXL shim (baseline)
+run: $(TESTS)
+	@echo "========================================="
+	@echo " Running tests WITHOUT CXL shim"
+	@echo "========================================="
+	@echo ""
+	@echo "--- Point-to-Point Tests ---"
+	$(MPIRUN) -np $(NP) ./test_p2p
+	@echo ""
+	@echo "--- Collective Tests ---"
+	$(MPIRUN) -np $(NP) ./test_collectives
+	@echo ""
+	@echo "--- One-Sided Tests ---"
+	$(MPIRUN) -np $(NP) ./test_onesided
+
+# Run tests with CXL shim
+run-cxl: $(TESTS) $(SHIM_LIB)
+	@echo "========================================="
+	@echo " Running tests WITH CXL shim"
+	@echo " DAX: $(CXL_DAX_PATH)"
+	@echo "========================================="
+	@echo ""
+	@echo "--- Point-to-Point Tests ---"
+	$(MPIRUN) -np $(NP) --host $(HOSTS) \
+		-x LD_PRELOAD=$(PWD)/$(SHIM_LIB) \
+		-x CXL_DAX_PATH=$(CXL_DAX_PATH) \
+		./test_p2p
+	@echo ""
+	@echo "--- Collective Tests ---"
+	$(MPIRUN) -np $(NP) --host $(HOSTS) \
+		-x LD_PRELOAD=$(PWD)/$(SHIM_LIB) \
+		-x CXL_DAX_PATH=$(CXL_DAX_PATH) \
+		./test_collectives
+	@echo ""
+	@echo "--- One-Sided Tests ---"
+	$(MPIRUN) -np $(NP) --host $(HOSTS) \
+		-x LD_PRELOAD=$(PWD)/$(SHIM_LIB) \
+		-x CXL_DAX_PATH=$(CXL_DAX_PATH) \
+		./test_onesided
+
+# Run with shared memory (for testing without DAX)
+run-shm: $(TESTS) $(SHIM_LIB)
+	@echo "========================================="
+	@echo " Running tests WITH CXL shim (SHM mode)"
+	@echo "========================================="
+	@echo ""
+	$(MPIRUN) -np $(NP) \
+		-x LD_PRELOAD=$(PWD)/$(SHIM_LIB) \
+		-x CXL_SHM_NAME=$(CXL_SHM_NAME) \
+		./test_p2p
+	@echo ""
+	$(MPIRUN) -np $(NP) \
+		-x LD_PRELOAD=$(PWD)/$(SHIM_LIB) \
+		-x CXL_SHM_NAME=$(CXL_SHM_NAME) \
+		./test_collectives
+
+# Individual test targets
+run-p2p: test_p2p $(SHIM_LIB)
+	$(MPIRUN) -np $(NP) --host $(HOSTS) \
+		-x LD_PRELOAD=$(PWD)/$(SHIM_LIB) \
+		-x CXL_DAX_PATH=$(CXL_DAX_PATH) \
+		./test_p2p
+
+run-coll: test_collectives $(SHIM_LIB)
+	$(MPIRUN) -np $(NP) --host $(HOSTS) \
+		-x LD_PRELOAD=$(PWD)/$(SHIM_LIB) \
+		-x CXL_DAX_PATH=$(CXL_DAX_PATH) \
+		./test_collectives
+
+run-rma: test_onesided $(SHIM_LIB)
+	$(MPIRUN) -np $(NP) --host $(HOSTS) \
+		-x LD_PRELOAD=$(PWD)/$(SHIM_LIB) \
+		-x CXL_DAX_PATH=$(CXL_DAX_PATH) \
+		./test_onesided
+
+# Debug mode with verbose output
+run-debug: $(TESTS) $(SHIM_LIB)
+	$(MPIRUN) -np $(NP) --host $(HOSTS) \
+		-x LD_PRELOAD=$(PWD)/$(SHIM_LIB) \
+		-x CXL_DAX_PATH=$(CXL_DAX_PATH) \
+		-x CXL_LOG_LEVEL=3 \
+		./test_p2p
+
+clean:
+	rm -f $(TESTS) $(SHIM_LIB)
+
+help:
+	@echo "MPI CXL Shim Test Suite"
+	@echo ""
+	@echo "Targets:"
+	@echo "  all        - Build all test programs"
+	@echo "  shim       - Build the CXL shim library"
+	@echo "  run        - Run tests without CXL shim"
+	@echo "  run-cxl    - Run tests with CXL shim (DAX mode)"
+	@echo "  run-shm    - Run tests with CXL shim (shared memory mode)"
+	@echo "  run-p2p    - Run only point-to-point tests"
+	@echo "  run-coll   - Run only collective tests"
+	@echo "  run-rma    - Run only one-sided (RMA) tests"
+	@echo "  run-debug  - Run with verbose debug output"
+	@echo "  clean      - Remove built files"
+	@echo ""
+	@echo "Variables:"
+	@echo "  NP=N           - Number of processes (default: 2)"
+	@echo "  HOSTS=h1,h2    - Comma-separated host list"
+	@echo "  CXL_DAX_PATH   - Path to DAX device (default: /dev/dax0.0)"
+	@echo "  CXL_SHM_NAME   - Shared memory name (default: /cxl_mpi_shim)"

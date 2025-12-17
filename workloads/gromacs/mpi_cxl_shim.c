@@ -860,8 +860,8 @@ static int cxl_send(const void *buf, size_t data_size, int dest, int tag, int so
 
     // Decide between inline data and remotable pointer
     if (data_size <= CXL_MSG_MAX_INLINE_SIZE) {
-        // Inline small messages
-        memcpy(msg->inline_data, buf, data_size);
+        // Inline small messages (use safe copy for CXL memory)
+        cxl_safe_memcpy(msg->inline_data, buf, data_size);
         msg->is_inline = 1;
         msg->data_rptr = CXL_RPTR_NULL;
         LOG_TRACE("CXL send: inlined %zu bytes to rank %d slot %lu\n", data_size, dest, slot);
@@ -872,7 +872,7 @@ static int cxl_send(const void *buf, size_t data_size, int dest, int tag, int so
             LOG_WARN("CXL send: failed to allocate %zu bytes for large message\n", data_size);
             return -1;
         }
-        memcpy(cxl_buf, buf, data_size);
+        cxl_safe_memcpy(cxl_buf, buf, data_size);
         msg->data_rptr = ptr_to_rptr(cxl_buf);
         msg->is_inline = 0;
         LOG_TRACE("CXL send: %zu bytes via rptr=0x%lx to rank %d slot %lu\n",
@@ -939,14 +939,14 @@ static int cxl_recv(void *buf, size_t max_size, int source, int tag, size_t *act
         // Memory barrier to ensure we see all data
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
-        // Copy data
+        // Copy data (use safe copy for CXL memory)
         size_t copy_size = MIN(msg->data_size, max_size);
         if (msg->is_inline) {
-            memcpy(buf, msg->inline_data, copy_size);
+            cxl_safe_memcpy(buf, msg->inline_data, copy_size);
         } else {
             void *src_ptr = rptr_to_ptr(msg->data_rptr);
             if (src_ptr) {
-                memcpy(buf, src_ptr, copy_size);
+                cxl_safe_memcpy(buf, src_ptr, copy_size);
             } else {
                 LOG_ERROR("CXL recv: invalid rptr 0x%lx\n", msg->data_rptr);
                 atomic_store(&msg->state, CXL_MSG_READY);  // Put it back
@@ -1417,7 +1417,7 @@ static cxl_window_t *register_cxl_window(MPI_Win win, void *base, size_t size,
                 // Allocate CXL memory for this window
                 void *cxl_base = allocate_cxl_memory(size);
                 if (cxl_base) {
-                    memcpy(cxl_base, base, size);
+                    cxl_safe_memcpy(cxl_base, base, size);
                     rank_info->base_rptr = ptr_to_rptr(cxl_base);
                 } else {
                     rank_info->base_rptr = CXL_RPTR_NULL;
@@ -1602,8 +1602,8 @@ int MPI_Put(const void *origin_addr, int origin_count, MPI_Datatype origin_datat
                 size_t origin_bytes = (size_t)origin_count * origin_size;
                 void *target_addr = (char *)target_base + target_disp * cxl_win->shm->disp_unit;
 
-                // Direct memory copy via CXL
-                memcpy(target_addr, origin_addr, origin_bytes);
+                // Direct memory copy via CXL (use safe copy to avoid AVX-512 issues)
+                cxl_safe_memcpy(target_addr, origin_addr, origin_bytes);
 
                 // Memory fence to ensure visibility
                 __atomic_thread_fence(__ATOMIC_RELEASE);
@@ -1654,8 +1654,8 @@ int MPI_Get(void *origin_addr, int origin_count, MPI_Datatype origin_datatype,
                 // Memory fence before reading
                 __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
-                // Direct memory copy via CXL
-                memcpy(origin_addr, target_addr, origin_bytes);
+                // Direct memory copy via CXL (use safe copy to avoid AVX-512 issues)
+                cxl_safe_memcpy(origin_addr, target_addr, origin_bytes);
 
                 int cxl_num = atomic_fetch_add(&cxl_get_count, 1);
                 LOG_DEBUG("MPI_Get[%d]: CXL direct get #%d (%zu bytes from rank %d @ offset %ld)\n",
