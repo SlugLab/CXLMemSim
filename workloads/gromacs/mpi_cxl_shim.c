@@ -1130,7 +1130,7 @@ int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
     if (g_cxl.initialized && getenv("CXL_SHIM_COPY_SEND")) {
         void *cxl_buf = allocate_cxl_memory(total_size);
         if (cxl_buf) {
-            memcpy(cxl_buf, buf, total_size);
+            cxl_safe_memcpy(cxl_buf, buf, total_size);
             send_buf = cxl_buf;
             LOG_TRACE("MPI_Send[%d]: copied %zu bytes to CXL at %p (rptr=0x%lx)\n",
                       call_num, total_size, cxl_buf, ptr_to_rptr(cxl_buf));
@@ -1199,7 +1199,7 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
     int ret = orig_MPI_Recv(recv_buf, count, datatype, source, tag, comm, status);
 
     if (cxl_buf && ret == MPI_SUCCESS) {
-        memcpy(buf, cxl_buf, max_size);
+        cxl_safe_memcpy(buf, cxl_buf, max_size);
         LOG_TRACE("MPI_Recv[%d]: copied %zu bytes from CXL\n", call_num, max_size);
     }
 
@@ -1245,7 +1245,7 @@ int MPI_Isend(const void *buf, int count, MPI_Datatype datatype, int dest, int t
     if (g_cxl.initialized && getenv("CXL_SHIM_COPY_SEND")) {
         void *cxl_buf = allocate_cxl_memory(total_size);
         if (cxl_buf) {
-            memcpy(cxl_buf, buf, total_size);
+            cxl_safe_memcpy(cxl_buf, buf, total_size);
             send_buf = cxl_buf;
             LOG_TRACE("MPI_Isend[%d]: copied %zu bytes to CXL at %p\n",
                       call_num, total_size, cxl_buf);
@@ -1393,10 +1393,18 @@ static cxl_window_t *register_cxl_window(MPI_Win win, void *base, size_t size,
 
     // Allocate shared memory for window metadata if CXL is available
     if (g_cxl.initialized && g_cxl.cxl_comm_enabled) {
-        cxl_win->shm = (cxl_win_shm_t *)allocate_cxl_memory(sizeof(cxl_win_shm_t));
-        if (cxl_win->shm) {
-            // Initialize on first rank
-            if (rank == 0) {
+        LOAD_ORIGINAL(MPI_Bcast);
+        LOAD_ORIGINAL(MPI_Barrier);
+
+        // Only rank 0 allocates the shared window metadata structure
+        // Then broadcast the rptr to all ranks so they share the same structure
+        cxl_rptr_t shm_rptr = CXL_RPTR_NULL;
+
+        if (rank == 0) {
+            cxl_win->shm = (cxl_win_shm_t *)allocate_cxl_memory(sizeof(cxl_win_shm_t));
+            if (cxl_win->shm) {
+                shm_rptr = ptr_to_rptr(cxl_win->shm);
+                // Initialize the shared structure
                 cxl_win->shm->magic = CXL_WIN_MAGIC;
                 cxl_win->shm->win_id = cxl_win->win_id;
                 atomic_store(&cxl_win->shm->ref_count, 0);
@@ -1405,37 +1413,56 @@ static cxl_window_t *register_cxl_window(MPI_Win win, void *base, size_t size,
                 cxl_win->shm->disp_unit = 1;
                 atomic_store(&cxl_win->shm->barrier_count, 0);
                 atomic_store(&cxl_win->shm->barrier_sense, 0);
+                // Initialize all rank info entries
+                for (int r = 0; r < comm_size && r < CXL_MAX_RANKS; r++) {
+                    cxl_win->shm->ranks[r].base_rptr = CXL_RPTR_NULL;
+                    cxl_win->shm->ranks[r].size = 0;
+                    cxl_win->shm->ranks[r].owner_rank = r;
+                    atomic_store(&cxl_win->shm->ranks[r].lock_count, 0);
+                    atomic_store(&cxl_win->shm->ranks[r].exclusive_lock, (uint32_t)-1);
+                    atomic_store(&cxl_win->shm->ranks[r].fence_counter, 0);
+                    atomic_store(&cxl_win->shm->ranks[r].sync_state, CXL_WIN_UNLOCKED);
+                }
+                __atomic_thread_fence(__ATOMIC_SEQ_CST);
             }
+        }
 
+        // Broadcast the shm rptr from rank 0 to all ranks
+        orig_MPI_Bcast(&shm_rptr, sizeof(shm_rptr), MPI_BYTE, 0, comm);
+
+        // All ranks convert rptr to local pointer
+        if (shm_rptr != CXL_RPTR_NULL) {
+            cxl_win->shm = (cxl_win_shm_t *)rptr_to_ptr(shm_rptr);
+        }
+
+        if (cxl_win->shm) {
+            // Now all ranks share the same shm structure
             // Register this rank's window region
             cxl_win_rank_info_t *rank_info = &cxl_win->shm->ranks[rank];
 
-            // If base is in CXL memory, use it directly; otherwise copy
+            // Only use CXL acceleration if base is already in CXL memory
+            // Copying non-CXL buffers would break MPI semantics since
+            // Put/Get/Accumulate would modify the copy, not the original
             if (is_cxl_ptr(base)) {
                 rank_info->base_rptr = ptr_to_rptr(base);
+                rank_info->size = size;
+                __atomic_thread_fence(__ATOMIC_SEQ_CST);
+                atomic_fetch_add(&cxl_win->shm->ref_count, 1);
+                cxl_win->cxl_enabled = true;
             } else {
-                // Allocate CXL memory for this window
-                void *cxl_base = allocate_cxl_memory(size);
-                if (cxl_base) {
-                    cxl_safe_memcpy(cxl_base, base, size);
-                    rank_info->base_rptr = ptr_to_rptr(cxl_base);
-                } else {
-                    rank_info->base_rptr = CXL_RPTR_NULL;
-                }
+                // Non-CXL buffer - disable CXL acceleration for this window
+                rank_info->base_rptr = CXL_RPTR_NULL;
+                rank_info->size = 0;
+                cxl_win->cxl_enabled = false;
+                LOG_DEBUG("Window base %p is not in CXL memory, disabling CXL acceleration\n", base);
             }
 
-            rank_info->size = size;
-            rank_info->owner_rank = rank;
-            atomic_store(&rank_info->lock_count, 0);
-            atomic_store(&rank_info->exclusive_lock, (uint32_t)-1);
-            atomic_store(&rank_info->fence_counter, 0);
-            atomic_store(&rank_info->sync_state, CXL_WIN_UNLOCKED);
+            // Barrier to ensure all ranks have registered before proceeding
+            orig_MPI_Barrier(comm);
 
-            atomic_fetch_add(&cxl_win->shm->ref_count, 1);
-            cxl_win->cxl_enabled = (rank_info->base_rptr != CXL_RPTR_NULL);
-
-            LOG_DEBUG("Registered CXL window %u for rank %d: base_rptr=0x%lx, size=%zu\n",
-                      cxl_win->win_id, rank, rank_info->base_rptr, size);
+            LOG_DEBUG("Registered CXL window %u for rank %d: shm_rptr=0x%lx, base_rptr=0x%lx, size=%zu\n",
+                      cxl_win->win_id, rank, (unsigned long)shm_rptr,
+                      (unsigned long)rank_info->base_rptr, size);
         }
     }
 
@@ -1740,26 +1767,22 @@ int MPI_Win_fence(int assert, MPI_Win win) {
     cxl_window_t *cxl_win = find_cxl_window(win);
 
     if (cxl_win && cxl_win->cxl_enabled && cxl_win->shm) {
-        // Full memory barrier
+        // Full memory barrier to ensure all CXL writes are visible
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
-        // Increment local fence counter
+        // Track fence epochs for debugging
         cxl_win_rank_info_t *my_info = &cxl_win->shm->ranks[cxl_win->my_rank];
         uint64_t my_fence = atomic_fetch_add(&my_info->fence_counter, 1) + 1;
-
-        // Increment global fence
         atomic_fetch_add(&cxl_win->shm->global_fence, 1);
 
-        // Wait for all ranks to reach this fence (barrier)
-        cxl_barrier(cxl_win->shm, cxl_win->my_rank, cxl_win->comm_size);
+        // Use MPI fence for synchronization - it will barrier internally
+        int ret = orig_MPI_Win_fence(assert, win);
 
         // Another memory barrier after synchronization
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
         LOG_DEBUG("MPI_Win_fence[%d]: CXL fence completed (epoch=%lu)\n", call_num, my_fence);
-
-        // Still call original for compatibility
-        return orig_MPI_Win_fence(assert, win);
+        return ret;
     }
 
     return orig_MPI_Win_fence(assert, win);
@@ -1936,7 +1959,9 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype da
     LOAD_ORIGINAL(MPI_Allreduce);
 
     // For small allreduce on COMM_WORLD with SUM, try CXL optimization
+    // Note: Skip if sendbuf is MPI_IN_PLACE to avoid complexity
     if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD &&
+        sendbuf != MPI_IN_PLACE &&
         op == MPI_SUM && total_size <= 4096 && g_cxl.world_size <= 64 &&
         (datatype == MPI_DOUBLE || datatype == MPI_FLOAT || datatype == MPI_INT ||
          datatype == MPI_LONG || datatype == MPI_LONG_LONG)) {
@@ -2031,8 +2056,10 @@ int MPI_Allgather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
     LOAD_ORIGINAL(MPI_Allgather);
 
     // CXL-optimized allgather for COMM_WORLD
-    if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD && send_bytes <= 4096 &&
-        g_cxl.world_size <= 64) {
+    // Skip MPI_IN_PLACE to avoid complexity
+    if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD &&
+        sendbuf != MPI_IN_PLACE &&
+        send_bytes <= 4096 && g_cxl.world_size <= 64) {
 
         LOAD_ORIGINAL(MPI_Barrier);
 
