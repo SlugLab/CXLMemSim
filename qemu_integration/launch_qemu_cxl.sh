@@ -11,11 +11,11 @@ DISK_IMAGE=${DISK_IMAGE:-plucky-server-cloudimg-amd64.img}
 export CXL_TRANSPORT_MODE=shm
 export CXL_HOST_ID=0
 exec $QEMU_BINARY \
-    --enable-kvm -cpu qemu64,+xsave,+rdtscp,+avx,+avx2,+sse4.1,+sse4.2,+avx512f,+avx512dq,+avx512ifma,+avx512cd,+avx512bw,+avx512vl,+avx512vbmi,+clflushopt  \
-    -m 16G,maxmem=32G,slots=8 \
+    --enable-kvm -cpu host  \
+    -m 160G,maxmem=200G,slots=8 \
     -smp 4 \
     -M q35,cxl=on \
-    -kernel ./bzImage \
+    -kernel /home/victoryang00/open-gpu-kernel-modules/bzImage \
     -append "root=/dev/sda rw console=ttyS0,115200 nokaslr" \
     -drive file=./qemu.img,index=0,media=disk,format=raw \
     -netdev tap,id=net0,ifname=tap0,script=no,downscript=no \
@@ -31,4 +31,4 @@ exec $QEMU_BINARY \
     -object memory-backend-file,id=cxl-mem1,share=on,mem-path=/dev/shm/cxlmemsim_shared,size=1G \
     -object memory-backend-file,id=cxl-lsa1,share=on,mem-path=/dev/shm/lsa0.raw,size=1G \
     -M cxl-fmw.0.targets.0=cxl.1,cxl-fmw.0.size=4G \
-    -nographic
+    -nographic -device vfio-pci,host=0000:b0:00.0,bus=pcie.0,id=gpu0,x-pci-vendor-id=0x10de
