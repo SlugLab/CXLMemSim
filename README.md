@@ -114,3 +114,203 @@ echo "Bridge $BR ready on host $(hostname)"
 ```
 for every host and edit the qemu's ip with `/usr/local/bin/setup*` and `/etc/hostname`.
 
+# CXL Type 2 GPU Emulation
+
+This module enables GPU compute through CXL Type 2 device emulation, allowing a guest VM to access the host's NVIDIA GPU via the CXL.cache coherency protocol.
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              GUEST VM                                        │
+│  ┌─────────────────┐    ┌──────────────────────────────────────────────┐    │
+│  │  CUDA Application │    │           Guest libcuda.so Shim              │    │
+│  │  (cuda_test.c)   │───▶│  - Intercepts CUDA Driver API calls          │    │
+│  │                  │    │  - Translates to CXL GPU command protocol    │    │
+│  └─────────────────┘    │  - Maps BAR2 via /sys/bus/pci/.../resource2  │    │
+│                          └──────────────────┬───────────────────────────┘    │
+│                                             │ MMIO Read/Write                │
+│  ┌──────────────────────────────────────────▼───────────────────────────┐    │
+│  │                    CXL Type 2 PCI Device                              │    │
+│  │                    Vendor: 0x8086  Device: 0x0d92                     │    │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │    │
+│  │  │    BAR0     │  │    BAR2     │  │    BAR4     │  │    BAR6     │  │    │
+│  │  │  Component  │  │ Cache/GPU   │  │   Device    │  │   MSI-X     │  │    │
+│  │  │  Registers  │  │  Command    │  │   Memory    │  │             │  │    │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│                                             │                                 │
+│  ┌──────────────────────────────────────────▼───────────────────────────┐    │
+│  │              Linux Kernel: cxl_type2_accel.ko                         │    │
+│  │  - Binds to CXL Type 2 PCI device                                     │    │
+│  │  - Configures CXL.cache and CXL.mem capabilities                      │    │
+│  │  - Manages cache coherency state                                      │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                              PCIe/CXL Bus
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              QEMU HOST                                       │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │                    CXL Type 2 Device Emulation                        │   │
+│  │                    (hw/cxl/cxl_type2.c)                               │   │
+│  │                                                                       │   │
+│  │  ┌─────────────────────────────────────────────────────────────────┐ │   │
+│  │  │                   GPU Command Interface                          │ │   │
+│  │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐   │ │   │
+│  │  │  │ Command Regs │  │ Result Regs  │  │    Data Buffer       │   │ │   │
+│  │  │  │ 0x00-0x3F    │  │ 0x80-0x9F    │  │    0x1000-0xFFFF     │   │ │   │
+│  │  │  │              │  │              │  │    (60KB for PTX,    │   │ │   │
+│  │  │  │ CMD, PARAMS  │  │ RESULT0-3    │  │     memcpy data)     │   │ │   │
+│  │  │  └──────────────┘  └──────────────┘  └──────────────────────┘   │ │   │
+│  │  └────────────────────────────┬────────────────────────────────────┘ │   │
+│  │                               │                                       │   │
+│  │  ┌────────────────────────────▼────────────────────────────────────┐ │   │
+│  │  │                   Coherency Engine                               │ │   │
+│  │  │  - Cache line tracking (MESI-like states)                        │ │   │
+│  │  │  - Snoop request handling                                        │ │   │
+│  │  │  - Writeback management                                          │ │   │
+│  │  └────────────────────────────┬────────────────────────────────────┘ │   │
+│  │                               │                                       │   │
+│  │  ┌────────────────────────────▼────────────────────────────────────┐ │   │
+│  │  │                   hetGPU Backend                                 │ │   │
+│  │  │                   (hw/cxl/cxl_hetgpu.c)                          │ │   │
+│  │  │  - Loads libcuda.so via dlopen()                                 │ │   │
+│  │  │  - Translates commands to real CUDA API calls                    │ │   │
+│  │  │  - Manages GPU context, memory, kernel launches                  │ │   │
+│  │  └────────────────────────────┬────────────────────────────────────┘ │   │
+│  └───────────────────────────────│────────────────────────────────────┘   │
+│                                  │ dlsym() calls                          │
+│  ┌───────────────────────────────▼────────────────────────────────────┐   │
+│  │              /usr/lib/x86_64-linux-gnu/libcuda.so                   │   │
+│  │              (NVIDIA CUDA Driver Library)                           │   │
+│  │  cuInit, cuCtxCreate, cuMemAlloc, cuLaunchKernel, ...               │   │
+│  └───────────────────────────────┬────────────────────────────────────┘   │
+│                                  │                                         │
+│  ┌───────────────────────────────▼────────────────────────────────────┐   │
+│  │                    NVIDIA GPU Hardware                              │   │
+│  │                    (e.g., RTX 3090, A100)                           │   │
+│  └────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## GPU Command Protocol
+
+The guest communicates with the CXL Type 2 device via MMIO registers in BAR2:
+
+| Offset | Register | Description |
+|--------|----------|-------------|
+| 0x0000 | MAGIC | Magic number: 0x43584C32 ("CXL2") |
+| 0x0004 | VERSION | Interface version |
+| 0x0008 | STATUS | Device status (READY, BUSY, ERROR) |
+| 0x0010 | CMD | Command register - write triggers execution |
+| 0x0014 | CMD_STATUS | Command status (IDLE, RUNNING, COMPLETE) |
+| 0x0018 | CMD_RESULT | Result/error code |
+| 0x0040-0x78 | PARAM0-7 | Command parameters |
+| 0x0080-0x98 | RESULT0-3 | Command results |
+| 0x0140 | TOTAL_MEM | Total GPU memory |
+| 0x1000-0xFFFF | DATA | Data buffer for PTX, memcpy |
+
+## Supported Commands
+
+| Command | Code | Description |
+|---------|------|-------------|
+| CMD_INIT | 0x01 | Initialize GPU |
+| CMD_GET_DEVICE_COUNT | 0x02 | Get number of GPUs |
+| CMD_CTX_CREATE | 0x10 | Create CUDA context |
+| CMD_CTX_SYNC | 0x12 | Synchronize context |
+| CMD_MEM_ALLOC | 0x20 | Allocate device memory |
+| CMD_MEM_FREE | 0x21 | Free device memory |
+| CMD_MEM_COPY_HTOD | 0x22 | Copy host to device |
+| CMD_MEM_COPY_DTOH | 0x23 | Copy device to host |
+| CMD_MODULE_LOAD_PTX | 0x30 | Load PTX module |
+| CMD_FUNC_GET | 0x32 | Get kernel function |
+| CMD_LAUNCH_KERNEL | 0x40 | Launch GPU kernel |
+
+## Data Flow Example: cuMemAlloc
+
+```
+Guest                     QEMU CXL Type 2              Host GPU
+  │                             │                          │
+  │ 1. Write size to PARAM0     │                          │
+  │ ──────────────────────────▶ │                          │
+  │                             │                          │
+  │ 2. Write CMD_MEM_ALLOC      │                          │
+  │ ──────────────────────────▶ │                          │
+  │                             │ 3. Call cuMemAlloc_v2()  │
+  │                             │ ───────────────────────▶ │
+  │                             │                          │
+  │                             │ 4. Return device pointer │
+  │                             │ ◀─────────────────────── │
+  │                             │                          │
+  │                             │ 5. Store in RESULT0      │
+  │ 6. Poll CMD_STATUS          │                          │
+  │ ──────────────────────────▶ │                          │
+  │                             │                          │
+  │ 7. Read RESULT0 (dev ptr)   │                          │
+  │ ◀────────────────────────── │                          │
+```
+
+## Setup Instructions
+
+### 1. Build QEMU with CXL Type 2 Support
+```bash
+cd lib/qemu/build
+meson setup --reconfigure
+ninja
+```
+
+### 2. Build Guest libcuda Shim
+```bash
+cd qemu_integration/guest_libcuda
+make
+```
+
+### 3. Load Kernel Modules (in Guest)
+```bash
+modprobe cxl_core
+modprobe cxl_port
+modprobe cxl_cache
+modprobe cxl_type2_accel
+```
+
+### 4. Run CUDA Applications (in Guest)
+```bash
+# Set library path to use the CXL shim instead of real libcuda
+LD_LIBRARY_PATH=/path/to/guest_libcuda ./your_cuda_app
+
+# Enable debug logging
+CXL_CUDA_DEBUG=1 LD_LIBRARY_PATH=. ./cuda_test
+```
+
+## QEMU Command Line Options
+
+```bash
+-device cxl-type2,id=cxl-gpu0,\
+    cache-size=128M,\           # CXL.cache size
+    mem-size=4G,\               # Device-attached memory
+    hetgpu-lib=/path/to/libcuda.so,\  # CUDA library path
+    hetgpu-device=0             # GPU device index
+```
+
+## CXL.cache Coherency
+
+The CXL Type 2 device implements CPU-GPU cache coherency:
+
+```
+    CPU Cache                  CXL Type 2 Device
+        │                            │
+        │  ◀─── Snoop Request ────── │  (GPU wants exclusive access)
+        │                            │
+        │  ──── Snoop Response ────▶ │  (CPU provides data/invalidates)
+        │                            │
+        │  ◀─── Writeback ────────── │  (GPU writes back dirty data)
+        │                            │
+```
+
+This enables:
+- Zero-copy data sharing between CPU and GPU
+- Coherent memory regions visible to both processors
+- Reduced memory copy overhead for GPU compute
