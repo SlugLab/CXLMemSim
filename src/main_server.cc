@@ -15,6 +15,7 @@
 #include "policy.h"
 #include "shared_memory_manager.h"
 #include "../include/shm_communication.h"
+#include "../include/cxl_backend.h"
 #include <cerrno>
 #include <cxxopts.hpp>
 #include <spdlog/cfg/env.h>
@@ -93,7 +94,8 @@ struct BackInvalidationEntry {
 // Communication mode enum
 enum class CommMode {
     TCP,
-    SHM  // Shared Memory via /dev/shm
+    SHM,      // Shared Memory via /dev/shm (ring buffer based)
+    PGAS_SHM  // PGAS Shared Memory (lock-free slots for cxl_backend.h clients)
 };
 
 // Thread-per-connection server class
@@ -108,7 +110,14 @@ private:
     // Communication mode
     CommMode comm_mode;
     std::unique_ptr<ShmCommunicationManager> shm_comm_manager;
-    
+
+    // PGAS SHMEM backend state (for cxl_backend.h protocol)
+    std::string pgas_shm_name_;
+    int pgas_shm_fd_;
+    cxl_shm_header_t* pgas_shm_header_;
+    void* pgas_memory_;
+    size_t pgas_memory_size_;
+
     // Shared memory manager for real memory allocation
     std::unique_ptr<SharedMemoryManager> shm_manager;
     std::string backing_file_;
@@ -142,14 +151,17 @@ private:
     std::atomic<uint64_t> back_invalidations{0};
     
 public:
-    ThreadPerConnectionServer(int port, CXLController* ctrl, size_t capacity_mb, 
-                            const std::string& backing_file = "", CommMode mode = CommMode::TCP)
-        : port(port), controller(ctrl), running(true), next_thread_id(0), 
-          backing_file_(backing_file), comm_mode(mode) {
+    ThreadPerConnectionServer(int port, CXLController* ctrl, size_t capacity_mb,
+                            const std::string& backing_file = "", CommMode mode = CommMode::TCP,
+                            const std::string& pgas_shm_name = "/cxlmemsim_pgas")
+        : port(port), controller(ctrl), running(true), next_thread_id(0),
+          backing_file_(backing_file), comm_mode(mode),
+          pgas_shm_name_(pgas_shm_name), pgas_shm_fd_(-1),
+          pgas_shm_header_(nullptr), pgas_memory_(nullptr), pgas_memory_size_(0) {
         congestion_info.active_requests = 0;
         congestion_info.total_bandwidth_used = 0;
         congestion_info.last_reset = std::chrono::steady_clock::now();
-        
+
         // Initialize shared memory manager
         if (!backing_file_.empty()) {
             SPDLOG_INFO("Using backing file for memory: {}", backing_file_);
@@ -167,7 +179,13 @@ public:
     // Shared memory mode methods
     void run_shm_mode();
     void handle_shm_requests();
-    
+
+    // PGAS Shared memory mode methods (cxl_backend.h protocol)
+    bool init_pgas_shm(const std::string& shm_name, size_t memory_size);
+    void run_pgas_shm_mode();
+    int poll_pgas_shm_requests();
+    void cleanup_pgas_shm();
+
 private:
     // Coherency protocol methods
     void handle_read_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo& info);
@@ -215,7 +233,8 @@ int main(int argc, char *argv[]) {
         ("p,port", "Server port", cxxopts::value<int>()->default_value("9999"))
         ("t,topology", "Topology file", cxxopts::value<std::string>()->default_value("topology.txt"))
         ("backing-file", "Back CXL memory with a regular file (shared across VMs)", cxxopts::value<std::string>()->default_value(""))
-        ("comm-mode", "Communication mode: tcp or shm (shared memory)", cxxopts::value<std::string>()->default_value("tcp"));
+        ("comm-mode", "Communication mode: tcp, shm, or pgas-shm", cxxopts::value<std::string>()->default_value("tcp"))
+        ("pgas-shm-name", "PGAS shared memory name (for pgas-shm mode)", cxxopts::value<std::string>()->default_value("/cxlmemsim_pgas"));
 
     auto result = options.parse(argc, argv);
     
@@ -233,12 +252,16 @@ int main(int argc, char *argv[]) {
     std::string topology = result["topology"].as<std::string>();
     std::string comm_mode_str = result["comm-mode"].as<std::string>();
     
+    std::string pgas_shm_name = result["pgas-shm-name"].as<std::string>();
+
     // Parse communication mode
     CommMode comm_mode = CommMode::TCP;
     if (comm_mode_str == "shm" || comm_mode_str == "shared_memory") {
         comm_mode = CommMode::SHM;
+    } else if (comm_mode_str == "pgas-shm" || comm_mode_str == "pgas") {
+        comm_mode = CommMode::PGAS_SHM;
     } else if (comm_mode_str != "tcp") {
-        SPDLOG_ERROR("Invalid communication mode: {}. Use 'tcp' or 'shm'", comm_mode_str);
+        SPDLOG_ERROR("Invalid communication mode: {}. Use 'tcp', 'shm', or 'pgas-shm'", comm_mode_str);
         return 1;
     }
     
@@ -272,7 +295,13 @@ int main(int argc, char *argv[]) {
     SPDLOG_INFO("CXLMemSim CXL Type3 Memory Server");
     SPDLOG_INFO("========================================");
     SPDLOG_INFO("Server Configuration:");
-    SPDLOG_INFO("  Communication Mode: {}", comm_mode == CommMode::TCP ? "TCP" : "Shared Memory (/dev/shm)");
+    const char* mode_str = (comm_mode == CommMode::TCP) ? "TCP" :
+                           (comm_mode == CommMode::SHM) ? "Shared Memory (/dev/shm)" :
+                           "PGAS Shared Memory (cxl_backend.h)";
+    SPDLOG_INFO("  Communication Mode: {}", mode_str);
+    if (comm_mode == CommMode::PGAS_SHM) {
+        SPDLOG_INFO("  PGAS SHM Name: {}", pgas_shm_name);
+    }
     SPDLOG_INFO("  Port: {}", port);
     SPDLOG_INFO("  Topology: {}", topology);
     SPDLOG_INFO("  Capacity: {} MB", capacity);
@@ -288,7 +317,7 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, signal_handler);
     
     try {
-        ThreadPerConnectionServer server(port, controller, capacity, backing_file, comm_mode);
+        ThreadPerConnectionServer server(port, controller, capacity, backing_file, comm_mode, pgas_shm_name);
         g_server = &server;
         
         if (!server.start()) {
@@ -330,7 +359,18 @@ bool ThreadPerConnectionServer::start() {
         SPDLOG_INFO("Server using shared memory communication mode");
         return true;
     }
-    
+
+    if (comm_mode == CommMode::PGAS_SHM) {
+        // Initialize PGAS shared memory (cxl_backend.h protocol)
+        pgas_memory_size_ = shm_info.size;
+        if (!init_pgas_shm(pgas_shm_name_, pgas_memory_size_)) {
+            SPDLOG_ERROR("Failed to initialize PGAS shared memory");
+            return false;
+        }
+        SPDLOG_INFO("Server using PGAS shared memory mode (cxl_backend.h protocol)");
+        return true;
+    }
+
     // TCP mode initialization
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
@@ -368,7 +408,12 @@ void ThreadPerConnectionServer::run() {
         run_shm_mode();
         return;
     }
-    
+
+    if (comm_mode == CommMode::PGAS_SHM) {
+        run_pgas_shm_mode();
+        return;
+    }
+
     // TCP mode
     while (running) {
         struct sockaddr_in client_addr;
@@ -398,8 +443,13 @@ void ThreadPerConnectionServer::run() {
 
 void ThreadPerConnectionServer::stop() {
     running = false;
-    close(server_fd);
-    
+
+    if (comm_mode == CommMode::PGAS_SHM) {
+        cleanup_pgas_shm();
+    } else if (comm_mode == CommMode::TCP) {
+        close(server_fd);
+    }
+
     // Print final statistics
     SPDLOG_INFO("Server Statistics:");
     SPDLOG_INFO("  Total Reads: {}", total_reads.load());
@@ -994,4 +1044,281 @@ void ThreadPerConnectionServer::handle_shm_requests() {
         // Send response back
         shm_comm_manager->send_response(client_id, shm_resp);
     }
+}
+
+// ============================================================================
+// PGAS Shared Memory Implementation (cxl_backend.h protocol)
+// Data and metadata stored together: 64-byte data + 64-byte metadata per cacheline
+// ============================================================================
+
+// Memory entry structure (128 bytes total) - matching RDMA server format
+struct PGASMemoryEntry {
+    // Data portion (64 bytes)
+    uint8_t data[64];
+
+    // Metadata portion (64 bytes)
+    struct {
+        uint8_t cache_state;        // MESI state (0=Invalid, 1=Shared, 2=Exclusive, 3=Modified)
+        uint8_t owner_id;           // Current owner host/thread ID
+        uint16_t sharers_bitmap;    // Bitmap of hosts/threads sharing this line
+        uint32_t access_count;      // Number of accesses
+        uint64_t last_access_time;  // Timestamp of last access
+        uint64_t virtual_addr;      // Virtual address mapping
+        uint64_t physical_addr;     // Physical address
+        uint32_t version;           // Version number for coherency
+        uint8_t flags;              // Various flags (dirty, locked, etc.)
+        uint8_t reserved[23];       // Reserved for future use
+    } metadata;
+} __attribute__((packed));
+
+bool ThreadPerConnectionServer::init_pgas_shm(const std::string& shm_name, size_t memory_size) {
+    // Remove existing shared memory
+    shm_unlink(shm_name.c_str());
+
+    // Create shared memory
+    pgas_shm_fd_ = shm_open(shm_name.c_str(), O_CREAT | O_RDWR, 0666);
+    if (pgas_shm_fd_ < 0) {
+        SPDLOG_ERROR("Failed to create PGAS shared memory {}: {}", shm_name, strerror(errno));
+        return false;
+    }
+
+    // Calculate total size: header + slots + memory (data + metadata per cacheline)
+    // Each cacheline needs 128 bytes (64 data + 64 metadata)
+    size_t num_cachelines = memory_size / 64;
+    size_t entry_region_size = num_cachelines * sizeof(PGASMemoryEntry);
+    size_t header_size = CXL_SHM_HEADER_SIZE(CXL_SHM_MAX_SLOTS);
+    size_t total_size = header_size + entry_region_size;
+
+    if (ftruncate(pgas_shm_fd_, total_size) < 0) {
+        SPDLOG_ERROR("Failed to set PGAS shared memory size: {}", strerror(errno));
+        close(pgas_shm_fd_);
+        shm_unlink(shm_name.c_str());
+        return false;
+    }
+
+    // Map shared memory
+    void* mapped = mmap(NULL, total_size, PROT_READ | PROT_WRITE,
+                        MAP_SHARED, pgas_shm_fd_, 0);
+    if (mapped == MAP_FAILED) {
+        SPDLOG_ERROR("Failed to mmap PGAS shared memory: {}", strerror(errno));
+        close(pgas_shm_fd_);
+        shm_unlink(shm_name.c_str());
+        return false;
+    }
+
+    pgas_shm_header_ = (cxl_shm_header_t*)mapped;
+    pgas_memory_ = (char*)mapped + header_size;
+    pgas_memory_size_ = entry_region_size;
+
+    // Initialize header
+    memset(pgas_shm_header_, 0, header_size);
+    pgas_shm_header_->magic = CXL_SHM_MAGIC;
+    pgas_shm_header_->version = CXL_SHM_VERSION;
+    pgas_shm_header_->num_slots = CXL_SHM_MAX_SLOTS;
+    pgas_shm_header_->memory_base = 0;
+    pgas_shm_header_->memory_size = memory_size;  // Original memory size (data only)
+
+    // Initialize memory entries (data + metadata)
+    PGASMemoryEntry* entries = (PGASMemoryEntry*)pgas_memory_;
+    for (size_t i = 0; i < num_cachelines; i++) {
+        memset(&entries[i], 0, sizeof(PGASMemoryEntry));
+        entries[i].metadata.cache_state = 0;  // INVALID
+        entries[i].metadata.owner_id = 0xFF;  // No owner
+        entries[i].metadata.physical_addr = i * 64;  // Cacheline address
+    }
+
+    SPDLOG_INFO("PGAS shared memory initialized:");
+    SPDLOG_INFO("  Name: {}", shm_name);
+    SPDLOG_INFO("  Memory size: {} MB ({} cachelines)", memory_size / (1024*1024), num_cachelines);
+    SPDLOG_INFO("  Total mapped size: {} MB (including metadata)", total_size / (1024*1024));
+    SPDLOG_INFO("  Entry size: {} bytes (64 data + 64 metadata)", sizeof(PGASMemoryEntry));
+
+    return true;
+}
+
+void ThreadPerConnectionServer::run_pgas_shm_mode() {
+    SPDLOG_INFO("Running in PGAS shared memory mode");
+
+    // Mark server as ready
+    __atomic_store_n(&pgas_shm_header_->server_ready, 1, __ATOMIC_RELEASE);
+
+    // Create worker threads for handling PGAS SHM requests
+    const int num_workers = 4;
+    std::vector<std::thread> workers;
+
+    for (int i = 0; i < num_workers; i++) {
+        workers.emplace_back([this]() {
+            while (running) {
+                int processed = poll_pgas_shm_requests();
+                if (processed == 0) {
+                    // No requests - sleep briefly to reduce CPU usage
+                    usleep(100);  // 100us
+                }
+            }
+        });
+    }
+
+    // Wait for workers to finish
+    for (auto& worker : workers) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+}
+
+int ThreadPerConnectionServer::poll_pgas_shm_requests() {
+    if (!pgas_shm_header_ || !running) return 0;
+
+    int processed = 0;
+    PGASMemoryEntry* entries = (PGASMemoryEntry*)pgas_memory_;
+    size_t num_cachelines = pgas_shm_header_->memory_size / 64;
+
+    for (uint32_t i = 0; i < pgas_shm_header_->num_slots; i++) {
+        cxl_shm_slot_t* slot = &pgas_shm_header_->slots[i];
+
+        uint32_t req = __atomic_load_n(&slot->req_type, __ATOMIC_ACQUIRE);
+        if (req == CXL_SHM_REQ_NONE) continue;
+
+        // Calculate cacheline index from address
+        uint64_t addr = slot->addr;
+        size_t cacheline_idx = addr / 64;
+
+        if (cacheline_idx >= num_cachelines) {
+            slot->resp_status = CXL_SHM_RESP_ERROR;
+            __atomic_store_n(&slot->req_type, CXL_SHM_REQ_NONE, __ATOMIC_RELEASE);
+            continue;
+        }
+
+        PGASMemoryEntry* entry = &entries[cacheline_idx];
+
+        // Calculate latency using CXL controller
+        std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
+        access_elem.push_back(std::make_tuple(addr, slot->size));
+        double base_latency = controller->calculate_latency(access_elem, controller->dramlatency);
+
+        switch (req) {
+            case CXL_SHM_REQ_READ: {
+                // Update metadata
+                entry->metadata.access_count++;
+                entry->metadata.last_access_time = slot->timestamp;
+
+                // Copy data to slot
+                size_t copy_size = std::min((size_t)slot->size, (size_t)64);
+                size_t offset = addr % 64;
+                memcpy((void*)slot->data, entry->data + offset, copy_size);
+
+                // Copy metadata to response (use latency_ns field for cache_state)
+                slot->latency_ns = (uint64_t)base_latency;
+
+                // Store cache state in first byte of data response padding
+                // Client can check this for coherency information
+
+                __atomic_thread_fence(__ATOMIC_RELEASE);
+                slot->resp_status = CXL_SHM_RESP_OK;
+                total_reads++;
+                processed++;
+                break;
+            }
+
+            case CXL_SHM_REQ_WRITE: {
+                // Copy data from slot to memory
+                size_t copy_size = std::min((size_t)slot->size, (size_t)64);
+                size_t offset = addr % 64;
+                memcpy(entry->data + offset, (void*)slot->data, copy_size);
+
+                // Update metadata
+                entry->metadata.access_count++;
+                entry->metadata.last_access_time = slot->timestamp;
+                entry->metadata.cache_state = 3;  // MODIFIED
+                entry->metadata.version++;
+
+                slot->latency_ns = (uint64_t)base_latency;
+                __atomic_thread_fence(__ATOMIC_RELEASE);
+                slot->resp_status = CXL_SHM_RESP_OK;
+                total_writes++;
+                processed++;
+                break;
+            }
+
+            case CXL_SHM_REQ_ATOMIC_FAA: {
+                if (slot->addr + sizeof(uint64_t) <= num_cachelines * 64) {
+                    uint64_t* ptr = (uint64_t*)(entry->data + (addr % 64));
+                    uint64_t old = __atomic_fetch_add(ptr, slot->value, __ATOMIC_SEQ_CST);
+                    memcpy((void*)slot->data, &old, sizeof(old));
+
+                    entry->metadata.access_count++;
+                    entry->metadata.cache_state = 3;  // MODIFIED
+                    entry->metadata.version++;
+
+                    slot->latency_ns = (uint64_t)base_latency;
+                    __atomic_thread_fence(__ATOMIC_RELEASE);
+                    slot->resp_status = CXL_SHM_RESP_OK;
+                } else {
+                    slot->resp_status = CXL_SHM_RESP_ERROR;
+                }
+                processed++;
+                break;
+            }
+
+            case CXL_SHM_REQ_ATOMIC_CAS: {
+                if (slot->addr + sizeof(uint64_t) <= num_cachelines * 64) {
+                    uint64_t* ptr = (uint64_t*)(entry->data + (addr % 64));
+                    uint64_t expected = slot->expected;
+                    __atomic_compare_exchange_n(ptr, &expected, slot->value,
+                                                false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+                    memcpy((void*)slot->data, &expected, sizeof(expected));
+
+                    entry->metadata.access_count++;
+                    entry->metadata.version++;
+
+                    slot->latency_ns = (uint64_t)base_latency;
+                    __atomic_thread_fence(__ATOMIC_RELEASE);
+                    slot->resp_status = CXL_SHM_RESP_OK;
+                } else {
+                    slot->resp_status = CXL_SHM_RESP_ERROR;
+                }
+                processed++;
+                break;
+            }
+
+            case CXL_SHM_REQ_FENCE: {
+                __atomic_thread_fence(__ATOMIC_SEQ_CST);
+                slot->latency_ns = 0;
+                __atomic_thread_fence(__ATOMIC_RELEASE);
+                slot->resp_status = CXL_SHM_RESP_OK;
+                processed++;
+                break;
+            }
+
+            default:
+                break;
+        }
+
+        // Clear request to mark slot as free
+        __atomic_store_n(&slot->req_type, CXL_SHM_REQ_NONE, __ATOMIC_RELEASE);
+    }
+
+    return processed;
+}
+
+void ThreadPerConnectionServer::cleanup_pgas_shm() {
+    if (pgas_shm_header_) {
+        __atomic_store_n(&pgas_shm_header_->server_ready, 0, __ATOMIC_RELEASE);
+
+        // Calculate total size for munmap
+        size_t header_size = CXL_SHM_HEADER_SIZE(pgas_shm_header_->num_slots);
+        size_t total_size = header_size + pgas_memory_size_;
+
+        munmap(pgas_shm_header_, total_size);
+        pgas_shm_header_ = nullptr;
+        pgas_memory_ = nullptr;
+    }
+
+    if (pgas_shm_fd_ >= 0) {
+        close(pgas_shm_fd_);
+        pgas_shm_fd_ = -1;
+    }
+
+    shm_unlink(pgas_shm_name_.c_str());
+    SPDLOG_INFO("PGAS shared memory cleaned up");
 }

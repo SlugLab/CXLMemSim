@@ -47,12 +47,20 @@
 #define CXL_GPU_REG_WARP_SIZE       0x0160  /* Warp size */
 #define CXL_GPU_REG_BACKEND         0x0164  /* Backend type */
 
-/* Data transfer region */
-#define CXL_GPU_DATA_OFFSET         0x1000  /* Data buffer offset */
-#define CXL_GPU_DATA_SIZE           0xF000  /* Data buffer size (60KB) */
+/* Data transfer region - OPTIMIZED for larger chunks */
+#define CXL_GPU_DATA_OFFSET         0x1000    /* Data buffer offset */
+#define CXL_GPU_DATA_SIZE           0x100000  /* Data buffer size (1MB) - was 60KB */
 
-/* Command register size */
-#define CXL_GPU_CMD_REG_SIZE        0x10000 /* 64KB total */
+/* Command register size - increased to accommodate larger data buffer */
+#define CXL_GPU_CMD_REG_SIZE        0x101000  /* ~1MB + 4KB registers */
+
+/* Bulk transfer region (BAR4 direct access) */
+#define CXL_GPU_BULK_TRANSFER_SIZE  0x4000000 /* 64MB bulk transfer region */
+
+/* Capability bits */
+#define CXL_GPU_CAP_BULK_TRANSFER   (1 << 0)  /* Supports bulk transfer mode */
+#define CXL_GPU_CAP_CACHE_COHERENT  (1 << 1)  /* CXL.cache coherent memory */
+#define CXL_GPU_CAP_DMA_ENGINE      (1 << 2)  /* Hardware DMA engine available */
 
 /* Magic number */
 #define CXL_GPU_MAGIC               0x43584C32  /* "CXL2" */
@@ -107,6 +115,16 @@ typedef enum {
     CXL_GPU_CMD_EVENT_DESTROY   = 0x61,
     CXL_GPU_CMD_EVENT_RECORD    = 0x62,
     CXL_GPU_CMD_EVENT_SYNC      = 0x63,
+
+    /* Bulk transfer commands (optimized for large transfers) */
+    CXL_GPU_CMD_BULK_HTOD       = 0x70,  /* Bulk host-to-device via BAR4 */
+    CXL_GPU_CMD_BULK_DTOH       = 0x71,  /* Bulk device-to-host via BAR4 */
+    CXL_GPU_CMD_BULK_DTOD       = 0x72,  /* Bulk device-to-device */
+
+    /* CXL.cache coherency commands */
+    CXL_GPU_CMD_CACHE_FLUSH     = 0x80,  /* Flush cache lines to device */
+    CXL_GPU_CMD_CACHE_INVALIDATE= 0x81,  /* Invalidate cache lines */
+    CXL_GPU_CMD_CACHE_WRITEBACK = 0x82,  /* Writeback dirty cache lines */
 } CXLGPUCommand;
 
 /* Error codes (matching CUDA error codes) */
