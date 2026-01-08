@@ -18,18 +18,29 @@
 #include <atomic>
 #include <cstring>
 
+// Operation type constants for SHM mode
+constexpr uint8_t SHM_OP_READ = 0;
+constexpr uint8_t SHM_OP_WRITE = 1;
+constexpr uint8_t SHM_OP_GET_SHM_INFO = 2;
+constexpr uint8_t SHM_OP_ATOMIC_FAA = 3;   // Fetch-and-Add
+constexpr uint8_t SHM_OP_ATOMIC_CAS = 4;   // Compare-and-Swap
+constexpr uint8_t SHM_OP_FENCE = 5;        // Memory fence
+
 // Request/Response structures matching TCP version
 struct ShmRequest {
-    uint8_t op_type;      // 0=READ, 1=WRITE, 2=GET_SHM_INFO
+    uint8_t op_type;      // 0=READ, 1=WRITE, 2=GET_SHM_INFO, 3=ATOMIC_FAA, 4=ATOMIC_CAS, 5=FENCE
     uint64_t addr;
     uint64_t size;
     uint64_t timestamp;
+    uint64_t value;       // Value for FAA (add value) or CAS (desired value)
+    uint64_t expected;    // Expected value for CAS operation
     uint8_t data[64];     // Cacheline data
 };
 
 struct ShmResponse {
     uint8_t status;
     uint64_t latency_ns;
+    uint64_t old_value;   // Previous value returned by atomic operations
     uint8_t data[64];
 };
 

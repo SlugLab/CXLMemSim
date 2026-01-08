@@ -55,18 +55,29 @@ Helper helper{};
 CXLController* controller = nullptr;
 Monitors* monitors = nullptr;  // Required by helper.cpp signal handlers
 
+// Operation type constants
+constexpr uint8_t OP_READ = 0;
+constexpr uint8_t OP_WRITE = 1;
+constexpr uint8_t OP_GET_SHM_INFO = 2;
+constexpr uint8_t OP_ATOMIC_FAA = 3;   // Fetch-and-Add
+constexpr uint8_t OP_ATOMIC_CAS = 4;   // Compare-and-Swap
+constexpr uint8_t OP_FENCE = 5;        // Memory fence
+
 // Server request/response structures (matching qemu_integration)
 struct ServerRequest {
-    uint8_t op_type;      // 0=READ, 1=WRITE, 2=GET_SHM_INFO
+    uint8_t op_type;      // 0=READ, 1=WRITE, 2=GET_SHM_INFO, 3=ATOMIC_FAA, 4=ATOMIC_CAS, 5=FENCE
     uint64_t addr;
     uint64_t size;
     uint64_t timestamp;
+    uint64_t value;       // Value for FAA (add value) or CAS (desired value)
+    uint64_t expected;    // Expected value for CAS operation
     uint8_t data[64];     // Cacheline data
 };
 
 struct ServerResponse {
     uint8_t status;
     uint64_t latency_ns;
+    uint64_t old_value;   // Previous value returned by atomic operations
     uint8_t data[64];
 };
 
@@ -146,6 +157,10 @@ private:
     // Statistics
     std::atomic<uint64_t> total_reads{0};
     std::atomic<uint64_t> total_writes{0};
+    std::atomic<uint64_t> total_atomic_faa{0};
+    std::atomic<uint64_t> total_atomic_cas{0};
+    std::atomic<uint64_t> total_atomic_cas_success{0};
+    std::atomic<uint64_t> total_fences{0};
     std::atomic<uint64_t> coherency_invalidations{0};
     std::atomic<uint64_t> coherency_downgrades{0};
     std::atomic<uint64_t> back_invalidations{0};
@@ -199,7 +214,8 @@ private:
     
     // Request handling
     void handle_request(int client_fd, int thread_id, ServerRequest& req, ServerResponse& resp);
-    uint64_t calculate_total_latency(uint64_t base_latency, double congestion_factor, 
+    void handle_atomic_request(int thread_id, ServerRequest& req, ServerResponse& resp);
+    uint64_t calculate_total_latency(uint64_t base_latency, double congestion_factor,
                                    bool had_coherency_miss, uint64_t size);
     
     // Back invalidation methods
@@ -595,21 +611,27 @@ uint64_t ThreadPerConnectionServer::calculate_total_latency(uint64_t base_latenc
 }
 
 void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, ServerRequest& req, ServerResponse& resp) {
-    uint64_t cacheline_addr = req.addr & ~(63ULL);  // 64-byte aligned
-    bool had_coherency_miss = false;
-
     // CRITICAL: Memory barrier before reading from shared memory
     // This ensures we see all updates from other guests
     std::atomic_thread_fence(std::memory_order_seq_cst);
 
+    // Dispatch atomic operations to dedicated handler
+    if (req.op_type == OP_ATOMIC_FAA || req.op_type == OP_ATOMIC_CAS || req.op_type == OP_FENCE) {
+        handle_atomic_request(thread_id, req, resp);
+        return;
+    }
+
+    uint64_t cacheline_addr = req.addr & ~(63ULL);  // 64-byte aligned
+    bool had_coherency_miss = false;
+
     // Log CXL Type3 operation with detailed information
-    const char* op_name = (req.op_type == 0) ? "CXL_TYPE3_READ" : "CXL_TYPE3_WRITE";
+    const char* op_name = (req.op_type == OP_READ) ? "CXL_TYPE3_READ" : "CXL_TYPE3_WRITE";
     
     // Log incoming request details
     // SPDLOG_INFO("Thread {}: {} request - addr=0x{:x}, size={}, cacheline=0x{:x}", 
     //             thread_id, op_name, req.addr, req.size, cacheline_addr);
     
-    if (req.op_type == 1) {  // WRITE
+    if (req.op_type == OP_WRITE) {
         // Log first 16 bytes of write data
         std::stringstream data_str;
         for (int i = 0; i < std::min(16UL, req.size); i++) {
@@ -657,7 +679,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
         auto& info = *metadata;
         
         // Check if we need coherency actions
-        if (req.op_type == 0) {  // READ
+        if (req.op_type == OP_READ) {
             // SPDLOG_DEBUG("Thread {}: CXL_TYPE3_READ processing - checking coherency for cacheline 0x{:x}", 
             //             thread_id, cacheline_addr);
             
@@ -805,7 +827,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     resp.latency_ns = total_latency;
     
     // Enhanced logging for CXL Type3 operations
-    const char* op_result = (req.op_type == 0) ? "CXL_TYPE3_READ_COMPLETE" : "CXL_TYPE3_WRITE_COMPLETE";
+    const char* op_result = (req.op_type == OP_READ) ? "CXL_TYPE3_READ_COMPLETE" : "CXL_TYPE3_WRITE_COMPLETE";
     // SPDLOG_INFO("Thread {}: {} addr=0x{:x} size={} latency={}ns (base={}ns congestion={:.2f}x coherency_miss={})",
     //             thread_id, op_result, req.addr, req.size, 
                 // total_latency, static_cast<uint64_t>(base_latency), congestion_factor, had_coherency_miss);
@@ -819,6 +841,147 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     // Detailed debug logging
     // SPDLOG_DEBUG("Thread {}: Memory access details - cacheline_addr=0x{:x} offset={} data_size={}",
     //             thread_id, cacheline_addr, req.addr - cacheline_addr, req.size);
+}
+
+void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerRequest& req, ServerResponse& resp) {
+    uint64_t cacheline_addr = req.addr & ~(63ULL);  // 64-byte aligned
+
+    // Increment active requests for congestion tracking
+    congestion_info.active_requests++;
+
+    // Calculate base latency using CXL controller
+    std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
+    access_elem.push_back(std::make_tuple(req.addr, sizeof(uint64_t)));
+    double base_latency = controller->calculate_latency(access_elem, controller->dramlatency);
+
+    // Atomic operations require exclusive access with proper coherency
+    {
+        std::unique_lock<std::shared_mutex> lock(memory_mutex);
+
+        // Get metadata from shared memory manager
+        auto* metadata = shm_manager->get_cacheline_metadata(cacheline_addr);
+        if (!metadata) {
+            SPDLOG_ERROR("Thread {}: Failed to get metadata for atomic op at cacheline 0x{:x}",
+                        thread_id, cacheline_addr);
+            resp.status = 1;
+            resp.old_value = 0;
+            congestion_info.active_requests--;
+            return;
+        }
+
+        // Lock the cacheline for this atomic operation
+        std::lock_guard<std::mutex> cacheline_lock(metadata->lock);
+
+        // Get pointer to the data location in shared memory
+        void* data_area = shm_manager->get_data_area();
+        if (!data_area) {
+            SPDLOG_ERROR("Thread {}: Failed to get data area for atomic op", thread_id);
+            resp.status = 1;
+            resp.old_value = 0;
+            congestion_info.active_requests--;
+            return;
+        }
+
+        // Calculate offset within cacheline
+        size_t offset = req.addr % 64;
+        uint64_t* ptr = reinterpret_cast<uint64_t*>(
+            static_cast<uint8_t*>(data_area) + cacheline_addr + offset);
+
+        switch (req.op_type) {
+            case OP_ATOMIC_FAA: {
+                // Fetch-and-Add: atomically add value and return old value
+                uint64_t old_value = __atomic_fetch_add(ptr, req.value, __ATOMIC_SEQ_CST);
+                resp.old_value = old_value;
+
+                // Update metadata
+                metadata->last_access_time = req.timestamp;
+                metadata->state = MODIFIED;
+                metadata->owner = thread_id;
+                metadata->sharers.clear();
+                metadata->version++;
+
+                // Force sync to physical memory
+                msync(ptr, sizeof(uint64_t), MS_SYNC);
+                __atomic_thread_fence(__ATOMIC_RELEASE);
+
+                total_atomic_faa++;
+                SPDLOG_DEBUG("Thread {}: ATOMIC_FAA addr=0x{:x} add={} old={} new={}",
+                            thread_id, req.addr, req.value, old_value, old_value + req.value);
+                break;
+            }
+
+            case OP_ATOMIC_CAS: {
+                // Compare-and-Swap: if *ptr == expected, set *ptr = value
+                uint64_t expected = req.expected;
+                bool success = __atomic_compare_exchange_n(ptr, &expected, req.value,
+                                                          false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+                resp.old_value = expected;  // Returns actual value (old if success, current if fail)
+
+                // Update metadata
+                metadata->last_access_time = req.timestamp;
+                if (success) {
+                    metadata->state = MODIFIED;
+                    metadata->owner = thread_id;
+                    metadata->sharers.clear();
+                    metadata->version++;
+                    total_atomic_cas_success++;
+
+                    // Force sync to physical memory
+                    msync(ptr, sizeof(uint64_t), MS_SYNC);
+                }
+                __atomic_thread_fence(__ATOMIC_RELEASE);
+
+                total_atomic_cas++;
+                SPDLOG_DEBUG("Thread {}: ATOMIC_CAS addr=0x{:x} expected={} desired={} actual={} success={}",
+                            thread_id, req.addr, req.expected, req.value, expected, success);
+                break;
+            }
+
+            case OP_FENCE: {
+                // Memory fence: ensure all prior operations are visible
+                __atomic_thread_fence(__ATOMIC_SEQ_CST);
+                resp.old_value = 0;
+
+                // Also sync the entire shared memory region
+                if (data_area) {
+                    auto shm_info = shm_manager->get_shm_info();
+                    msync(data_area, shm_info.size, MS_SYNC);
+                }
+
+                total_fences++;
+                SPDLOG_DEBUG("Thread {}: FENCE completed", thread_id);
+                break;
+            }
+
+            default:
+                SPDLOG_ERROR("Thread {}: Unknown atomic op_type: {}", thread_id, req.op_type);
+                resp.status = 1;
+                resp.old_value = 0;
+                congestion_info.active_requests--;
+                return;
+        }
+    }
+
+    // Calculate congestion factor
+    double congestion_factor = calculate_congestion_factor();
+
+    // Update congestion statistics
+    update_congestion_stats(sizeof(uint64_t));
+
+    // Calculate total latency (atomic ops have similar latency to writes + extra for RMW)
+    uint64_t total_latency = calculate_total_latency(base_latency, congestion_factor, true, sizeof(uint64_t));
+
+    // Add extra latency for atomic RMW operations (read-modify-write)
+    if (req.op_type != OP_FENCE) {
+        total_latency += 20;  // Additional 20ns for atomic RMW overhead
+    }
+
+    // Decrement active requests
+    congestion_info.active_requests--;
+
+    // Fill response
+    resp.status = 0;
+    resp.latency_ns = total_latency;
 }
 
 void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
@@ -875,7 +1038,7 @@ void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
         }
         
         // Handle special request for shared memory info
-        if (req.op_type == 2) {  // GET_SHM_INFO
+        if (req.op_type == OP_GET_SHM_INFO) {
             SharedMemoryInfoResponse shm_resp = {0};
             auto shm_info = shm_manager->get_shm_info();
             
@@ -1012,10 +1175,12 @@ void ThreadPerConnectionServer::handle_shm_requests() {
         req.addr = shm_req.addr;
         req.size = shm_req.size;
         req.timestamp = shm_req.timestamp;
+        req.value = shm_req.value;       // For atomic FAA/CAS operations
+        req.expected = shm_req.expected; // For atomic CAS operation
         std::memcpy(req.data, shm_req.data, sizeof(req.data));
-        
+
         // Handle special request for shared memory info
-        if (req.op_type == 2) {  // GET_SHM_INFO
+        if (req.op_type == OP_GET_SHM_INFO) {
             ShmResponse shm_resp = {0};
             auto shm_info = shm_manager->get_shm_info();
             
@@ -1039,6 +1204,7 @@ void ThreadPerConnectionServer::handle_shm_requests() {
         ShmResponse shm_resp;
         shm_resp.status = resp.status;
         shm_resp.latency_ns = resp.latency_ns;
+        shm_resp.old_value = resp.old_value;  // For atomic operations
         std::memcpy(shm_resp.data, resp.data, sizeof(shm_resp.data));
         
         // Send response back
@@ -1117,12 +1283,16 @@ bool ThreadPerConnectionServer::init_pgas_shm(const std::string& shm_name, size_
     pgas_shm_header_->num_slots = CXL_SHM_MAX_SLOTS;
     pgas_shm_header_->memory_base = 0;
     pgas_shm_header_->memory_size = memory_size;  // Original memory size (data only)
+    pgas_shm_header_->num_cachelines = num_cachelines;
+    pgas_shm_header_->metadata_enabled = 1;  // Always enabled in PGAS mode
+    pgas_shm_header_->entry_size = sizeof(PGASMemoryEntry);
+    pgas_shm_header_->flags = CXL_SHM_FLAG_METADATA_ENABLED;
 
     // Initialize memory entries (data + metadata)
     PGASMemoryEntry* entries = (PGASMemoryEntry*)pgas_memory_;
     for (size_t i = 0; i < num_cachelines; i++) {
         memset(&entries[i], 0, sizeof(PGASMemoryEntry));
-        entries[i].metadata.cache_state = 0;  // INVALID
+        entries[i].metadata.cache_state = CXL_CACHE_INVALID;
         entries[i].metadata.owner_id = 0xFF;  // No owner
         entries[i].metadata.physical_addr = i * 64;  // Cacheline address
     }

@@ -193,17 +193,52 @@ const char* cxl_backend_type_name(cxl_backend_type_t type);
 #define CXL_SHM_CACHELINE_SIZE 64
 
 /* Request types */
-#define CXL_SHM_REQ_NONE      0
-#define CXL_SHM_REQ_READ      1
-#define CXL_SHM_REQ_WRITE     2
-#define CXL_SHM_REQ_ATOMIC_FAA 3
-#define CXL_SHM_REQ_ATOMIC_CAS 4
-#define CXL_SHM_REQ_FENCE     5
+#define CXL_SHM_REQ_NONE          0
+#define CXL_SHM_REQ_READ          1
+#define CXL_SHM_REQ_WRITE         2
+#define CXL_SHM_REQ_ATOMIC_FAA    3
+#define CXL_SHM_REQ_ATOMIC_CAS    4
+#define CXL_SHM_REQ_FENCE         5
+#define CXL_SHM_REQ_READ_META     6   /* Read with metadata */
+#define CXL_SHM_REQ_WRITE_META    7   /* Write with metadata */
+#define CXL_SHM_REQ_GET_META      8   /* Get metadata only */
+#define CXL_SHM_REQ_SET_META      9   /* Set metadata only */
 
 /* Response status */
 #define CXL_SHM_RESP_NONE     0
 #define CXL_SHM_RESP_OK       1
 #define CXL_SHM_RESP_ERROR    2
+
+/* MESI Cache States */
+#define CXL_CACHE_INVALID     0
+#define CXL_CACHE_SHARED      1
+#define CXL_CACHE_EXCLUSIVE   2
+#define CXL_CACHE_MODIFIED    3
+
+/* Metadata flags */
+#define CXL_META_FLAG_DIRTY   0x01
+#define CXL_META_FLAG_LOCKED  0x02
+#define CXL_META_FLAG_PINNED  0x04
+
+/* Cacheline metadata structure (64 bytes) - compatible with Splash libpgas */
+typedef struct {
+    uint8_t cache_state;        /* MESI state */
+    uint8_t owner_id;           /* Current owner host/thread ID */
+    uint16_t sharers_bitmap;    /* Bitmap of hosts/threads sharing this line */
+    uint32_t access_count;      /* Number of accesses */
+    uint64_t last_access_time;  /* Timestamp of last access */
+    uint64_t virtual_addr;      /* Virtual address mapping */
+    uint64_t physical_addr;     /* Physical address */
+    uint32_t version;           /* Version number for coherency */
+    uint8_t flags;              /* Various flags (dirty, locked, etc.) */
+    uint8_t reserved[23];       /* Reserved for future use */
+} __attribute__((packed)) cxl_cacheline_metadata_t;
+
+/* PGAS Memory Entry: 128 bytes (64 data + 64 metadata) per cacheline */
+typedef struct {
+    uint8_t data[CXL_SHM_CACHELINE_SIZE];  /* 64 bytes of data */
+    cxl_cacheline_metadata_t metadata;      /* 64 bytes of metadata */
+} __attribute__((packed, aligned(128))) cxl_pgas_entry_t;
 
 /* Shared memory slot for request/response */
 typedef struct {
@@ -215,9 +250,9 @@ typedef struct {
     volatile uint64_t expected;      /* Expected value for CAS */
     volatile uint64_t latency_ns;    /* Simulated latency */
     volatile uint64_t timestamp;     /* Request timestamp */
-    uint8_t data[CXL_SHM_CACHELINE_SIZE];  /* Data buffer */
-    uint8_t padding[64 - 8];         /* Align to 128 bytes */
-} __attribute__((aligned(128))) cxl_shm_slot_t;
+    uint8_t data[CXL_SHM_CACHELINE_SIZE];  /* Data buffer (64 bytes) */
+    cxl_cacheline_metadata_t metadata;     /* Metadata buffer (64 bytes) */
+} __attribute__((aligned(256))) cxl_shm_slot_t;
 
 /* Shared memory header */
 typedef struct {
@@ -225,12 +260,18 @@ typedef struct {
     uint32_t version;                /* Protocol version */
     uint32_t num_slots;              /* Number of request slots */
     volatile uint32_t server_ready;  /* Server is ready flag */
-    uint32_t reserved;
+    uint32_t flags;                  /* Header flags */
     uint64_t memory_base;            /* Base address of simulated memory */
     uint64_t memory_size;            /* Size of simulated memory */
-    uint8_t padding[64 - 40];        /* Pad header to 64 bytes */
+    uint64_t num_cachelines;         /* Number of cachelines (memory_size/64) */
+    uint32_t metadata_enabled;       /* 1 if metadata transfer is enabled */
+    uint32_t entry_size;             /* Size of each entry (64 or 128 bytes) */
+    uint8_t padding[64 - 56];        /* Pad header to 64 bytes */
     cxl_shm_slot_t slots[];          /* Request/response slots */
 } __attribute__((aligned(64))) cxl_shm_header_t;
+
+/* Header flags */
+#define CXL_SHM_FLAG_METADATA_ENABLED  0x01
 
 /* Size calculation */
 #define CXL_SHM_HEADER_SIZE(nslots) \
