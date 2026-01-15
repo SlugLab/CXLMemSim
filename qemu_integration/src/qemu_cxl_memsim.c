@@ -4,6 +4,9 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/socket.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
@@ -16,6 +19,155 @@ static uint64_t get_timestamp_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+}
+
+/* ============================================================================
+ * PGAS Shared Memory Backend Implementation
+ * ============================================================================ */
+
+static int connect_to_pgas_shm(CXLMemSimContext *ctx) {
+    // Open shared memory created by CXLMemSim server
+    ctx->pgas_shm_fd = shm_open(ctx->pgas_shm_name, O_RDWR, 0666);
+    if (ctx->pgas_shm_fd < 0) {
+        fprintf(stderr, "PGAS: Failed to open shared memory %s: %s\n",
+                ctx->pgas_shm_name, strerror(errno));
+        return -1;
+    }
+
+    // Get size from stat
+    struct stat sb;
+    if (fstat(ctx->pgas_shm_fd, &sb) < 0) {
+        fprintf(stderr, "PGAS: fstat failed: %s\n", strerror(errno));
+        close(ctx->pgas_shm_fd);
+        return -1;
+    }
+
+    size_t shm_size = sb.st_size;
+
+    // Map shared memory
+    void *mapped = mmap(NULL, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                        ctx->pgas_shm_fd, 0);
+    if (mapped == MAP_FAILED) {
+        fprintf(stderr, "PGAS: mmap failed: %s\n", strerror(errno));
+        close(ctx->pgas_shm_fd);
+        return -1;
+    }
+
+    ctx->pgas_header = (CXLPGASHeader *)mapped;
+
+    // Validate magic number
+    if (ctx->pgas_header->magic != CXL_PGAS_MAGIC) {
+        fprintf(stderr, "PGAS: Invalid magic number (got 0x%lx, expected 0x%lx)\n",
+                ctx->pgas_header->magic, (uint64_t)CXL_PGAS_MAGIC);
+        munmap(mapped, shm_size);
+        close(ctx->pgas_shm_fd);
+        return -1;
+    }
+
+    // Wait for server ready
+    int retries = 100;
+    while (!__atomic_load_n(&ctx->pgas_header->server_ready, __ATOMIC_ACQUIRE) && retries > 0) {
+        usleep(10000);  // 10ms
+        retries--;
+    }
+
+    if (retries == 0) {
+        fprintf(stderr, "PGAS: Server not ready after timeout\n");
+        munmap(mapped, shm_size);
+        close(ctx->pgas_shm_fd);
+        return -1;
+    }
+
+    // Calculate memory area pointer (after header + slots)
+    size_t header_size = sizeof(CXLPGASHeader) +
+                         ctx->pgas_header->num_slots * sizeof(CXLPGASSlot);
+    ctx->pgas_memory = (uint8_t *)mapped + header_size;
+    ctx->pgas_memory_size = ctx->pgas_header->memory_size;
+
+    // Assign a slot (use process ID mod num_slots for now)
+    ctx->pgas_slot_id = getpid() % ctx->pgas_header->num_slots;
+
+    ctx->connected = true;
+    fprintf(stderr, "PGAS: Connected to %s (memory_size=%lu, slot=%d)\n",
+            ctx->pgas_shm_name, ctx->pgas_memory_size, ctx->pgas_slot_id);
+
+    return 0;
+}
+
+static int send_pgas_request(CXLMemSimContext *ctx, CXLMemSimRequest *req, CXLMemSimResponse *resp) {
+    if (!ctx->pgas_header || !ctx->connected) {
+        return -1;
+    }
+
+    CXLPGASSlot *slot = &ctx->pgas_header->slots[ctx->pgas_slot_id];
+
+    // Wait for slot to be free
+    int retries = 1000;
+    while (__atomic_load_n(&slot->req_type, __ATOMIC_ACQUIRE) != CXL_PGAS_REQ_NONE && retries > 0) {
+        usleep(100);
+        retries--;
+    }
+
+    if (retries == 0) {
+        fprintf(stderr, "PGAS: Slot busy timeout\n");
+        return -1;
+    }
+
+    // Fill request
+    slot->addr = req->addr;
+    slot->size = req->size;
+    slot->timestamp = req->timestamp;
+    slot->value = req->value;
+    slot->expected = req->expected;
+
+    if (req->op_type == CXL_WRITE_OP) {
+        memcpy((void *)slot->data, req->data, req->size < CACHELINE_SIZE ? req->size : CACHELINE_SIZE);
+    }
+
+    // Memory barrier before setting request type
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+
+    // Set request type (this triggers the server to process)
+    uint32_t pgas_req_type;
+    switch (req->op_type) {
+        case CXL_READ_OP:       pgas_req_type = CXL_PGAS_REQ_READ; break;
+        case CXL_WRITE_OP:      pgas_req_type = CXL_PGAS_REQ_WRITE; break;
+        case CXL_ATOMIC_FAA_OP: pgas_req_type = CXL_PGAS_REQ_ATOMIC_FAA; break;
+        case CXL_ATOMIC_CAS_OP: pgas_req_type = CXL_PGAS_REQ_ATOMIC_CAS; break;
+        case CXL_FENCE_OP:      pgas_req_type = CXL_PGAS_REQ_FENCE; break;
+        default:                pgas_req_type = CXL_PGAS_REQ_NONE; break;
+    }
+    __atomic_store_n(&slot->req_type, pgas_req_type, __ATOMIC_RELEASE);
+
+    // Wait for response
+    retries = 10000;
+    while (__atomic_load_n(&slot->resp_status, __ATOMIC_ACQUIRE) == CXL_PGAS_RESP_NONE && retries > 0) {
+        usleep(10);
+        retries--;
+    }
+
+    if (retries == 0) {
+        fprintf(stderr, "PGAS: Response timeout\n");
+        return -1;
+    }
+
+    // Memory barrier before reading response
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+
+    // Read response
+    resp->status = (slot->resp_status == CXL_PGAS_RESP_OK) ? 0 : 1;
+    resp->latency_ns = slot->latency_ns;
+
+    if (req->op_type == CXL_READ_OP) {
+        memcpy(resp->data, (void *)slot->data, req->size < CACHELINE_SIZE ? req->size : CACHELINE_SIZE);
+    } else if (req->op_type == CXL_ATOMIC_FAA_OP || req->op_type == CXL_ATOMIC_CAS_OP) {
+        memcpy(&resp->old_value, (void *)slot->data, sizeof(uint64_t));
+    }
+
+    // Clear response status for next request
+    __atomic_store_n(&slot->resp_status, CXL_PGAS_RESP_NONE, __ATOMIC_RELEASE);
+
+    return 0;
 }
 
 static int connect_to_cxlmemsim(CXLMemSimContext *ctx) {
@@ -46,36 +198,44 @@ static int connect_to_cxlmemsim(CXLMemSimContext *ctx) {
     return 0;
 }
 
-static int send_request(CXLMemSimContext *ctx, CXLMemSimRequest *req, CXLMemSimResponse *resp) {
-    pthread_mutex_lock(&ctx->lock);
-    
+static int send_tcp_request(CXLMemSimContext *ctx, CXLMemSimRequest *req, CXLMemSimResponse *resp) {
     if (!ctx->connected) {
         if (connect_to_cxlmemsim(ctx) < 0) {
-            pthread_mutex_unlock(&ctx->lock);
             return -1;
         }
     }
-    
+
     ssize_t sent = send(ctx->socket_fd, req, sizeof(*req), 0);
     if (sent != sizeof(*req)) {
         perror("send");
         ctx->connected = false;
         close(ctx->socket_fd);
-        pthread_mutex_unlock(&ctx->lock);
         return -1;
     }
-    
+
     ssize_t received = recv(ctx->socket_fd, resp, sizeof(*resp), MSG_WAITALL);
     if (received != sizeof(*resp)) {
         perror("recv");
         ctx->connected = false;
         close(ctx->socket_fd);
-        pthread_mutex_unlock(&ctx->lock);
         return -1;
     }
-    
-    pthread_mutex_unlock(&ctx->lock);
+
     return 0;
+}
+
+static int send_request(CXLMemSimContext *ctx, CXLMemSimRequest *req, CXLMemSimResponse *resp) {
+    pthread_mutex_lock(&ctx->lock);
+
+    int result;
+    if (ctx->backend_type == CXL_BACKEND_SHMEM) {
+        result = send_pgas_request(ctx, req, resp);
+    } else {
+        result = send_tcp_request(ctx, req, resp);
+    }
+
+    pthread_mutex_unlock(&ctx->lock);
+    return result;
 }
 
 static void update_hotness(CXLMemSimContext *ctx, uint64_t addr) {
@@ -90,18 +250,19 @@ int cxlmemsim_init(const char *host, int port) {
         fprintf(stderr, "CXLMemSim already initialized\n");
         return -1;
     }
-    
+
     g_ctx = calloc(1, sizeof(CXLMemSimContext));
     if (!g_ctx) {
         perror("calloc");
         return -1;
     }
-    
+
     strncpy(g_ctx->host, host, sizeof(g_ctx->host) - 1);
     g_ctx->port = port;
     g_ctx->connected = false;
+    g_ctx->backend_type = CXL_BACKEND_TCP;
     pthread_mutex_init(&g_ctx->lock, NULL);
-    
+
     g_ctx->hotness_map_size = 1024 * 1024;
     g_ctx->hotness_map = calloc(g_ctx->hotness_map_size, sizeof(uint64_t));
     if (!g_ctx->hotness_map) {
@@ -110,23 +271,81 @@ int cxlmemsim_init(const char *host, int port) {
         g_ctx = NULL;
         return -1;
     }
-    
+
     if (connect_to_cxlmemsim(g_ctx) < 0) {
         fprintf(stderr, "Initial connection to CXLMemSim failed (will retry on first access)\n");
     }
-    
+
+    return 0;
+}
+
+int cxlmemsim_init_pgas(const char *shm_name) {
+    if (g_ctx != NULL) {
+        fprintf(stderr, "CXLMemSim already initialized\n");
+        return -1;
+    }
+
+    g_ctx = calloc(1, sizeof(CXLMemSimContext));
+    if (!g_ctx) {
+        perror("calloc");
+        return -1;
+    }
+
+    strncpy(g_ctx->pgas_shm_name, shm_name ? shm_name : CXL_PGAS_SHM_NAME,
+            sizeof(g_ctx->pgas_shm_name) - 1);
+    g_ctx->connected = false;
+    g_ctx->backend_type = CXL_BACKEND_SHMEM;
+    g_ctx->pgas_shm_fd = -1;
+    pthread_mutex_init(&g_ctx->lock, NULL);
+
+    g_ctx->hotness_map_size = 1024 * 1024;
+    g_ctx->hotness_map = calloc(g_ctx->hotness_map_size, sizeof(uint64_t));
+    if (!g_ctx->hotness_map) {
+        perror("calloc hotness_map");
+        free(g_ctx);
+        g_ctx = NULL;
+        return -1;
+    }
+
+    if (connect_to_pgas_shm(g_ctx) < 0) {
+        fprintf(stderr, "Failed to connect to PGAS shared memory\n");
+        free(g_ctx->hotness_map);
+        free(g_ctx);
+        g_ctx = NULL;
+        return -1;
+    }
+
+    fprintf(stderr, "CXLMemSim initialized with PGAS backend: %s\n", g_ctx->pgas_shm_name);
     return 0;
 }
 
 void cxlmemsim_cleanup(void) {
     if (!g_ctx) return;
-    
+
     pthread_mutex_lock(&g_ctx->lock);
-    if (g_ctx->connected) {
-        close(g_ctx->socket_fd);
+
+    if (g_ctx->backend_type == CXL_BACKEND_SHMEM) {
+        // Cleanup PGAS shared memory
+        if (g_ctx->pgas_header) {
+            size_t header_size = sizeof(CXLPGASHeader) +
+                                 g_ctx->pgas_header->num_slots * sizeof(CXLPGASSlot);
+            size_t total_size = header_size + g_ctx->pgas_memory_size;
+            munmap(g_ctx->pgas_header, total_size);
+            g_ctx->pgas_header = NULL;
+        }
+        if (g_ctx->pgas_shm_fd >= 0) {
+            close(g_ctx->pgas_shm_fd);
+            g_ctx->pgas_shm_fd = -1;
+        }
+    } else {
+        // Cleanup TCP connection
+        if (g_ctx->connected) {
+            close(g_ctx->socket_fd);
+        }
     }
+
     pthread_mutex_unlock(&g_ctx->lock);
-    
+
     pthread_mutex_destroy(&g_ctx->lock);
     free(g_ctx->hotness_map);
     free(g_ctx);
@@ -193,8 +412,87 @@ MemTxResult cxl_type3_write(void *d,uint64_t  addr, uint64_t data,
         
         offset += req.size;
     }
-    
+
     return 0;
+}
+
+/* ============================================================================
+ * Atomic Operations
+ * ============================================================================ */
+
+int cxlmemsim_atomic_faa(uint64_t addr, uint64_t add_value, uint64_t *old_value) {
+    if (!g_ctx) {
+        fprintf(stderr, "CXLMemSim not initialized\n");
+        return -1;
+    }
+
+    CXLMemSimRequest req = {0};
+    CXLMemSimResponse resp = {0};
+
+    req.op_type = CXL_ATOMIC_FAA_OP;
+    req.addr = addr;
+    req.size = sizeof(uint64_t);
+    req.timestamp = get_timestamp_ns();
+    req.value = add_value;
+
+    if (send_request(g_ctx, &req, &resp) < 0) {
+        return -1;
+    }
+
+    if (old_value) {
+        *old_value = resp.old_value;
+    }
+
+    update_hotness(g_ctx, addr);
+    __sync_fetch_and_add(&g_ctx->total_atomics, 1);
+
+    return resp.status;
+}
+
+int cxlmemsim_atomic_cas(uint64_t addr, uint64_t expected, uint64_t desired, uint64_t *old_value) {
+    if (!g_ctx) {
+        fprintf(stderr, "CXLMemSim not initialized\n");
+        return -1;
+    }
+
+    CXLMemSimRequest req = {0};
+    CXLMemSimResponse resp = {0};
+
+    req.op_type = CXL_ATOMIC_CAS_OP;
+    req.addr = addr;
+    req.size = sizeof(uint64_t);
+    req.timestamp = get_timestamp_ns();
+    req.expected = expected;
+    req.value = desired;
+
+    if (send_request(g_ctx, &req, &resp) < 0) {
+        return -1;
+    }
+
+    if (old_value) {
+        *old_value = resp.old_value;
+    }
+
+    update_hotness(g_ctx, addr);
+    __sync_fetch_and_add(&g_ctx->total_atomics, 1);
+
+    // Return 0 if CAS succeeded (old_value == expected), 1 if failed
+    return (resp.old_value == expected) ? 0 : 1;
+}
+
+void cxlmemsim_fence(void) {
+    if (!g_ctx) {
+        fprintf(stderr, "CXLMemSim not initialized\n");
+        return;
+    }
+
+    CXLMemSimRequest req = {0};
+    CXLMemSimResponse resp = {0};
+
+    req.op_type = CXL_FENCE_OP;
+    req.timestamp = get_timestamp_ns();
+
+    send_request(g_ctx, &req, &resp);
 }
 
 uint64_t cxlmemsim_get_hotness(uint64_t addr) {
@@ -209,10 +507,12 @@ uint64_t cxlmemsim_get_hotness(uint64_t addr) {
 
 void cxlmemsim_dump_hotness_stats(void) {
     if (!g_ctx) return;
-    
+
     printf("CXLMemSim Statistics:\n");
+    printf("  Backend: %s\n", g_ctx->backend_type == CXL_BACKEND_SHMEM ? "PGAS/SHMEM" : "TCP");
     printf("  Total Reads: %lu\n", g_ctx->total_reads);
     printf("  Total Writes: %lu\n", g_ctx->total_writes);
+    printf("  Total Atomics: %lu\n", g_ctx->total_atomics);
     
     uint64_t hot_pages = 0;
     uint64_t total_accesses = 0;

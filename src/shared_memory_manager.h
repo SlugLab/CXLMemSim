@@ -89,7 +89,7 @@ private:
     std::vector<MemoryRegion> regions;
     
 public:
-    explicit SharedMemoryManager(size_t capacity_mb, const std::string& shm_name = "/cxlmemsim_shared");
+    explicit SharedMemoryManager(size_t capacity_mb, const std::string& shm_name = "/cxlmemsim_pgas");
     SharedMemoryManager(size_t capacity_mb, const std::string& shm_name, bool use_file, const std::string& file_path);
     ~SharedMemoryManager();
     

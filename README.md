@@ -51,11 +51,14 @@ Compute Express Link (CXL) 3.0 introduces powerful memory pooling and promises t
 sudo ip link add br0 type bridge
 sudo ip link set br0 up
 sudo ip addr add 192.168.100.1/24 dev br0
-for i in 0; do
+for i in 0 1; do
     sudo ip tuntap add tap$i mode tap
     sudo ip link set tap$i up
     sudo ip link set tap$i master br0
 done
+sudo iptables -t nat -A POSTROUTING -s 192.168.100.0/24 -o eno2 -j MASQUERADE
+sudo iptables -A FORWARD -i br0 -o eno2 -j ACCEPT
+sudo iptables -A FORWARD -i eno2 -o br0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 mkdir build
 cd build
 wget https://asplos.dev/about/qemu.img

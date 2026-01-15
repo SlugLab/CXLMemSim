@@ -164,6 +164,26 @@ private:
     std::atomic<uint64_t> coherency_invalidations{0};
     std::atomic<uint64_t> coherency_downgrades{0};
     std::atomic<uint64_t> back_invalidations{0};
+
+    // Periodic logging interval
+    static constexpr uint64_t LOG_INTERVAL = 100000;
+
+    // Helper to log stats periodically
+    void log_periodic_stats(const char* op_type, uint64_t count) {
+        if (count % LOG_INTERVAL == 0) {
+            uint64_t total_ops = total_reads + total_writes + total_atomic_faa +
+                                total_atomic_cas + total_fences;
+            SPDLOG_INFO("=== Stats @ {} {} ops ===", count, op_type);
+            SPDLOG_INFO("  Total operations: {}", total_ops);
+            SPDLOG_INFO("  Reads: {}, Writes: {}", total_reads.load(), total_writes.load());
+            SPDLOG_INFO("  Atomics: FAA={}, CAS={} (success={}), Fences={}",
+                       total_atomic_faa.load(), total_atomic_cas.load(),
+                       total_atomic_cas_success.load(), total_fences.load());
+            SPDLOG_INFO("  Coherency: invalidations={}, downgrades={}, back_inv={}",
+                       coherency_invalidations.load(), coherency_downgrades.load(),
+                       back_invalidations.load());
+        }
+    }
     
 public:
     ThreadPerConnectionServer(int port, CXLController* ctrl, size_t capacity_mb,
@@ -352,85 +372,98 @@ int main(int argc, char *argv[]) {
 
 // ThreadPerConnectionServer implementation
 bool ThreadPerConnectionServer::start() {
-    // Initialize shared memory first
+    // Initialize shared memory for data storage first
     if (!shm_manager->initialize()) {
         SPDLOG_ERROR("Failed to initialize shared memory");
         return false;
     }
-    
+
     auto shm_info = shm_manager->get_shm_info();
     SPDLOG_INFO("Shared memory initialized:");
     SPDLOG_INFO("  Name: {}", shm_info.shm_name);
     SPDLOG_INFO("  Size: {} bytes", shm_info.size);
     SPDLOG_INFO("  Base address: 0x{:x}", shm_info.base_addr);
     SPDLOG_INFO("  Cachelines: {}", shm_info.num_cachelines);
-    
-    if (comm_mode == CommMode::SHM) {
-        // Initialize shared memory communication
-        shm_comm_manager = std::make_unique<ShmCommunicationManager>("/cxlmemsim_comm", true);
-        if (!shm_comm_manager->initialize()) {
-            SPDLOG_ERROR("Failed to initialize shared memory communication");
-            return false;
-        }
-        SPDLOG_INFO("Server using shared memory communication mode");
-        return true;
+
+    // Select communication mode
+    switch (comm_mode) {
+        case CommMode::SHM:
+            SPDLOG_INFO(">>> SHM mode: Skipping TCP socket initialization <<<");
+            shm_comm_manager = std::make_unique<ShmCommunicationManager>("/cxlmemsim_comm", true);
+            if (!shm_comm_manager->initialize()) {
+                SPDLOG_ERROR("Failed to initialize shared memory communication");
+                return false;
+            }
+            SPDLOG_INFO("Server using shared memory communication mode");
+            SPDLOG_INFO("No TCP port binding - communication via /dev/shm only");
+            return true;
+
+        case CommMode::PGAS_SHM:
+            SPDLOG_INFO(">>> PGAS SHM mode: Skipping TCP socket initialization <<<");
+            pgas_memory_size_ = shm_info.size;
+            if (!init_pgas_shm(pgas_shm_name_, pgas_memory_size_)) {
+                SPDLOG_ERROR("Failed to initialize PGAS shared memory");
+                return false;
+            }
+            SPDLOG_INFO("Server using PGAS shared memory mode (cxl_backend.h protocol)");
+            SPDLOG_INFO("No TCP port binding - communication via {} only", pgas_shm_name_);
+            return true;
+
+        case CommMode::TCP:
+            SPDLOG_INFO(">>> TCP mode: Initializing TCP socket <<<");
+            break;
     }
 
-    if (comm_mode == CommMode::PGAS_SHM) {
-        // Initialize PGAS shared memory (cxl_backend.h protocol)
-        pgas_memory_size_ = shm_info.size;
-        if (!init_pgas_shm(pgas_shm_name_, pgas_memory_size_)) {
-            SPDLOG_ERROR("Failed to initialize PGAS shared memory");
-            return false;
-        }
-        SPDLOG_INFO("Server using PGAS shared memory mode (cxl_backend.h protocol)");
-        return true;
-    }
-
-    // TCP mode initialization
+    // TCP mode initialization (only reached if comm_mode == TCP)
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
         SPDLOG_ERROR("Failed to create socket");
         return false;
     }
-    
+
     int opt = 1;
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
         SPDLOG_ERROR("Failed to set socket options");
         return false;
     }
-    
+
     struct sockaddr_in address;
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(port);
-    
+
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         SPDLOG_ERROR("Failed to bind to port {}", port);
         return false;
     }
-    
+
     if (listen(server_fd, 100) < 0) {
         SPDLOG_ERROR("Failed to listen on socket");
         return false;
     }
-    
-    SPDLOG_INFO("Server listening on port {}", port);
+
+    SPDLOG_INFO("Server listening on TCP port {}", port);
     return true;
 }
 
 void ThreadPerConnectionServer::run() {
-    if (comm_mode == CommMode::SHM) {
-        run_shm_mode();
-        return;
+    switch (comm_mode) {
+        case CommMode::SHM:
+            SPDLOG_INFO("Running in SHM mode (no TCP accept loop)");
+            run_shm_mode();
+            return;
+
+        case CommMode::PGAS_SHM:
+            SPDLOG_INFO("Running in PGAS SHM mode (no TCP accept loop)");
+            run_pgas_shm_mode();
+            return;
+
+        case CommMode::TCP:
+            SPDLOG_INFO("Running in TCP mode");
+            break;
     }
 
-    if (comm_mode == CommMode::PGAS_SHM) {
-        run_pgas_shm_mode();
-        return;
-    }
-
-    // TCP mode
+    // TCP accept loop (only reached if comm_mode == TCP)
     while (running) {
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
@@ -726,6 +759,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             }
             
             total_reads++;
+            log_periodic_stats("READ", total_reads.load());
         } else {  // WRITE
             // SPDLOG_DEBUG("Thread {}: CXL_TYPE3_WRITE processing - checking coherency for cacheline 0x{:x}", 
             //             thread_id, cacheline_addr);
@@ -804,8 +838,9 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             }
             
             total_writes++;
+            log_periodic_stats("WRITE", total_writes.load());
         }
-        
+
         info.last_access_time = req.timestamp;
     }
     
@@ -905,6 +940,7 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
                 __atomic_thread_fence(__ATOMIC_RELEASE);
 
                 total_atomic_faa++;
+                log_periodic_stats("ATOMIC_FAA", total_atomic_faa.load());
                 SPDLOG_DEBUG("Thread {}: ATOMIC_FAA addr=0x{:x} add={} old={} new={}",
                             thread_id, req.addr, req.value, old_value, old_value + req.value);
                 break;
@@ -932,6 +968,7 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
                 __atomic_thread_fence(__ATOMIC_RELEASE);
 
                 total_atomic_cas++;
+                log_periodic_stats("ATOMIC_CAS", total_atomic_cas.load());
                 SPDLOG_DEBUG("Thread {}: ATOMIC_CAS addr=0x{:x} expected={} desired={} actual={} success={}",
                             thread_id, req.addr, req.expected, req.value, expected, success);
                 break;
@@ -949,6 +986,7 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
                 }
 
                 total_fences++;
+                log_periodic_stats("FENCE", total_fences.load());
                 SPDLOG_DEBUG("Thread {}: FENCE completed", thread_id);
                 break;
             }
@@ -1386,6 +1424,7 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 __atomic_thread_fence(__ATOMIC_RELEASE);
                 slot->resp_status = CXL_SHM_RESP_OK;
                 total_reads++;
+                log_periodic_stats("PGAS_READ", total_reads.load());
                 processed++;
                 break;
             }
@@ -1406,6 +1445,7 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 __atomic_thread_fence(__ATOMIC_RELEASE);
                 slot->resp_status = CXL_SHM_RESP_OK;
                 total_writes++;
+                log_periodic_stats("PGAS_WRITE", total_writes.load());
                 processed++;
                 break;
             }
@@ -1423,6 +1463,8 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                     slot->latency_ns = (uint64_t)base_latency;
                     __atomic_thread_fence(__ATOMIC_RELEASE);
                     slot->resp_status = CXL_SHM_RESP_OK;
+                    total_atomic_faa++;
+                    log_periodic_stats("PGAS_FAA", total_atomic_faa.load());
                 } else {
                     slot->resp_status = CXL_SHM_RESP_ERROR;
                 }
@@ -1444,6 +1486,8 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                     slot->latency_ns = (uint64_t)base_latency;
                     __atomic_thread_fence(__ATOMIC_RELEASE);
                     slot->resp_status = CXL_SHM_RESP_OK;
+                    total_atomic_cas++;
+                    log_periodic_stats("PGAS_CAS", total_atomic_cas.load());
                 } else {
                     slot->resp_status = CXL_SHM_RESP_ERROR;
                 }
@@ -1456,6 +1500,8 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 slot->latency_ns = 0;
                 __atomic_thread_fence(__ATOMIC_RELEASE);
                 slot->resp_status = CXL_SHM_RESP_OK;
+                total_fences++;
+                log_periodic_stats("PGAS_FENCE", total_fences.load());
                 processed++;
                 break;
             }
