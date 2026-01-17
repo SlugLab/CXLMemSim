@@ -37,3 +37,6 @@
 [submodule "workloads/osu"]
 	path = workloads/osu
 	url = https://github.com/forresti/osu-micro-benchmarks
+[submodule "workloads/lulesh"]
+	path = workloads/lulesh
+	url = https://github.com/sg0/LULESH
