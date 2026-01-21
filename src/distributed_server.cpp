@@ -1,0 +1,1486 @@
+/*
+ * Distributed Multi-Memory Server Implementation
+ * Provides inter-node communication for distributed CXL memory simulation
+ * using shared memory message passing between nodes.
+ *
+ * SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
+ * Copyright 2025 Regents of the University of California
+ * UC Santa Cruz Sluglab.
+ */
+
+#include "../include/distributed_server.h"
+#include "cxlcontroller.h"
+#include "shared_memory_manager.h"
+#include <spdlog/spdlog.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstring>
+#include <algorithm>
+#include <chrono>
+
+/* ============================================================================
+ * DistributedMessageManager Implementation
+ * ============================================================================ */
+
+DistributedMessageManager::DistributedMessageManager(const std::string& shm_name, uint32_t node_id)
+    : shm_name_(shm_name), shm_fd_(-1), shm_header_(nullptr),
+      local_node_id_(node_id), is_coordinator_(false),
+      next_msg_id_(1), running_(false) {
+}
+
+DistributedMessageManager::~DistributedMessageManager() {
+    cleanup();
+}
+
+bool DistributedMessageManager::initialize(bool create_new) {
+    if (create_new) {
+        // Remove existing shared memory
+        shm_unlink(shm_name_.c_str());
+
+        // Create new shared memory
+        shm_fd_ = shm_open(shm_name_.c_str(), O_CREAT | O_RDWR, 0666);
+        if (shm_fd_ < 0) {
+            SPDLOG_ERROR("Failed to create distributed SHM {}: {}", shm_name_, strerror(errno));
+            return false;
+        }
+
+        // Set size
+        if (ftruncate(shm_fd_, DIST_SHM_SIZE) < 0) {
+            SPDLOG_ERROR("Failed to set distributed SHM size: {}", strerror(errno));
+            close(shm_fd_);
+            shm_unlink(shm_name_.c_str());
+            return false;
+        }
+
+        SPDLOG_INFO("Created distributed SHM: {} ({} bytes)", shm_name_, DIST_SHM_SIZE);
+    } else {
+        // Open existing shared memory
+        shm_fd_ = shm_open(shm_name_.c_str(), O_RDWR, 0666);
+        if (shm_fd_ < 0) {
+            SPDLOG_ERROR("Failed to open distributed SHM {}: {}", shm_name_, strerror(errno));
+            return false;
+        }
+    }
+
+    // Map shared memory
+    void* mapped = mmap(NULL, DIST_SHM_SIZE, PROT_READ | PROT_WRITE,
+                        MAP_SHARED, shm_fd_, 0);
+    if (mapped == MAP_FAILED) {
+        SPDLOG_ERROR("Failed to mmap distributed SHM: {}", strerror(errno));
+        close(shm_fd_);
+        if (create_new) shm_unlink(shm_name_.c_str());
+        return false;
+    }
+
+    shm_header_ = static_cast<dist_shm_header_t*>(mapped);
+
+    if (create_new) {
+        // Initialize header
+        memset(shm_header_, 0, DIST_SHM_SIZE);
+        shm_header_->magic = DIST_SHM_MAGIC;
+        shm_header_->version = DIST_SHM_VERSION;
+        shm_header_->num_nodes = 0;
+        shm_header_->coordinator_node = local_node_id_;
+        shm_header_->global_epoch = 0;
+        shm_header_->system_ready = 0;
+        shm_header_->shutdown_requested = 0;
+
+        // Initialize all queues
+        for (int i = 0; i < DIST_MAX_NODES * DIST_MAX_NODES; i++) {
+            shm_header_->queues[i].head = 0;
+            shm_header_->queues[i].tail = 0;
+            shm_header_->queues[i].msg_count = 0;
+            shm_header_->queues[i].capacity = DIST_MSG_QUEUE_SIZE;
+            shm_header_->queues[i].total_sent = 0;
+            shm_header_->queues[i].total_received = 0;
+            shm_header_->queues[i].total_dropped = 0;
+        }
+
+        is_coordinator_ = true;
+        SPDLOG_INFO("Initialized as coordinator node {}", local_node_id_);
+    } else {
+        // Validate existing header
+        if (shm_header_->magic != DIST_SHM_MAGIC) {
+            SPDLOG_ERROR("Invalid distributed SHM magic: 0x{:x}", shm_header_->magic);
+            munmap(shm_header_, DIST_SHM_SIZE);
+            close(shm_fd_);
+            return false;
+        }
+        if (shm_header_->version != DIST_SHM_VERSION) {
+            SPDLOG_ERROR("Incompatible distributed SHM version: {}", shm_header_->version);
+            munmap(shm_header_, DIST_SHM_SIZE);
+            close(shm_fd_);
+            return false;
+        }
+        SPDLOG_INFO("Joined existing distributed SHM as node {}", local_node_id_);
+    }
+
+    return true;
+}
+
+void DistributedMessageManager::cleanup() {
+    stop_processing();
+
+    if (shm_header_) {
+        munmap(shm_header_, DIST_SHM_SIZE);
+        shm_header_ = nullptr;
+    }
+
+    if (shm_fd_ >= 0) {
+        close(shm_fd_);
+        shm_fd_ = -1;
+    }
+
+    if (is_coordinator_) {
+        shm_unlink(shm_name_.c_str());
+    }
+}
+
+bool DistributedMessageManager::register_node(const DistNodeInfo& info) {
+    if (!shm_header_) return false;
+    if (info.node_id >= DIST_MAX_NODES) return false;
+
+    dist_node_status_t* status = &shm_header_->nodes[info.node_id];
+
+    status->node_id = info.node_id;
+    status->state = NODE_STATE_READY;
+    status->last_heartbeat = std::chrono::steady_clock::now().time_since_epoch().count();
+    status->memory_base = info.memory_base;
+    status->memory_size = info.memory_size;
+    status->active_connections = 0;
+    status->flags = 0;
+    strncpy(status->hostname, info.hostname.c_str(), sizeof(status->hostname) - 1);
+
+    __atomic_fetch_add(&shm_header_->num_nodes, 1, __ATOMIC_SEQ_CST);
+
+    SPDLOG_INFO("Registered node {}: {} (memory: 0x{:x}-0x{:x})",
+                info.node_id, info.hostname, info.memory_base,
+                info.memory_base + info.memory_size);
+
+    return true;
+}
+
+bool DistributedMessageManager::deregister_node(uint32_t node_id) {
+    if (!shm_header_ || node_id >= DIST_MAX_NODES) return false;
+
+    dist_node_status_t* status = &shm_header_->nodes[node_id];
+    status->state = NODE_STATE_OFFLINE;
+    status->last_heartbeat = 0;
+
+    __atomic_fetch_sub(&shm_header_->num_nodes, 1, __ATOMIC_SEQ_CST);
+
+    SPDLOG_INFO("Deregistered node {}", node_id);
+    return true;
+}
+
+bool DistributedMessageManager::is_node_active(uint32_t node_id) const {
+    if (!shm_header_ || node_id >= DIST_MAX_NODES) return false;
+    return shm_header_->nodes[node_id].state == NODE_STATE_READY ||
+           shm_header_->nodes[node_id].state == NODE_STATE_BUSY;
+}
+
+std::vector<uint32_t> DistributedMessageManager::get_active_nodes() const {
+    std::vector<uint32_t> active;
+    if (!shm_header_) return active;
+
+    for (uint32_t i = 0; i < DIST_MAX_NODES; i++) {
+        if (is_node_active(i)) {
+            active.push_back(i);
+        }
+    }
+    return active;
+}
+
+bool DistributedMessageManager::enqueue_message(uint32_t dst_node, const dist_message_t& msg) {
+    if (!shm_header_ || dst_node >= DIST_MAX_NODES) return false;
+
+    uint32_t queue_idx = local_node_id_ * DIST_MAX_NODES + dst_node;
+    dist_node_queue_t* queue = &shm_header_->queues[queue_idx];
+
+    // Check if queue is full
+    uint32_t head = __atomic_load_n(&queue->head, __ATOMIC_ACQUIRE);
+    uint32_t tail = __atomic_load_n(&queue->tail, __ATOMIC_ACQUIRE);
+    uint32_t next_head = (head + 1) % queue->capacity;
+
+    if (next_head == tail) {
+        // Queue full
+        __atomic_fetch_add(&queue->total_dropped, 1, __ATOMIC_RELAXED);
+        SPDLOG_WARN("Message queue to node {} full, dropping message", dst_node);
+        return false;
+    }
+
+    // Copy message to queue
+    memcpy(&queue->messages[head], &msg, sizeof(dist_message_t));
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+
+    // Update head
+    __atomic_store_n(&queue->head, next_head, __ATOMIC_RELEASE);
+    __atomic_fetch_add(&queue->msg_count, 1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&queue->total_sent, 1, __ATOMIC_RELAXED);
+
+    return true;
+}
+
+bool DistributedMessageManager::dequeue_message(uint32_t src_node, dist_message_t& msg) {
+    if (!shm_header_ || src_node >= DIST_MAX_NODES) return false;
+
+    uint32_t queue_idx = src_node * DIST_MAX_NODES + local_node_id_;
+    dist_node_queue_t* queue = &shm_header_->queues[queue_idx];
+
+    uint32_t head = __atomic_load_n(&queue->head, __ATOMIC_ACQUIRE);
+    uint32_t tail = __atomic_load_n(&queue->tail, __ATOMIC_ACQUIRE);
+
+    if (head == tail) {
+        // Queue empty
+        return false;
+    }
+
+    // Copy message from queue
+    memcpy(&msg, &queue->messages[tail], sizeof(dist_message_t));
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+
+    // Update tail
+    uint32_t next_tail = (tail + 1) % queue->capacity;
+    __atomic_store_n(&queue->tail, next_tail, __ATOMIC_RELEASE);
+    __atomic_fetch_sub(&queue->msg_count, 1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&queue->total_received, 1, __ATOMIC_RELAXED);
+
+    return true;
+}
+
+bool DistributedMessageManager::send_message(uint32_t dst_node, const dist_message_t& msg) {
+    return enqueue_message(dst_node, msg);
+}
+
+bool DistributedMessageManager::send_message_wait_response(uint32_t dst_node,
+                                                            const dist_message_t& req,
+                                                            dist_message_t& resp,
+                                                            int timeout_ms) {
+    // Create pending request entry
+    auto pending = std::make_shared<PendingRequest>();
+    pending->msg_id = req.header.msg_id;
+    pending->response = &resp;
+    pending->completed = false;
+
+    {
+        std::lock_guard<std::mutex> lock(pending_mutex_);
+        pending_requests_[req.header.msg_id] = pending;
+    }
+
+    // Send request
+    if (!send_message(dst_node, req)) {
+        std::lock_guard<std::mutex> lock(pending_mutex_);
+        pending_requests_.erase(req.header.msg_id);
+        return false;
+    }
+
+    // Wait for response
+    {
+        std::unique_lock<std::mutex> lock(pending->mutex);
+        if (!pending->cv.wait_for(lock, std::chrono::milliseconds(timeout_ms),
+                                   [&pending]() { return pending->completed; })) {
+            // Timeout
+            std::lock_guard<std::mutex> pending_lock(pending_mutex_);
+            pending_requests_.erase(req.header.msg_id);
+            SPDLOG_WARN("Request {} to node {} timed out", req.header.msg_id, dst_node);
+            return false;
+        }
+    }
+
+    // Clean up
+    {
+        std::lock_guard<std::mutex> lock(pending_mutex_);
+        pending_requests_.erase(req.header.msg_id);
+    }
+
+    return true;
+}
+
+bool DistributedMessageManager::broadcast_message(const dist_message_t& msg) {
+    bool all_success = true;
+    auto active_nodes = get_active_nodes();
+
+    for (uint32_t node_id : active_nodes) {
+        if (node_id != local_node_id_) {
+            if (!send_message(node_id, msg)) {
+                all_success = false;
+            }
+        }
+    }
+
+    return all_success;
+}
+
+void DistributedMessageManager::register_handler(dist_msg_type_t type, DistMessageHandler handler) {
+    std::unique_lock<std::shared_mutex> lock(handlers_mutex_);
+    handlers_[type] = std::move(handler);
+}
+
+void DistributedMessageManager::unregister_handler(dist_msg_type_t type) {
+    std::unique_lock<std::shared_mutex> lock(handlers_mutex_);
+    handlers_.erase(type);
+}
+
+void DistributedMessageManager::process_message(const dist_message_t& msg) {
+    // Check if this is a response to a pending request
+    {
+        std::lock_guard<std::mutex> lock(pending_mutex_);
+        auto it = pending_requests_.find(msg.header.msg_id);
+        if (it != pending_requests_.end()) {
+            auto pending = it->second;
+            memcpy(pending->response, &msg, sizeof(dist_message_t));
+            {
+                std::lock_guard<std::mutex> pending_lock(pending->mutex);
+                pending->completed = true;
+            }
+            pending->cv.notify_one();
+            return;
+        }
+    }
+
+    // Find and call handler
+    DistMessageHandler handler;
+    {
+        std::shared_lock<std::shared_mutex> lock(handlers_mutex_);
+        auto it = handlers_.find(static_cast<dist_msg_type_t>(msg.header.msg_type));
+        if (it != handlers_.end()) {
+            handler = it->second;
+        }
+    }
+
+    if (handler) {
+        dist_message_t response;
+        memset(&response, 0, sizeof(response));
+        response.header.msg_id = msg.header.msg_id;
+        response.header.src_node_id = local_node_id_;
+        response.header.dst_node_id = msg.header.src_node_id;
+        response.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+
+        handler(msg, response);
+
+        // Send response if handler set a response type
+        if (response.header.msg_type != DIST_MSG_NONE) {
+            send_message(msg.header.src_node_id, response);
+        }
+    } else {
+        SPDLOG_WARN("No handler for message type {}", msg.header.msg_type);
+    }
+}
+
+void DistributedMessageManager::worker_thread() {
+    while (running_) {
+        int processed = poll_messages(100);
+        if (processed == 0) {
+            // No messages, sleep briefly
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+    }
+}
+
+int DistributedMessageManager::poll_messages(int max_messages) {
+    int processed = 0;
+
+    // Poll messages from all nodes
+    for (uint32_t src_node = 0; src_node < DIST_MAX_NODES && processed < max_messages; src_node++) {
+        if (src_node == local_node_id_) continue;
+        if (!is_node_active(src_node)) continue;
+
+        dist_message_t msg;
+        while (processed < max_messages && dequeue_message(src_node, msg)) {
+            process_message(msg);
+            processed++;
+        }
+    }
+
+    return processed;
+}
+
+void DistributedMessageManager::send_heartbeat() {
+    if (!shm_header_) return;
+
+    // Update local node status
+    dist_node_status_t* status = &shm_header_->nodes[local_node_id_];
+    status->last_heartbeat = std::chrono::steady_clock::now().time_since_epoch().count();
+
+    // Send heartbeat message to all active nodes
+    dist_message_t hb_msg;
+    memset(&hb_msg, 0, sizeof(hb_msg));
+    hb_msg.header.msg_type = DIST_MSG_NODE_HEARTBEAT;
+    hb_msg.header.msg_id = generate_msg_id();
+    hb_msg.header.src_node_id = local_node_id_;
+    hb_msg.header.timestamp = status->last_heartbeat;
+
+    hb_msg.payload.node.node_id = local_node_id_;
+    hb_msg.payload.node.node_state = status->state;
+    hb_msg.payload.node.memory_base = status->memory_base;
+    hb_msg.payload.node.memory_size = status->memory_size;
+
+    broadcast_message(hb_msg);
+}
+
+void DistributedMessageManager::start_processing() {
+    if (running_) return;
+
+    running_ = true;
+
+    // Start worker threads
+    int num_workers = 2;
+    for (int i = 0; i < num_workers; i++) {
+        workers_.emplace_back(&DistributedMessageManager::worker_thread, this);
+    }
+
+    SPDLOG_INFO("Started {} message processing workers", num_workers);
+}
+
+void DistributedMessageManager::stop_processing() {
+    running_ = false;
+
+    for (auto& worker : workers_) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+    workers_.clear();
+}
+
+DistributedMessageManager::Stats DistributedMessageManager::get_stats() const {
+    Stats stats = {0, 0, 0, 0};
+
+    if (!shm_header_) return stats;
+
+    // Sum stats from all queues
+    for (int i = 0; i < DIST_MAX_NODES * DIST_MAX_NODES; i++) {
+        stats.messages_sent += shm_header_->queues[i].total_sent;
+        stats.messages_received += shm_header_->queues[i].total_received;
+        stats.messages_dropped += shm_header_->queues[i].total_dropped;
+    }
+
+    return stats;
+}
+
+/* ============================================================================
+ * DistributedDirectory Implementation
+ * ============================================================================ */
+
+DistributedDirectory::DistributedDirectory(DistributedMessageManager* mgr, uint32_t node_id,
+                                           uint64_t mem_base, uint64_t mem_size)
+    : msg_manager_(mgr), local_node_id_(node_id),
+      local_memory_base_(mem_base), local_memory_size_(mem_size),
+      total_lookups_(0), total_updates_(0),
+      total_invalidations_(0), total_writebacks_(0) {
+}
+
+uint32_t DistributedDirectory::get_home_node(uint64_t addr) const {
+    // Simple address interleaving across nodes
+    // Each node owns addresses where (addr / CACHELINE_SIZE) % num_nodes == node_id
+    auto active_nodes = msg_manager_->get_active_nodes();
+    if (active_nodes.empty()) return local_node_id_;
+
+    uint64_t cacheline_idx = addr / DIST_CACHELINE_SIZE;
+    return active_nodes[cacheline_idx % active_nodes.size()];
+}
+
+bool DistributedDirectory::is_local_home(uint64_t addr) const {
+    return get_home_node(addr) == local_node_id_;
+}
+
+DistDirectoryEntry* DistributedDirectory::get_entry(uint64_t cacheline_addr) {
+    total_lookups_++;
+
+    std::shared_lock<std::shared_mutex> lock(entries_mutex_);
+    auto it = entries_.find(cacheline_addr);
+    if (it != entries_.end()) {
+        return it->second.get();
+    }
+    return nullptr;
+}
+
+DistDirectoryEntry* DistributedDirectory::get_or_create_entry(uint64_t cacheline_addr) {
+    total_lookups_++;
+
+    {
+        std::shared_lock<std::shared_mutex> lock(entries_mutex_);
+        auto it = entries_.find(cacheline_addr);
+        if (it != entries_.end()) {
+            return it->second.get();
+        }
+    }
+
+    // Create new entry
+    std::unique_lock<std::shared_mutex> lock(entries_mutex_);
+    auto& entry = entries_[cacheline_addr];
+    if (!entry) {
+        entry = std::make_unique<DistDirectoryEntry>();
+        entry->cacheline_addr = cacheline_addr;
+        entry->home_node = get_home_node(cacheline_addr);
+        entry->state = DIST_CACHE_INVALID;
+        entry->owner_node = UINT32_MAX;
+        entry->version = 0;
+        entry->last_access_time = std::chrono::steady_clock::now().time_since_epoch().count();
+    }
+    return entry.get();
+}
+
+bool DistributedDirectory::request_shared(uint64_t addr, uint32_t requesting_node,
+                                          uint8_t* data, uint64_t& latency_ns) {
+    uint64_t cacheline_addr = addr & ~(DIST_CACHELINE_SIZE - 1);
+
+    if (!is_local_home(addr)) {
+        // Forward to home node
+        dist_message_t req, resp;
+        memset(&req, 0, sizeof(req));
+        req.header.msg_type = DIST_MSG_READ_REQ;
+        req.header.msg_id = msg_manager_->generate_msg_id();
+        req.header.src_node_id = local_node_id_;
+        req.header.dst_node_id = get_home_node(addr);
+        req.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        req.payload.mem.addr = addr;
+        req.payload.mem.size = DIST_CACHELINE_SIZE;
+        req.payload.mem.client_id = requesting_node;
+
+        uint32_t dst_node = req.header.dst_node_id;
+        if (!msg_manager_->send_message_wait_response(dst_node, req, resp)) {
+            SPDLOG_ERROR("Failed to request shared access from home node {}", dst_node);
+            return false;
+        }
+
+        memcpy(data, resp.payload.mem.data, DIST_CACHELINE_SIZE);
+        latency_ns = resp.payload.mem.latency_ns;
+        return resp.payload.mem.status == 0;
+    }
+
+    // Local home node - handle directly
+    DistDirectoryEntry* entry = get_or_create_entry(cacheline_addr);
+    std::lock_guard<std::mutex> lock(entry->lock);
+
+    switch (entry->state) {
+        case DIST_CACHE_INVALID:
+            // No one has the data - requesting node will be first sharer
+            entry->state = DIST_CACHE_SHARED;
+            entry->sharers.insert(requesting_node);
+            latency_ns = 100; // Base memory access latency
+            break;
+
+        case DIST_CACHE_SHARED:
+            // Already shared, add requester
+            entry->sharers.insert(requesting_node);
+            latency_ns = 50; // Cache hit latency
+            break;
+
+        case DIST_CACHE_EXCLUSIVE:
+        case DIST_CACHE_MODIFIED:
+            // Need to downgrade owner
+            if (entry->owner_node != requesting_node) {
+                downgrade_owner(addr);
+            }
+            entry->state = DIST_CACHE_SHARED;
+            entry->sharers.insert(entry->owner_node);
+            entry->sharers.insert(requesting_node);
+            entry->owner_node = UINT32_MAX;
+            latency_ns = 150; // Downgrade latency
+            break;
+
+        default:
+            break;
+    }
+
+    entry->last_access_time = std::chrono::steady_clock::now().time_since_epoch().count();
+    entry->version++;
+    total_updates_++;
+
+    return true;
+}
+
+bool DistributedDirectory::request_exclusive(uint64_t addr, uint32_t requesting_node,
+                                             uint8_t* data, uint64_t& latency_ns) {
+    uint64_t cacheline_addr = addr & ~(DIST_CACHELINE_SIZE - 1);
+
+    if (!is_local_home(addr)) {
+        // Forward to home node
+        dist_message_t req, resp;
+        memset(&req, 0, sizeof(req));
+        req.header.msg_type = DIST_MSG_WRITE_REQ;
+        req.header.msg_id = msg_manager_->generate_msg_id();
+        req.header.src_node_id = local_node_id_;
+        req.header.dst_node_id = get_home_node(addr);
+        req.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        req.payload.mem.addr = addr;
+        req.payload.mem.size = DIST_CACHELINE_SIZE;
+        req.payload.mem.client_id = requesting_node;
+        memcpy(req.payload.mem.data, data, DIST_CACHELINE_SIZE);
+
+        uint32_t dst_node = req.header.dst_node_id;
+        if (!msg_manager_->send_message_wait_response(dst_node, req, resp)) {
+            SPDLOG_ERROR("Failed to request exclusive access from home node {}", dst_node);
+            return false;
+        }
+
+        latency_ns = resp.payload.mem.latency_ns;
+        return resp.payload.mem.status == 0;
+    }
+
+    // Local home node - handle directly
+    DistDirectoryEntry* entry = get_or_create_entry(cacheline_addr);
+    std::lock_guard<std::mutex> lock(entry->lock);
+
+    // Invalidate all other copies
+    if (!entry->sharers.empty() || entry->owner_node != UINT32_MAX) {
+        invalidate_copies(addr, requesting_node);
+        latency_ns = 200; // Invalidation latency
+    } else {
+        latency_ns = 100; // Base latency
+    }
+
+    entry->state = DIST_CACHE_MODIFIED;
+    entry->owner_node = requesting_node;
+    entry->sharers.clear();
+    entry->last_access_time = std::chrono::steady_clock::now().time_since_epoch().count();
+    entry->version++;
+    total_updates_++;
+
+    return true;
+}
+
+bool DistributedDirectory::handle_writeback(uint64_t addr, uint32_t owner_node,
+                                            const uint8_t* data) {
+    uint64_t cacheline_addr = addr & ~(DIST_CACHELINE_SIZE - 1);
+    total_writebacks_++;
+
+    DistDirectoryEntry* entry = get_entry(cacheline_addr);
+    if (!entry) return false;
+
+    std::lock_guard<std::mutex> lock(entry->lock);
+
+    if (entry->owner_node == owner_node) {
+        entry->state = DIST_CACHE_INVALID;
+        entry->owner_node = UINT32_MAX;
+        entry->version++;
+        return true;
+    }
+
+    return false;
+}
+
+bool DistributedDirectory::invalidate_copies(uint64_t addr, uint32_t except_node) {
+    uint64_t cacheline_addr = addr & ~(DIST_CACHELINE_SIZE - 1);
+
+    DistDirectoryEntry* entry = get_entry(cacheline_addr);
+    if (!entry) return true; // Nothing to invalidate
+
+    std::set<uint32_t> nodes_to_invalidate;
+    {
+        std::lock_guard<std::mutex> lock(entry->lock);
+        nodes_to_invalidate = entry->sharers;
+        if (entry->owner_node != UINT32_MAX && entry->owner_node != except_node) {
+            nodes_to_invalidate.insert(entry->owner_node);
+        }
+        nodes_to_invalidate.erase(except_node);
+    }
+
+    // Send invalidation messages
+    for (uint32_t node_id : nodes_to_invalidate) {
+        if (node_id == local_node_id_) continue;
+
+        dist_message_t inv_msg;
+        memset(&inv_msg, 0, sizeof(inv_msg));
+        inv_msg.header.msg_type = DIST_MSG_INVALIDATE;
+        inv_msg.header.msg_id = msg_manager_->generate_msg_id();
+        inv_msg.header.src_node_id = local_node_id_;
+        inv_msg.header.dst_node_id = node_id;
+        inv_msg.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        inv_msg.payload.coherency.cacheline_addr = cacheline_addr;
+        inv_msg.payload.coherency.requesting_node = except_node;
+
+        msg_manager_->send_message(node_id, inv_msg);
+        total_invalidations_++;
+    }
+
+    return true;
+}
+
+bool DistributedDirectory::downgrade_owner(uint64_t addr) {
+    uint64_t cacheline_addr = addr & ~(DIST_CACHELINE_SIZE - 1);
+
+    DistDirectoryEntry* entry = get_entry(cacheline_addr);
+    if (!entry) return false;
+
+    uint32_t owner;
+    {
+        std::lock_guard<std::mutex> lock(entry->lock);
+        owner = entry->owner_node;
+        if (owner == UINT32_MAX || owner == local_node_id_) return true;
+    }
+
+    // Send downgrade message
+    dist_message_t down_msg;
+    memset(&down_msg, 0, sizeof(down_msg));
+    down_msg.header.msg_type = DIST_MSG_DOWNGRADE;
+    down_msg.header.msg_id = msg_manager_->generate_msg_id();
+    down_msg.header.src_node_id = local_node_id_;
+    down_msg.header.dst_node_id = owner;
+    down_msg.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    down_msg.payload.coherency.cacheline_addr = cacheline_addr;
+
+    dist_message_t resp;
+    return msg_manager_->send_message_wait_response(owner, down_msg, resp);
+}
+
+bool DistributedDirectory::remote_lookup(uint64_t addr, DistDirectoryEntry& entry) {
+    uint32_t home_node = get_home_node(addr);
+    if (home_node == local_node_id_) return false;
+
+    dist_message_t req, resp;
+    memset(&req, 0, sizeof(req));
+    req.header.msg_type = DIST_MSG_DIR_QUERY;
+    req.header.msg_id = msg_manager_->generate_msg_id();
+    req.header.src_node_id = local_node_id_;
+    req.header.dst_node_id = home_node;
+    req.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    req.payload.coherency.cacheline_addr = addr & ~(DIST_CACHELINE_SIZE - 1);
+
+    if (!msg_manager_->send_message_wait_response(home_node, req, resp)) {
+        return false;
+    }
+
+    // Parse response into entry
+    entry.cacheline_addr = resp.payload.coherency.cacheline_addr;
+    entry.state = static_cast<dist_cache_state_t>(resp.payload.coherency.current_state);
+    entry.owner_node = resp.payload.coherency.owner_node;
+    entry.home_node = home_node;
+    entry.version = resp.payload.coherency.version;
+
+    // Reconstruct sharers from bitmap
+    entry.sharers.clear();
+    for (int i = 0; i < 16; i++) {
+        if (resp.payload.coherency.sharers_bitmap & (1 << i)) {
+            entry.sharers.insert(i);
+        }
+    }
+
+    return true;
+}
+
+bool DistributedDirectory::remote_update(uint64_t addr, const DistDirectoryEntry& entry) {
+    uint32_t home_node = get_home_node(addr);
+    if (home_node == local_node_id_) return false;
+
+    dist_message_t req;
+    memset(&req, 0, sizeof(req));
+    req.header.msg_type = DIST_MSG_DIR_UPDATE;
+    req.header.msg_id = msg_manager_->generate_msg_id();
+    req.header.src_node_id = local_node_id_;
+    req.header.dst_node_id = home_node;
+    req.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    req.payload.coherency.cacheline_addr = entry.cacheline_addr;
+    req.payload.coherency.current_state = entry.state;
+    req.payload.coherency.owner_node = entry.owner_node;
+    req.payload.coherency.version = entry.version;
+
+    // Build sharers bitmap
+    uint16_t bitmap = 0;
+    for (uint32_t sharer : entry.sharers) {
+        if (sharer < 16) bitmap |= (1 << sharer);
+    }
+    req.payload.coherency.sharers_bitmap = bitmap;
+
+    return msg_manager_->send_message(home_node, req);
+}
+
+DistributedDirectory::Stats DistributedDirectory::get_stats() const {
+    return {
+        total_lookups_.load(),
+        total_updates_.load(),
+        total_invalidations_.load(),
+        total_writebacks_.load()
+    };
+}
+
+/* ============================================================================
+ * DistributedMemoryServer Implementation
+ * ============================================================================ */
+
+DistributedMemoryServer::DistributedMemoryServer(uint32_t node_id, const std::string& shm_name,
+                                                   int tcp_port, size_t capacity_mb,
+                                                   CXLController* controller)
+    : node_id_(node_id), shm_name_(shm_name), tcp_port_(tcp_port),
+      memory_capacity_mb_(capacity_mb), controller_(controller),
+      running_(false), state_(NODE_STATE_UNKNOWN),
+      local_reads_(0), local_writes_(0), remote_reads_(0), remote_writes_(0),
+      forwarded_requests_(0), coherency_messages_(0) {
+}
+
+DistributedMemoryServer::~DistributedMemoryServer() {
+    stop();
+}
+
+bool DistributedMemoryServer::initialize() {
+    state_ = NODE_STATE_INITIALIZING;
+
+    // Initialize local memory manager
+    std::string local_shm = shm_name_ + "_node" + std::to_string(node_id_);
+    local_memory_ = std::make_unique<SharedMemoryManager>(memory_capacity_mb_, local_shm);
+    if (!local_memory_->initialize()) {
+        SPDLOG_ERROR("Failed to initialize local shared memory");
+        return false;
+    }
+
+    auto shm_info = local_memory_->get_shm_info();
+
+    // Initialize message manager
+    msg_manager_ = std::make_unique<DistributedMessageManager>(shm_name_, node_id_);
+    bool is_first_node = (node_id_ == 0);
+    if (!msg_manager_->initialize(is_first_node)) {
+        SPDLOG_ERROR("Failed to initialize message manager");
+        return false;
+    }
+
+    // Register this node
+    DistNodeInfo info;
+    info.node_id = node_id_;
+    info.hostname = "node" + std::to_string(node_id_);
+    info.state = NODE_STATE_READY;
+    info.memory_base = shm_info.base_addr;
+    info.memory_size = shm_info.size;
+    info.last_heartbeat = std::chrono::steady_clock::now().time_since_epoch().count();
+
+    if (!msg_manager_->register_node(info)) {
+        SPDLOG_ERROR("Failed to register node");
+        return false;
+    }
+
+    // Initialize directory
+    directory_ = std::make_unique<DistributedDirectory>(
+        msg_manager_.get(), node_id_, shm_info.base_addr, shm_info.size);
+
+    // Setup message handlers
+    setup_message_handlers();
+
+    state_ = NODE_STATE_READY;
+    SPDLOG_INFO("Distributed node {} initialized: memory 0x{:x}-0x{:x} ({} MB)",
+                node_id_, shm_info.base_addr, shm_info.base_addr + shm_info.size,
+                memory_capacity_mb_);
+
+    return true;
+}
+
+bool DistributedMemoryServer::start() {
+    if (running_) return true;
+    if (state_ != NODE_STATE_READY) {
+        SPDLOG_ERROR("Cannot start: node not ready");
+        return false;
+    }
+
+    running_ = true;
+
+    // Start message processing
+    msg_manager_->start_processing();
+
+    // Start heartbeat thread
+    heartbeat_thread_ = std::thread(&DistributedMemoryServer::heartbeat_loop, this);
+
+    // Start request processor
+    request_processor_thread_ = std::thread(&DistributedMemoryServer::process_requests_loop, this);
+
+    SPDLOG_INFO("Distributed node {} started", node_id_);
+    return true;
+}
+
+void DistributedMemoryServer::stop() {
+    if (!running_) return;
+
+    running_ = false;
+    state_ = NODE_STATE_DRAINING;
+
+    // Wait for threads
+    if (heartbeat_thread_.joinable()) {
+        heartbeat_thread_.join();
+    }
+    if (request_processor_thread_.joinable()) {
+        request_processor_thread_.join();
+    }
+    for (auto& t : client_threads_) {
+        if (t.joinable()) t.join();
+    }
+    client_threads_.clear();
+
+    // Stop message processing
+    if (msg_manager_) {
+        msg_manager_->stop_processing();
+        msg_manager_->deregister_node(node_id_);
+    }
+
+    state_ = NODE_STATE_OFFLINE;
+    SPDLOG_INFO("Distributed node {} stopped", node_id_);
+}
+
+bool DistributedMemoryServer::join_cluster(const std::string& coordinator_shm) {
+    // For joining an existing cluster
+    // Re-initialize message manager with the coordinator's shared memory
+    msg_manager_ = std::make_unique<DistributedMessageManager>(coordinator_shm, node_id_);
+    if (!msg_manager_->initialize(false)) {
+        SPDLOG_ERROR("Failed to join cluster");
+        return false;
+    }
+
+    auto shm_info = local_memory_->get_shm_info();
+    DistNodeInfo info;
+    info.node_id = node_id_;
+    info.hostname = "node" + std::to_string(node_id_);
+    info.state = NODE_STATE_READY;
+    info.memory_base = shm_info.base_addr;
+    info.memory_size = shm_info.size;
+
+    if (!msg_manager_->register_node(info)) {
+        SPDLOG_ERROR("Failed to register with cluster");
+        return false;
+    }
+
+    // Notify coordinator
+    dist_message_t reg_msg;
+    memset(&reg_msg, 0, sizeof(reg_msg));
+    reg_msg.header.msg_type = DIST_MSG_NODE_REGISTER;
+    reg_msg.header.msg_id = msg_manager_->generate_msg_id();
+    reg_msg.header.src_node_id = node_id_;
+    reg_msg.header.dst_node_id = 0; // Coordinator
+    reg_msg.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    reg_msg.payload.node = {
+        .node_id = info.node_id,
+        .node_state = static_cast<uint32_t>(info.state),
+        .memory_base = info.memory_base,
+        .memory_size = info.memory_size,
+        .num_cachelines = info.memory_size / DIST_CACHELINE_SIZE,
+        .port = static_cast<uint32_t>(tcp_port_),
+        .flags = 0
+    };
+    strncpy(reg_msg.payload.node.hostname, info.hostname.c_str(),
+            sizeof(reg_msg.payload.node.hostname) - 1);
+
+    msg_manager_->send_message(0, reg_msg);
+
+    SPDLOG_INFO("Node {} joined cluster", node_id_);
+    return true;
+}
+
+bool DistributedMemoryServer::leave_cluster() {
+    // Notify other nodes
+    dist_message_t dereg_msg;
+    memset(&dereg_msg, 0, sizeof(dereg_msg));
+    dereg_msg.header.msg_type = DIST_MSG_NODE_DEREGISTER;
+    dereg_msg.header.msg_id = msg_manager_->generate_msg_id();
+    dereg_msg.header.src_node_id = node_id_;
+    dereg_msg.header.dst_node_id = 0xFFFF; // Broadcast
+    dereg_msg.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    dereg_msg.payload.node.node_id = node_id_;
+
+    msg_manager_->broadcast_message(dereg_msg);
+    msg_manager_->deregister_node(node_id_);
+
+    SPDLOG_INFO("Node {} left cluster", node_id_);
+    return true;
+}
+
+void DistributedMemoryServer::setup_message_handlers() {
+    // Read request handler
+    msg_manager_->register_handler(DIST_MSG_READ_REQ,
+        [this](const dist_message_t& req, dist_message_t& resp) {
+            handle_read_request(req, resp);
+        });
+
+    // Write request handler
+    msg_manager_->register_handler(DIST_MSG_WRITE_REQ,
+        [this](const dist_message_t& req, dist_message_t& resp) {
+            handle_write_request(req, resp);
+        });
+
+    // Atomic FAA handler
+    msg_manager_->register_handler(DIST_MSG_ATOMIC_FAA_REQ,
+        [this](const dist_message_t& req, dist_message_t& resp) {
+            handle_atomic_request(req, resp);
+        });
+
+    // Atomic CAS handler
+    msg_manager_->register_handler(DIST_MSG_ATOMIC_CAS_REQ,
+        [this](const dist_message_t& req, dist_message_t& resp) {
+            handle_atomic_request(req, resp);
+        });
+
+    // Coherency handlers
+    msg_manager_->register_handler(DIST_MSG_INVALIDATE,
+        [this](const dist_message_t& req, dist_message_t& resp) {
+            handle_coherency_request(req, resp);
+        });
+
+    msg_manager_->register_handler(DIST_MSG_DOWNGRADE,
+        [this](const dist_message_t& req, dist_message_t& resp) {
+            handle_coherency_request(req, resp);
+        });
+
+    // Node management handlers
+    msg_manager_->register_handler(DIST_MSG_NODE_REGISTER,
+        [this](const dist_message_t& req, dist_message_t& resp) {
+            handle_node_message(req, resp);
+        });
+
+    msg_manager_->register_handler(DIST_MSG_NODE_HEARTBEAT,
+        [this](const dist_message_t& req, dist_message_t& resp) {
+            handle_node_message(req, resp);
+        });
+
+    // Directory query handler
+    msg_manager_->register_handler(DIST_MSG_DIR_QUERY,
+        [this](const dist_message_t& req, dist_message_t& resp) {
+            resp.header.msg_type = DIST_MSG_DIR_RESPONSE;
+            auto* entry = directory_->get_entry(req.payload.coherency.cacheline_addr);
+            if (entry) {
+                std::lock_guard<std::mutex> lock(entry->lock);
+                resp.payload.coherency.cacheline_addr = entry->cacheline_addr;
+                resp.payload.coherency.current_state = entry->state;
+                resp.payload.coherency.owner_node = entry->owner_node;
+                resp.payload.coherency.version = entry->version;
+                uint16_t bitmap = 0;
+                for (uint32_t s : entry->sharers) {
+                    if (s < 16) bitmap |= (1 << s);
+                }
+                resp.payload.coherency.sharers_bitmap = bitmap;
+            }
+        });
+}
+
+void DistributedMemoryServer::handle_read_request(const dist_message_t& req, dist_message_t& resp) {
+    resp.header.msg_type = DIST_MSG_READ_RESP;
+
+    uint64_t addr = req.payload.mem.addr;
+    uint64_t size = req.payload.mem.size;
+    uint32_t client = req.payload.mem.client_id;
+
+    // Ensure coherency
+    ensure_coherency_for_read(addr, client);
+
+    // Read from local memory
+    if (local_memory_->read_cacheline(addr, resp.payload.mem.data, size)) {
+        resp.payload.mem.status = 0;
+
+        // Calculate latency
+        std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
+        access_elem.push_back(std::make_tuple(addr, size));
+        resp.payload.mem.latency_ns = controller_->calculate_latency(access_elem, controller_->dramlatency);
+
+        local_reads_++;
+    } else {
+        resp.payload.mem.status = 1;
+        SPDLOG_ERROR("Failed to read local address 0x{:x}", addr);
+    }
+}
+
+void DistributedMemoryServer::handle_write_request(const dist_message_t& req, dist_message_t& resp) {
+    resp.header.msg_type = DIST_MSG_WRITE_RESP;
+
+    uint64_t addr = req.payload.mem.addr;
+    uint64_t size = req.payload.mem.size;
+    uint32_t client = req.payload.mem.client_id;
+
+    // Ensure coherency (invalidate other copies)
+    ensure_coherency_for_write(addr, client);
+
+    // Write to local memory
+    if (local_memory_->write_cacheline(addr, req.payload.mem.data, size)) {
+        resp.payload.mem.status = 0;
+
+        // Calculate latency
+        std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
+        access_elem.push_back(std::make_tuple(addr, size));
+        resp.payload.mem.latency_ns = controller_->calculate_latency(access_elem, controller_->dramlatency);
+
+        local_writes_++;
+    } else {
+        resp.payload.mem.status = 1;
+        SPDLOG_ERROR("Failed to write local address 0x{:x}", addr);
+    }
+}
+
+void DistributedMemoryServer::handle_atomic_request(const dist_message_t& req, dist_message_t& resp) {
+    uint64_t addr = req.payload.mem.addr;
+
+    // Ensure exclusive access
+    ensure_coherency_for_write(addr, req.header.src_node_id);
+
+    // Get pointer to data
+    uint8_t* data_ptr = local_memory_->get_cacheline_data(addr & ~(DIST_CACHELINE_SIZE - 1));
+    if (!data_ptr) {
+        if (req.header.msg_type == DIST_MSG_ATOMIC_FAA_REQ) {
+            resp.header.msg_type = DIST_MSG_ATOMIC_FAA_RESP;
+        } else {
+            resp.header.msg_type = DIST_MSG_ATOMIC_CAS_RESP;
+        }
+        resp.payload.mem.status = 1;
+        return;
+    }
+
+    uint64_t offset = addr % DIST_CACHELINE_SIZE;
+    uint64_t* ptr = reinterpret_cast<uint64_t*>(data_ptr + offset);
+
+    if (req.header.msg_type == DIST_MSG_ATOMIC_FAA_REQ) {
+        resp.header.msg_type = DIST_MSG_ATOMIC_FAA_RESP;
+        uint64_t old = __atomic_fetch_add(ptr, req.payload.mem.value, __ATOMIC_SEQ_CST);
+        memcpy(&resp.payload.mem.value, &old, sizeof(old));
+        resp.payload.mem.status = 0;
+    } else { // CAS
+        resp.header.msg_type = DIST_MSG_ATOMIC_CAS_RESP;
+        uint64_t expected = req.payload.mem.expected;
+        __atomic_compare_exchange_n(ptr, &expected, req.payload.mem.value,
+                                    false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+        memcpy(&resp.payload.mem.value, &expected, sizeof(expected));
+        resp.payload.mem.status = 0;
+    }
+
+    // Calculate latency with atomic overhead
+    std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
+    access_elem.push_back(std::make_tuple(addr, sizeof(uint64_t)));
+    resp.payload.mem.latency_ns = controller_->calculate_latency(access_elem, controller_->dramlatency) + 20;
+}
+
+void DistributedMemoryServer::handle_coherency_request(const dist_message_t& req, dist_message_t& resp) {
+    coherency_messages_++;
+
+    uint64_t cacheline_addr = req.payload.coherency.cacheline_addr;
+
+    if (req.header.msg_type == DIST_MSG_INVALIDATE) {
+        resp.header.msg_type = DIST_MSG_INVALIDATE_ACK;
+
+        // Invalidate local copy
+        auto* metadata = local_memory_->get_cacheline_metadata(cacheline_addr);
+        if (metadata) {
+            std::lock_guard<std::mutex> lock(metadata->lock);
+            metadata->state = INVALID;
+            metadata->owner = -1;
+            metadata->sharers.clear();
+        }
+        resp.payload.coherency.cacheline_addr = cacheline_addr;
+
+    } else if (req.header.msg_type == DIST_MSG_DOWNGRADE) {
+        resp.header.msg_type = DIST_MSG_DOWNGRADE_ACK;
+
+        // Downgrade from Modified/Exclusive to Shared
+        auto* metadata = local_memory_->get_cacheline_metadata(cacheline_addr);
+        if (metadata) {
+            std::lock_guard<std::mutex> lock(metadata->lock);
+            if (metadata->state == MODIFIED || metadata->state == EXCLUSIVE) {
+                // Include dirty data in response if modified
+                if (metadata->state == MODIFIED) {
+                    local_memory_->read_cacheline(cacheline_addr, resp.payload.coherency.data,
+                                                  DIST_CACHELINE_SIZE);
+                }
+                metadata->state = SHARED;
+                metadata->owner = -1;
+            }
+        }
+        resp.payload.coherency.cacheline_addr = cacheline_addr;
+    }
+}
+
+void DistributedMemoryServer::handle_node_message(const dist_message_t& req, dist_message_t& resp) {
+    if (req.header.msg_type == DIST_MSG_NODE_REGISTER) {
+        // New node joined
+        DistNodeInfo info;
+        info.node_id = req.payload.node.node_id;
+        info.hostname = req.payload.node.hostname;
+        info.state = static_cast<node_state_t>(req.payload.node.node_state);
+        info.memory_base = req.payload.node.memory_base;
+        info.memory_size = req.payload.node.memory_size;
+
+        {
+            std::unique_lock<std::shared_mutex> lock(nodes_mutex_);
+            nodes_[info.node_id] = info;
+        }
+
+        resp.header.msg_type = DIST_MSG_NODE_ACK;
+        SPDLOG_INFO("Node {} registered: {} (memory: 0x{:x}-0x{:x})",
+                    info.node_id, info.hostname, info.memory_base,
+                    info.memory_base + info.memory_size);
+
+    } else if (req.header.msg_type == DIST_MSG_NODE_HEARTBEAT) {
+        // Update node status
+        uint32_t node_id = req.payload.node.node_id;
+
+        std::unique_lock<std::shared_mutex> lock(nodes_mutex_);
+        auto it = nodes_.find(node_id);
+        if (it != nodes_.end()) {
+            it->second.last_heartbeat = req.header.timestamp;
+            it->second.state = static_cast<node_state_t>(req.payload.node.node_state);
+        }
+        // No response needed for heartbeat
+        resp.header.msg_type = DIST_MSG_NONE;
+    }
+}
+
+void DistributedMemoryServer::heartbeat_loop() {
+    while (running_) {
+        msg_manager_->send_heartbeat();
+
+        // Check for dead nodes
+        auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+        {
+            std::shared_lock<std::shared_mutex> lock(nodes_mutex_);
+            for (auto& [id, info] : nodes_) {
+                if (id == node_id_) continue;
+                // Mark node as offline if no heartbeat for 10 seconds
+                if (now - info.last_heartbeat > 10000000000ULL) {
+                    if (info.state != NODE_STATE_OFFLINE) {
+                        SPDLOG_WARN("Node {} appears to be offline", id);
+                        info.state = NODE_STATE_OFFLINE;
+                    }
+                }
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+}
+
+void DistributedMemoryServer::process_requests_loop() {
+    // This thread handles any additional request processing
+    while (running_) {
+        // Main processing is done by message manager workers
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
+
+uint32_t DistributedMemoryServer::get_node_for_address(uint64_t addr) const {
+    return directory_->get_home_node(addr);
+}
+
+bool DistributedMemoryServer::is_local_address(uint64_t addr) const {
+    auto shm_info = local_memory_->get_shm_info();
+    return addr >= shm_info.base_addr && addr < shm_info.base_addr + shm_info.size;
+}
+
+int DistributedMemoryServer::read(uint64_t addr, void* data, size_t size, uint64_t* latency_ns) {
+    uint32_t target_node = get_node_for_address(addr);
+
+    if (target_node == node_id_ || is_local_address(addr)) {
+        // Local read
+        ensure_coherency_for_read(addr, node_id_);
+
+        if (!local_memory_->read_cacheline(addr, static_cast<uint8_t*>(data), size)) {
+            return -1;
+        }
+
+        std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
+        access_elem.push_back(std::make_tuple(addr, size));
+        *latency_ns = controller_->calculate_latency(access_elem, controller_->dramlatency);
+
+        local_reads_++;
+        return 0;
+    }
+
+    // Remote read
+    return forward_read(target_node, addr, data, size, latency_ns);
+}
+
+int DistributedMemoryServer::write(uint64_t addr, const void* data, size_t size, uint64_t* latency_ns) {
+    uint32_t target_node = get_node_for_address(addr);
+
+    if (target_node == node_id_ || is_local_address(addr)) {
+        // Local write
+        ensure_coherency_for_write(addr, node_id_);
+
+        if (!local_memory_->write_cacheline(addr, static_cast<const uint8_t*>(data), size)) {
+            return -1;
+        }
+
+        std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
+        access_elem.push_back(std::make_tuple(addr, size));
+        *latency_ns = controller_->calculate_latency(access_elem, controller_->dramlatency);
+
+        local_writes_++;
+        return 0;
+    }
+
+    // Remote write
+    return forward_write(target_node, addr, data, size, latency_ns);
+}
+
+int DistributedMemoryServer::forward_read(uint32_t target_node, uint64_t addr, void* data,
+                                          size_t size, uint64_t* latency_ns) {
+    forwarded_requests_++;
+    remote_reads_++;
+
+    dist_message_t req, resp;
+    memset(&req, 0, sizeof(req));
+    req.header.msg_type = DIST_MSG_READ_REQ;
+    req.header.msg_id = msg_manager_->generate_msg_id();
+    req.header.src_node_id = node_id_;
+    req.header.dst_node_id = target_node;
+    req.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    req.payload.mem.addr = addr;
+    req.payload.mem.size = size;
+    req.payload.mem.client_id = node_id_;
+
+    if (!msg_manager_->send_message_wait_response(target_node, req, resp)) {
+        SPDLOG_ERROR("Forward read to node {} failed", target_node);
+        return -1;
+    }
+
+    if (resp.payload.mem.status != 0) {
+        return -1;
+    }
+
+    memcpy(data, resp.payload.mem.data, size);
+    *latency_ns = resp.payload.mem.latency_ns + 50; // Add network latency
+
+    return 0;
+}
+
+int DistributedMemoryServer::forward_write(uint32_t target_node, uint64_t addr, const void* data,
+                                           size_t size, uint64_t* latency_ns) {
+    forwarded_requests_++;
+    remote_writes_++;
+
+    dist_message_t req, resp;
+    memset(&req, 0, sizeof(req));
+    req.header.msg_type = DIST_MSG_WRITE_REQ;
+    req.header.msg_id = msg_manager_->generate_msg_id();
+    req.header.src_node_id = node_id_;
+    req.header.dst_node_id = target_node;
+    req.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    req.payload.mem.addr = addr;
+    req.payload.mem.size = size;
+    req.payload.mem.client_id = node_id_;
+    memcpy(req.payload.mem.data, data, size);
+
+    if (!msg_manager_->send_message_wait_response(target_node, req, resp)) {
+        SPDLOG_ERROR("Forward write to node {} failed", target_node);
+        return -1;
+    }
+
+    if (resp.payload.mem.status != 0) {
+        return -1;
+    }
+
+    *latency_ns = resp.payload.mem.latency_ns + 50; // Add network latency
+
+    return 0;
+}
+
+int DistributedMemoryServer::atomic_faa(uint64_t addr, uint64_t value, uint64_t* old_value) {
+    uint32_t target_node = get_node_for_address(addr);
+
+    dist_message_t req, resp;
+    memset(&req, 0, sizeof(req));
+    req.header.msg_type = DIST_MSG_ATOMIC_FAA_REQ;
+    req.header.msg_id = msg_manager_->generate_msg_id();
+    req.header.src_node_id = node_id_;
+    req.header.dst_node_id = target_node;
+    req.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    req.payload.mem.addr = addr;
+    req.payload.mem.value = value;
+
+    if (target_node == node_id_) {
+        // Local atomic
+        handle_atomic_request(req, resp);
+    } else {
+        if (!msg_manager_->send_message_wait_response(target_node, req, resp)) {
+            return -1;
+        }
+    }
+
+    if (resp.payload.mem.status != 0) {
+        return -1;
+    }
+
+    memcpy(old_value, &resp.payload.mem.value, sizeof(*old_value));
+    return 0;
+}
+
+int DistributedMemoryServer::atomic_cas(uint64_t addr, uint64_t expected, uint64_t desired,
+                                        uint64_t* old_value) {
+    uint32_t target_node = get_node_for_address(addr);
+
+    dist_message_t req, resp;
+    memset(&req, 0, sizeof(req));
+    req.header.msg_type = DIST_MSG_ATOMIC_CAS_REQ;
+    req.header.msg_id = msg_manager_->generate_msg_id();
+    req.header.src_node_id = node_id_;
+    req.header.dst_node_id = target_node;
+    req.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    req.payload.mem.addr = addr;
+    req.payload.mem.expected = expected;
+    req.payload.mem.value = desired;
+
+    if (target_node == node_id_) {
+        // Local atomic
+        handle_atomic_request(req, resp);
+    } else {
+        if (!msg_manager_->send_message_wait_response(target_node, req, resp)) {
+            return -1;
+        }
+    }
+
+    if (resp.payload.mem.status != 0) {
+        return -1;
+    }
+
+    memcpy(old_value, &resp.payload.mem.value, sizeof(*old_value));
+    return 0;
+}
+
+void DistributedMemoryServer::fence() {
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+
+    // Broadcast fence to all active nodes
+    dist_message_t fence_msg;
+    memset(&fence_msg, 0, sizeof(fence_msg));
+    fence_msg.header.msg_type = DIST_MSG_FENCE_REQ;
+    fence_msg.header.msg_id = msg_manager_->generate_msg_id();
+    fence_msg.header.src_node_id = node_id_;
+    fence_msg.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+
+    msg_manager_->broadcast_message(fence_msg);
+}
+
+bool DistributedMemoryServer::ensure_coherency_for_read(uint64_t addr, uint32_t requesting_node) {
+    uint8_t dummy_data[DIST_CACHELINE_SIZE];
+    uint64_t latency;
+    return directory_->request_shared(addr, requesting_node, dummy_data, latency);
+}
+
+bool DistributedMemoryServer::ensure_coherency_for_write(uint64_t addr, uint32_t requesting_node) {
+    uint8_t dummy_data[DIST_CACHELINE_SIZE];
+    uint64_t latency;
+    return directory_->request_exclusive(addr, requesting_node, dummy_data, latency);
+}
+
+bool DistributedMemoryServer::add_remote_node(const DistNodeInfo& info) {
+    std::unique_lock<std::shared_mutex> lock(nodes_mutex_);
+    nodes_[info.node_id] = info;
+    return true;
+}
+
+bool DistributedMemoryServer::remove_remote_node(uint32_t node_id) {
+    std::unique_lock<std::shared_mutex> lock(nodes_mutex_);
+    nodes_.erase(node_id);
+    return msg_manager_->deregister_node(node_id);
+}
+
+std::vector<DistNodeInfo> DistributedMemoryServer::get_cluster_nodes() const {
+    std::vector<DistNodeInfo> result;
+    std::shared_lock<std::shared_mutex> lock(nodes_mutex_);
+    for (const auto& [id, info] : nodes_) {
+        result.push_back(info);
+    }
+    return result;
+}
+
+DistributedMemoryServer::Stats DistributedMemoryServer::get_stats() const {
+    return {
+        local_reads_.load(),
+        local_writes_.load(),
+        remote_reads_.load(),
+        remote_writes_.load(),
+        forwarded_requests_.load(),
+        coherency_messages_.load(),
+        static_cast<uint64_t>(client_threads_.size())
+    };
+}

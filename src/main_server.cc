@@ -16,6 +16,7 @@
 #include "shared_memory_manager.h"
 #include "../include/shm_communication.h"
 #include "../include/cxl_backend.h"
+#include "../include/distributed_server.h"
 #include <cerrno>
 #include <cxxopts.hpp>
 #include <spdlog/cfg/env.h>
@@ -105,8 +106,9 @@ struct BackInvalidationEntry {
 // Communication mode enum
 enum class CommMode {
     TCP,
-    SHM,      // Shared Memory via /dev/shm (ring buffer based)
-    PGAS_SHM  // PGAS Shared Memory (lock-free slots for cxl_backend.h clients)
+    SHM,        // Shared Memory via /dev/shm (ring buffer based)
+    PGAS_SHM,   // PGAS Shared Memory (lock-free slots for cxl_backend.h clients)
+    DISTRIBUTED // Distributed multi-node memory server
 };
 
 // Thread-per-connection server class
@@ -269,8 +271,11 @@ int main(int argc, char *argv[]) {
         ("p,port", "Server port", cxxopts::value<int>()->default_value("9999"))
         ("t,topology", "Topology file", cxxopts::value<std::string>()->default_value("topology.txt"))
         ("backing-file", "Back CXL memory with a regular file (shared across VMs)", cxxopts::value<std::string>()->default_value(""))
-        ("comm-mode", "Communication mode: tcp, shm, or pgas-shm", cxxopts::value<std::string>()->default_value("tcp"))
-        ("pgas-shm-name", "PGAS shared memory name (for pgas-shm mode)", cxxopts::value<std::string>()->default_value("/cxlmemsim_pgas"));
+        ("comm-mode", "Communication mode: tcp, shm, pgas-shm, or distributed", cxxopts::value<std::string>()->default_value("tcp"))
+        ("pgas-shm-name", "PGAS shared memory name (for pgas-shm mode)", cxxopts::value<std::string>()->default_value("/cxlmemsim_pgas"))
+        ("node-id", "Node ID for distributed mode (0 = coordinator)", cxxopts::value<uint32_t>()->default_value("0"))
+        ("dist-shm-name", "Shared memory name for distributed inter-node communication", cxxopts::value<std::string>()->default_value("/cxlmemsim_dist"))
+        ("coordinator-shm", "Coordinator's shared memory name (for joining existing cluster)", cxxopts::value<std::string>()->default_value(""));
 
     auto result = options.parse(argc, argv);
     
@@ -290,14 +295,21 @@ int main(int argc, char *argv[]) {
     
     std::string pgas_shm_name = result["pgas-shm-name"].as<std::string>();
 
+    // Parse distributed mode options
+    uint32_t node_id = result["node-id"].as<uint32_t>();
+    std::string dist_shm_name = result["dist-shm-name"].as<std::string>();
+    std::string coordinator_shm = result["coordinator-shm"].as<std::string>();
+
     // Parse communication mode
     CommMode comm_mode = CommMode::TCP;
     if (comm_mode_str == "shm" || comm_mode_str == "shared_memory") {
         comm_mode = CommMode::SHM;
     } else if (comm_mode_str == "pgas-shm" || comm_mode_str == "pgas") {
         comm_mode = CommMode::PGAS_SHM;
+    } else if (comm_mode_str == "distributed" || comm_mode_str == "dist") {
+        comm_mode = CommMode::DISTRIBUTED;
     } else if (comm_mode_str != "tcp") {
-        SPDLOG_ERROR("Invalid communication mode: {}. Use 'tcp', 'shm', or 'pgas-shm'", comm_mode_str);
+        SPDLOG_ERROR("Invalid communication mode: {}. Use 'tcp', 'shm', 'pgas-shm', or 'distributed'", comm_mode_str);
         return 1;
     }
     
@@ -333,10 +345,20 @@ int main(int argc, char *argv[]) {
     SPDLOG_INFO("Server Configuration:");
     const char* mode_str = (comm_mode == CommMode::TCP) ? "TCP" :
                            (comm_mode == CommMode::SHM) ? "Shared Memory (/dev/shm)" :
-                           "PGAS Shared Memory (cxl_backend.h)";
+                           (comm_mode == CommMode::PGAS_SHM) ? "PGAS Shared Memory (cxl_backend.h)" :
+                           "Distributed Multi-Node";
     SPDLOG_INFO("  Communication Mode: {}", mode_str);
     if (comm_mode == CommMode::PGAS_SHM) {
         SPDLOG_INFO("  PGAS SHM Name: {}", pgas_shm_name);
+    }
+    if (comm_mode == CommMode::DISTRIBUTED) {
+        SPDLOG_INFO("  Node ID: {}", node_id);
+        SPDLOG_INFO("  Distributed SHM Name: {}", dist_shm_name);
+        if (!coordinator_shm.empty()) {
+            SPDLOG_INFO("  Joining cluster via: {}", coordinator_shm);
+        } else {
+            SPDLOG_INFO("  Role: Coordinator (creating new cluster)");
+        }
     }
     SPDLOG_INFO("  Port: {}", port);
     SPDLOG_INFO("  Topology: {}", topology);
@@ -346,27 +368,85 @@ int main(int argc, char *argv[]) {
     SPDLOG_INFO("CXL Type3 Operations Supported:");
     SPDLOG_INFO("  - CXL_TYPE3_READ");
     SPDLOG_INFO("  - CXL_TYPE3_WRITE");
+    if (comm_mode == CommMode::DISTRIBUTED) {
+        SPDLOG_INFO("  - Distributed coherency protocol");
+        SPDLOG_INFO("  - Inter-node message passing");
+    }
     SPDLOG_INFO("========================================");
     
     // Set up signal handlers
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
-    
+
+    // Handle distributed mode separately
+    if (comm_mode == CommMode::DISTRIBUTED) {
+        try {
+            SPDLOG_INFO("Starting distributed memory server node {}...", node_id);
+
+            DistributedMemoryServer dist_server(node_id, dist_shm_name, port, capacity, controller);
+
+            if (!dist_server.initialize()) {
+                SPDLOG_ERROR("Failed to initialize distributed server");
+                return 1;
+            }
+
+            // Join existing cluster or create new one
+            if (!coordinator_shm.empty()) {
+                if (!dist_server.join_cluster(coordinator_shm)) {
+                    SPDLOG_ERROR("Failed to join cluster");
+                    return 1;
+                }
+            }
+
+            if (!dist_server.start()) {
+                SPDLOG_ERROR("Failed to start distributed server");
+                return 1;
+            }
+
+            SPDLOG_INFO("Distributed node {} is running", node_id);
+            SPDLOG_INFO("Press Ctrl+C to stop");
+
+            // Wait for shutdown signal
+            while (dist_server.is_running()) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+
+                // Periodic stats logging
+                auto stats = dist_server.get_stats();
+                if ((stats.local_reads + stats.local_writes + stats.remote_reads + stats.remote_writes) % 100000 == 0 &&
+                    (stats.local_reads + stats.local_writes + stats.remote_reads + stats.remote_writes) > 0) {
+                    SPDLOG_INFO("Distributed Stats: local_r={} local_w={} remote_r={} remote_w={} fwd={} coherency={}",
+                               stats.local_reads, stats.local_writes,
+                               stats.remote_reads, stats.remote_writes,
+                               stats.forwarded_requests, stats.coherency_messages);
+                }
+            }
+
+            dist_server.stop();
+            SPDLOG_INFO("Distributed node {} stopped", node_id);
+
+        } catch (const std::exception& e) {
+            SPDLOG_ERROR("Distributed server error: {}", e.what());
+            return 1;
+        }
+
+        return 0;
+    }
+
     try {
         ThreadPerConnectionServer server(port, controller, capacity, backing_file, comm_mode, pgas_shm_name);
         g_server = &server;
-        
+
         if (!server.start()) {
             SPDLOG_ERROR("Failed to start server");
             return 1;
         }
-        
+
         server.run();
     } catch (const std::exception& e) {
         SPDLOG_ERROR("Server error: {}", e.what());
         return 1;
     }
-    
+
     return 0;
 }
 
