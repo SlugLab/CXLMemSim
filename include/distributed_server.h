@@ -265,6 +265,8 @@ typedef struct {
 /* Forward declarations */
 class CXLController;
 class SharedMemoryManager;
+class CoherencyEngine;
+class HDMDecoder;
 struct MHSLDDevice;
 enum class MHSLDCacheState : uint8_t;
 
@@ -459,63 +461,7 @@ private:
     void worker_thread();
 };
 
-/* Distributed directory for cache coherency */
-class DistributedDirectory {
-private:
-    /* Directory entries */
-    std::map<uint64_t, std::unique_ptr<DistDirectoryEntry>> entries_;
-    std::shared_mutex entries_mutex_;
-
-    /* Message manager reference */
-    DistributedMessageManager* msg_manager_;
-
-    /* Local node info */
-    uint32_t local_node_id_;
-    uint64_t local_memory_base_;
-    uint64_t local_memory_size_;
-
-    /* Statistics */
-    std::atomic<uint64_t> total_lookups_;
-    std::atomic<uint64_t> total_updates_;
-    std::atomic<uint64_t> total_invalidations_;
-    std::atomic<uint64_t> total_writebacks_;
-
-public:
-    DistributedDirectory(DistributedMessageManager* mgr, uint32_t node_id,
-                         uint64_t mem_base, uint64_t mem_size);
-    ~DistributedDirectory() = default;
-
-    /* Home node calculation (determines which node owns directory entry) */
-    uint32_t get_home_node(uint64_t addr) const;
-    bool is_local_home(uint64_t addr) const;
-
-    /* Directory operations */
-    DistDirectoryEntry* get_entry(uint64_t cacheline_addr);
-    DistDirectoryEntry* get_or_create_entry(uint64_t cacheline_addr);
-
-    /* Coherency protocol */
-    bool request_shared(uint64_t addr, uint32_t requesting_node,
-                        uint8_t* data, uint64_t& latency_ns);
-    bool request_exclusive(uint64_t addr, uint32_t requesting_node,
-                           uint8_t* data, uint64_t& latency_ns);
-    bool handle_writeback(uint64_t addr, uint32_t owner_node,
-                          const uint8_t* data);
-    bool invalidate_copies(uint64_t addr, uint32_t except_node);
-    bool downgrade_owner(uint64_t addr);
-
-    /* Remote directory operations */
-    bool remote_lookup(uint64_t addr, DistDirectoryEntry& entry);
-    bool remote_update(uint64_t addr, const DistDirectoryEntry& entry);
-
-    /* Statistics */
-    struct Stats {
-        uint64_t lookups;
-        uint64_t updates;
-        uint64_t invalidations;
-        uint64_t writebacks;
-    };
-    Stats get_stats() const;
-};
+/* DistributedDirectory removed - replaced by CoherencyEngine */
 
 /* RDMA Transport Layer for Distributed Server */
 class DistributedRDMATransport {
@@ -578,54 +524,7 @@ private:
     bool recv_rdma_msg(uint32_t src_node, void* data, size_t size, int timeout_ms);
 };
 
-/* Distributed MH-SLD Manager - Cross-node coherency via RDMA */
-class DistributedMHSLDManager {
-private:
-    CXLController* controller_;
-    DistributedRDMATransport* rdma_transport_;
-    DistributedMessageManager* msg_manager_;
-    uint32_t local_node_id_;
-    uint32_t local_head_id_;
-
-    // Remote directory cache (avoids repeated RDMA reads)
-    std::unordered_map<uint64_t, DistDirectoryEntry> remote_dir_cache_;
-    mutable std::shared_mutex cache_mutex_;
-
-    // Statistics
-    std::atomic<uint64_t> remote_invalidations_;
-    std::atomic<uint64_t> remote_fetches_;
-    std::atomic<uint64_t> remote_updates_;
-    std::atomic<uint64_t> cache_hits_;
-
-public:
-    DistributedMHSLDManager(CXLController* ctrl, DistributedRDMATransport* rdma,
-                            DistributedMessageManager* msg_mgr,
-                            uint32_t node_id, uint32_t head_id);
-    ~DistributedMHSLDManager() = default;
-
-    // Distributed coherency operations (returns additional latency in ns)
-    double distributed_read(uint64_t addr, uint64_t timestamp);
-    double distributed_write(uint64_t addr, uint64_t timestamp);
-    double distributed_atomic(uint64_t addr, uint64_t timestamp);
-
-    // RDMA-based coherency protocol
-    double rdma_invalidate_remote(uint32_t target_node, uint64_t addr, uint64_t timestamp);
-    double rdma_fetch_directory(uint32_t home_node, uint64_t addr);
-    double rdma_update_directory(uint32_t home_node, uint64_t addr,
-                                  uint8_t new_state, uint32_t new_owner);
-
-    // Invalidate local cache entry
-    void invalidate_cache_entry(uint64_t addr);
-
-    // Statistics
-    struct Stats {
-        uint64_t remote_invalidations;
-        uint64_t remote_fetches;
-        uint64_t remote_updates;
-        uint64_t cache_hits;
-    };
-    Stats get_stats() const;
-};
+/* DistributedMHSLDManager removed - replaced by CoherencyEngine */
 
 /* Main distributed memory server class */
 class DistributedMemoryServer {
@@ -645,9 +544,7 @@ private:
     CXLController* controller_;
     std::unique_ptr<SharedMemoryManager> local_memory_;
     std::unique_ptr<DistributedMessageManager> msg_manager_;
-    std::unique_ptr<DistributedDirectory> directory_;
     std::unique_ptr<DistributedRDMATransport> rdma_transport_;
-    std::unique_ptr<DistributedMHSLDManager> mhsld_manager_;
 
     /* Node registry */
     std::map<uint32_t, DistNodeInfo> nodes_;
@@ -713,6 +610,9 @@ public:
     bool connect_rdma_node(uint32_t node_id, const std::string& addr, uint16_t port);
     bool calibrate_rdma_logp(uint32_t target_node = UINT32_MAX);
     DistributedRDMATransport* get_rdma_transport() { return rdma_transport_.get(); }
+
+    /* CoherencyEngine access (delegates to controller) */
+    CoherencyEngine* coherency();
 
     /* Statistics */
     struct Stats {

@@ -10,6 +10,8 @@
 
 #include "../include/distributed_server.h"
 #include "cxlcontroller.h"
+#include "coherency_engine.h"
+#include "hdm_decoder.h"
 #include "shared_memory_manager.h"
 #include <spdlog/spdlog.h>
 #include <sys/mman.h>
@@ -462,341 +464,12 @@ DistributedMessageManager::Stats DistributedMessageManager::get_stats() const {
 }
 
 /* ============================================================================
- * DistributedDirectory Implementation
+ * DistributedDirectory removed - all coherency now via CoherencyEngine.
  * ============================================================================ */
 
-DistributedDirectory::DistributedDirectory(DistributedMessageManager* mgr, uint32_t node_id,
-                                           uint64_t mem_base, uint64_t mem_size)
-    : msg_manager_(mgr), local_node_id_(node_id),
-      local_memory_base_(mem_base), local_memory_size_(mem_size),
-      total_lookups_(0), total_updates_(0),
-      total_invalidations_(0), total_writebacks_(0) {
-}
+/* (DistributedDirectory methods removed) */
 
-uint32_t DistributedDirectory::get_home_node(uint64_t addr) const {
-    // Simple address interleaving across nodes
-    // Each node owns addresses where (addr / CACHELINE_SIZE) % num_nodes == node_id
-    auto active_nodes = msg_manager_->get_active_nodes();
-    if (active_nodes.empty()) return local_node_id_;
-
-    uint64_t cacheline_idx = addr / DIST_CACHELINE_SIZE;
-    return active_nodes[cacheline_idx % active_nodes.size()];
-}
-
-bool DistributedDirectory::is_local_home(uint64_t addr) const {
-    return get_home_node(addr) == local_node_id_;
-}
-
-DistDirectoryEntry* DistributedDirectory::get_entry(uint64_t cacheline_addr) {
-    total_lookups_++;
-
-    std::shared_lock<std::shared_mutex> lock(entries_mutex_);
-    auto it = entries_.find(cacheline_addr);
-    if (it != entries_.end()) {
-        return it->second.get();
-    }
-    return nullptr;
-}
-
-DistDirectoryEntry* DistributedDirectory::get_or_create_entry(uint64_t cacheline_addr) {
-    total_lookups_++;
-
-    {
-        std::shared_lock<std::shared_mutex> lock(entries_mutex_);
-        auto it = entries_.find(cacheline_addr);
-        if (it != entries_.end()) {
-            return it->second.get();
-        }
-    }
-
-    // Create new entry
-    std::unique_lock<std::shared_mutex> lock(entries_mutex_);
-    auto& entry = entries_[cacheline_addr];
-    if (!entry) {
-        entry = std::make_unique<DistDirectoryEntry>();
-        entry->cacheline_addr = cacheline_addr;
-        entry->home_node = get_home_node(cacheline_addr);
-        entry->state = DIST_CACHE_INVALID;
-        entry->owner_node = UINT32_MAX;
-        entry->version = 0;
-        entry->last_access_time = std::chrono::steady_clock::now().time_since_epoch().count();
-    }
-    return entry.get();
-}
-
-bool DistributedDirectory::request_shared(uint64_t addr, uint32_t requesting_node,
-                                          uint8_t* data, uint64_t& latency_ns) {
-    uint64_t cacheline_addr = addr & ~(DIST_CACHELINE_SIZE - 1);
-
-    if (!is_local_home(addr)) {
-        // Forward to home node
-        dist_message_t req, resp;
-        memset(&req, 0, sizeof(req));
-        req.header.msg_type = DIST_MSG_READ_REQ;
-        req.header.msg_id = msg_manager_->generate_msg_id();
-        req.header.src_node_id = local_node_id_;
-        req.header.dst_node_id = get_home_node(addr);
-        req.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        req.payload.mem.addr = addr;
-        req.payload.mem.size = DIST_CACHELINE_SIZE;
-        req.payload.mem.client_id = requesting_node;
-
-        uint32_t dst_node = req.header.dst_node_id;
-        if (!msg_manager_->send_message_wait_response(dst_node, req, resp)) {
-            SPDLOG_ERROR("Failed to request shared access from home node {}", dst_node);
-            return false;
-        }
-
-        memcpy(data, resp.payload.mem.data, DIST_CACHELINE_SIZE);
-        latency_ns = resp.payload.mem.latency_ns;
-        return resp.payload.mem.status == 0;
-    }
-
-    // Local home node - handle directly
-    DistDirectoryEntry* entry = get_or_create_entry(cacheline_addr);
-    std::lock_guard<std::mutex> lock(entry->lock);
-
-    switch (entry->state) {
-        case DIST_CACHE_INVALID:
-            // No one has the data - requesting node will be first sharer
-            entry->state = DIST_CACHE_SHARED;
-            entry->sharers.insert(requesting_node);
-            latency_ns = 100; // Base memory access latency
-            break;
-
-        case DIST_CACHE_SHARED:
-            // Already shared, add requester
-            entry->sharers.insert(requesting_node);
-            latency_ns = 50; // Cache hit latency
-            break;
-
-        case DIST_CACHE_EXCLUSIVE:
-        case DIST_CACHE_MODIFIED:
-            // Need to downgrade owner
-            if (entry->owner_node != requesting_node) {
-                downgrade_owner(addr);
-            }
-            entry->state = DIST_CACHE_SHARED;
-            entry->sharers.insert(entry->owner_node);
-            entry->sharers.insert(requesting_node);
-            entry->owner_node = UINT32_MAX;
-            latency_ns = 150; // Downgrade latency
-            break;
-
-        default:
-            break;
-    }
-
-    entry->last_access_time = std::chrono::steady_clock::now().time_since_epoch().count();
-    entry->version++;
-    total_updates_++;
-
-    return true;
-}
-
-bool DistributedDirectory::request_exclusive(uint64_t addr, uint32_t requesting_node,
-                                             uint8_t* data, uint64_t& latency_ns) {
-    uint64_t cacheline_addr = addr & ~(DIST_CACHELINE_SIZE - 1);
-
-    if (!is_local_home(addr)) {
-        // Forward to home node
-        dist_message_t req, resp;
-        memset(&req, 0, sizeof(req));
-        req.header.msg_type = DIST_MSG_WRITE_REQ;
-        req.header.msg_id = msg_manager_->generate_msg_id();
-        req.header.src_node_id = local_node_id_;
-        req.header.dst_node_id = get_home_node(addr);
-        req.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        req.payload.mem.addr = addr;
-        req.payload.mem.size = DIST_CACHELINE_SIZE;
-        req.payload.mem.client_id = requesting_node;
-        memcpy(req.payload.mem.data, data, DIST_CACHELINE_SIZE);
-
-        uint32_t dst_node = req.header.dst_node_id;
-        if (!msg_manager_->send_message_wait_response(dst_node, req, resp)) {
-            SPDLOG_ERROR("Failed to request exclusive access from home node {}", dst_node);
-            return false;
-        }
-
-        latency_ns = resp.payload.mem.latency_ns;
-        return resp.payload.mem.status == 0;
-    }
-
-    // Local home node - handle directly
-    DistDirectoryEntry* entry = get_or_create_entry(cacheline_addr);
-    std::lock_guard<std::mutex> lock(entry->lock);
-
-    // Invalidate all other copies
-    if (!entry->sharers.empty() || entry->owner_node != UINT32_MAX) {
-        invalidate_copies(addr, requesting_node);
-        latency_ns = 200; // Invalidation latency
-    } else {
-        latency_ns = 100; // Base latency
-    }
-
-    entry->state = DIST_CACHE_MODIFIED;
-    entry->owner_node = requesting_node;
-    entry->sharers.clear();
-    entry->last_access_time = std::chrono::steady_clock::now().time_since_epoch().count();
-    entry->version++;
-    total_updates_++;
-
-    return true;
-}
-
-bool DistributedDirectory::handle_writeback(uint64_t addr, uint32_t owner_node,
-                                            const uint8_t* data) {
-    uint64_t cacheline_addr = addr & ~(DIST_CACHELINE_SIZE - 1);
-    total_writebacks_++;
-
-    DistDirectoryEntry* entry = get_entry(cacheline_addr);
-    if (!entry) return false;
-
-    std::lock_guard<std::mutex> lock(entry->lock);
-
-    if (entry->owner_node == owner_node) {
-        entry->state = DIST_CACHE_INVALID;
-        entry->owner_node = UINT32_MAX;
-        entry->version++;
-        return true;
-    }
-
-    return false;
-}
-
-bool DistributedDirectory::invalidate_copies(uint64_t addr, uint32_t except_node) {
-    uint64_t cacheline_addr = addr & ~(DIST_CACHELINE_SIZE - 1);
-
-    DistDirectoryEntry* entry = get_entry(cacheline_addr);
-    if (!entry) return true; // Nothing to invalidate
-
-    std::set<uint32_t> nodes_to_invalidate;
-    {
-        std::lock_guard<std::mutex> lock(entry->lock);
-        nodes_to_invalidate = entry->sharers;
-        if (entry->owner_node != UINT32_MAX && entry->owner_node != except_node) {
-            nodes_to_invalidate.insert(entry->owner_node);
-        }
-        nodes_to_invalidate.erase(except_node);
-    }
-
-    // Send invalidation messages
-    for (uint32_t node_id : nodes_to_invalidate) {
-        if (node_id == local_node_id_) continue;
-
-        dist_message_t inv_msg;
-        memset(&inv_msg, 0, sizeof(inv_msg));
-        inv_msg.header.msg_type = DIST_MSG_INVALIDATE;
-        inv_msg.header.msg_id = msg_manager_->generate_msg_id();
-        inv_msg.header.src_node_id = local_node_id_;
-        inv_msg.header.dst_node_id = node_id;
-        inv_msg.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        inv_msg.payload.coherency.cacheline_addr = cacheline_addr;
-        inv_msg.payload.coherency.requesting_node = except_node;
-
-        msg_manager_->send_message(node_id, inv_msg);
-        total_invalidations_++;
-    }
-
-    return true;
-}
-
-bool DistributedDirectory::downgrade_owner(uint64_t addr) {
-    uint64_t cacheline_addr = addr & ~(DIST_CACHELINE_SIZE - 1);
-
-    DistDirectoryEntry* entry = get_entry(cacheline_addr);
-    if (!entry) return false;
-
-    uint32_t owner;
-    {
-        std::lock_guard<std::mutex> lock(entry->lock);
-        owner = entry->owner_node;
-        if (owner == UINT32_MAX || owner == local_node_id_) return true;
-    }
-
-    // Send downgrade message
-    dist_message_t down_msg;
-    memset(&down_msg, 0, sizeof(down_msg));
-    down_msg.header.msg_type = DIST_MSG_DOWNGRADE;
-    down_msg.header.msg_id = msg_manager_->generate_msg_id();
-    down_msg.header.src_node_id = local_node_id_;
-    down_msg.header.dst_node_id = owner;
-    down_msg.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    down_msg.payload.coherency.cacheline_addr = cacheline_addr;
-
-    dist_message_t resp;
-    return msg_manager_->send_message_wait_response(owner, down_msg, resp);
-}
-
-bool DistributedDirectory::remote_lookup(uint64_t addr, DistDirectoryEntry& entry) {
-    uint32_t home_node = get_home_node(addr);
-    if (home_node == local_node_id_) return false;
-
-    dist_message_t req, resp;
-    memset(&req, 0, sizeof(req));
-    req.header.msg_type = DIST_MSG_DIR_QUERY;
-    req.header.msg_id = msg_manager_->generate_msg_id();
-    req.header.src_node_id = local_node_id_;
-    req.header.dst_node_id = home_node;
-    req.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    req.payload.coherency.cacheline_addr = addr & ~(DIST_CACHELINE_SIZE - 1);
-
-    if (!msg_manager_->send_message_wait_response(home_node, req, resp)) {
-        return false;
-    }
-
-    // Parse response into entry
-    entry.cacheline_addr = resp.payload.coherency.cacheline_addr;
-    entry.state = static_cast<dist_cache_state_t>(resp.payload.coherency.current_state);
-    entry.owner_node = resp.payload.coherency.owner_node;
-    entry.home_node = home_node;
-    entry.version = resp.payload.coherency.version;
-
-    // Reconstruct sharers from bitmap
-    entry.sharers.clear();
-    for (int i = 0; i < 16; i++) {
-        if (resp.payload.coherency.sharers_bitmap & (1 << i)) {
-            entry.sharers.insert(i);
-        }
-    }
-
-    return true;
-}
-
-bool DistributedDirectory::remote_update(uint64_t addr, const DistDirectoryEntry& entry) {
-    uint32_t home_node = get_home_node(addr);
-    if (home_node == local_node_id_) return false;
-
-    dist_message_t req;
-    memset(&req, 0, sizeof(req));
-    req.header.msg_type = DIST_MSG_DIR_UPDATE;
-    req.header.msg_id = msg_manager_->generate_msg_id();
-    req.header.src_node_id = local_node_id_;
-    req.header.dst_node_id = home_node;
-    req.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    req.payload.coherency.cacheline_addr = entry.cacheline_addr;
-    req.payload.coherency.current_state = entry.state;
-    req.payload.coherency.owner_node = entry.owner_node;
-    req.payload.coherency.version = entry.version;
-
-    // Build sharers bitmap
-    uint16_t bitmap = 0;
-    for (uint32_t sharer : entry.sharers) {
-        if (sharer < 16) bitmap |= (1 << sharer);
-    }
-    req.payload.coherency.sharers_bitmap = bitmap;
-
-    return msg_manager_->send_message(home_node, req);
-}
-
-DistributedDirectory::Stats DistributedDirectory::get_stats() const {
-    return {
-        total_lookups_.load(),
-        total_updates_.load(),
-        total_invalidations_.load(),
-        total_writebacks_.load()
-    };
-}
+/* (All DistributedDirectory method implementations removed) */
 
 /* ============================================================================
  * DistributedMemoryServer Implementation
@@ -856,10 +529,6 @@ bool DistributedMemoryServer::initialize() {
         return false;
     }
 
-    // Initialize directory
-    directory_ = std::make_unique<DistributedDirectory>(
-        msg_manager_.get(), node_id_, shm_info.base_addr, shm_info.size);
-
     // Setup message handlers
     setup_message_handlers();
 
@@ -874,6 +543,14 @@ bool DistributedMemoryServer::initialize() {
         num_nodes
     );
     controller_->configure_logp(logp_cfg);
+
+    // Configure controller for distributed mode with HDM decoder + CoherencyEngine
+    HDMDecoderMode hdm_mode = (transport_mode_ == DistTransportMode::RDMA)
+        ? HDMDecoderMode::INTERLEAVED : HDMDecoderMode::RANGE_BASED;
+    controller_->configure_distributed(node_id_, hdm_mode);
+
+    // Add local range to HDM decoder
+    controller_->hdm_decoder_->add_range(shm_info.base_addr, shm_info.size, node_id_, false);
 
     // Initialize RDMA transport if requested
     if (transport_mode_ == DistTransportMode::RDMA || transport_mode_ == DistTransportMode::HYBRID) {
@@ -1061,23 +738,12 @@ void DistributedMemoryServer::setup_message_handlers() {
             handle_node_message(req, resp);
         });
 
-    // Directory query handler
+    // Directory query handler (now handled by CoherencyEngine, reply with ACK)
     msg_manager_->register_handler(DIST_MSG_DIR_QUERY,
         [this](const dist_message_t& req, dist_message_t& resp) {
             resp.header.msg_type = DIST_MSG_DIR_RESPONSE;
-            auto* entry = directory_->get_entry(req.payload.coherency.cacheline_addr);
-            if (entry) {
-                std::lock_guard<std::mutex> lock(entry->lock);
-                resp.payload.coherency.cacheline_addr = entry->cacheline_addr;
-                resp.payload.coherency.current_state = entry->state;
-                resp.payload.coherency.owner_node = entry->owner_node;
-                resp.payload.coherency.version = entry->version;
-                uint16_t bitmap = 0;
-                for (uint32_t s : entry->sharers) {
-                    if (s < 16) bitmap |= (1 << s);
-                }
-                resp.payload.coherency.sharers_bitmap = bitmap;
-            }
+            resp.payload.coherency.cacheline_addr = req.payload.coherency.cacheline_addr;
+            // CoherencyEngine processes coherency internally; just acknowledge
         });
 }
 
@@ -1182,32 +848,20 @@ void DistributedMemoryServer::handle_coherency_request(const dist_message_t& req
     if (req.header.msg_type == DIST_MSG_INVALIDATE) {
         resp.header.msg_type = DIST_MSG_INVALIDATE_ACK;
 
-        // Invalidate local copy
-        auto* metadata = local_memory_->get_cacheline_metadata(cacheline_addr);
-        if (metadata) {
-            std::lock_guard<std::mutex> lock(metadata->lock);
-            metadata->state = INVALID;
-            metadata->owner = -1;
-            metadata->sharers.clear();
+        // Delegate to CoherencyEngine
+        if (controller_->coherency_) {
+            controller_->coherency_->handle_remote_invalidate(
+                cacheline_addr, req.header.src_node_id);
         }
         resp.payload.coherency.cacheline_addr = cacheline_addr;
 
     } else if (req.header.msg_type == DIST_MSG_DOWNGRADE) {
         resp.header.msg_type = DIST_MSG_DOWNGRADE_ACK;
 
-        // Downgrade from Modified/Exclusive to Shared
-        auto* metadata = local_memory_->get_cacheline_metadata(cacheline_addr);
-        if (metadata) {
-            std::lock_guard<std::mutex> lock(metadata->lock);
-            if (metadata->state == MODIFIED || metadata->state == EXCLUSIVE) {
-                // Include dirty data in response if modified
-                if (metadata->state == MODIFIED) {
-                    local_memory_->read_cacheline(cacheline_addr, resp.payload.coherency.data,
-                                                  DIST_CACHELINE_SIZE);
-                }
-                metadata->state = SHARED;
-                metadata->owner = -1;
-            }
+        // Delegate to CoherencyEngine
+        if (controller_->coherency_) {
+            controller_->coherency_->handle_remote_downgrade(
+                cacheline_addr, req.header.src_node_id);
         }
         resp.payload.coherency.cacheline_addr = cacheline_addr;
     }
@@ -1281,7 +935,11 @@ void DistributedMemoryServer::process_requests_loop() {
 }
 
 uint32_t DistributedMemoryServer::get_node_for_address(uint64_t addr) const {
-    return directory_->get_home_node(addr);
+    if (controller_->hdm_decoder_) {
+        return controller_->hdm_decoder_->get_home_node(addr);
+    }
+    // Fallback: assume local
+    return node_id_;
 }
 
 bool DistributedMemoryServer::is_local_address(uint64_t addr) const {
@@ -1488,15 +1146,23 @@ void DistributedMemoryServer::fence() {
 }
 
 bool DistributedMemoryServer::ensure_coherency_for_read(uint64_t addr, uint32_t requesting_node) {
-    uint8_t dummy_data[DIST_CACHELINE_SIZE];
-    uint64_t latency;
-    return directory_->request_shared(addr, requesting_node, dummy_data, latency);
+    if (controller_->coherency_) {
+        uint64_t ts = std::chrono::steady_clock::now().time_since_epoch().count();
+        CoherencyRequest req{addr, requesting_node, 0, false, ts};
+        auto resp = controller_->coherency_->process_read(req);
+        return resp.success;
+    }
+    return true;
 }
 
 bool DistributedMemoryServer::ensure_coherency_for_write(uint64_t addr, uint32_t requesting_node) {
-    uint8_t dummy_data[DIST_CACHELINE_SIZE];
-    uint64_t latency;
-    return directory_->request_exclusive(addr, requesting_node, dummy_data, latency);
+    if (controller_->coherency_) {
+        uint64_t ts = std::chrono::steady_clock::now().time_since_epoch().count();
+        CoherencyRequest req{addr, requesting_node, 0, true, ts};
+        auto resp = controller_->coherency_->process_write(req);
+        return resp.success;
+    }
+    return true;
 }
 
 bool DistributedMemoryServer::add_remote_node(const DistNodeInfo& info) {
@@ -1532,6 +1198,10 @@ DistributedMemoryServer::Stats DistributedMemoryServer::get_stats() const {
     };
 }
 
+CoherencyEngine* DistributedMemoryServer::coherency() {
+    return controller_->coherency_.get();
+}
+
 /* ============================================================================
  * RDMA-based forwarding for DistributedMemoryServer
  * ============================================================================ */
@@ -1553,15 +1223,12 @@ bool DistributedMemoryServer::initialize_rdma_transport() {
 
     SPDLOG_INFO("RDMA transport initialized on {}:{}", rdma_addr_, rdma_port_);
 
-    // Enable MH-SLD with node count as num_heads for distributed coherency
-    auto active_nodes = msg_manager_->get_active_nodes();
-    uint32_t num_heads = std::max(static_cast<uint32_t>(active_nodes.size()), 2u);
-    controller_->enable_mhsld(num_heads, 25.0); // 25 GB/s default RDMA bandwidth
-
-    // Create distributed MH-SLD manager
-    mhsld_manager_ = std::make_unique<DistributedMHSLDManager>(
-        controller_, rdma_transport_.get(), msg_manager_.get(),
-        node_id_, node_id_);  // head_id == node_id for simplicity
+    // Register RDMA transport and message manager with the CoherencyEngine
+    if (controller_->coherency_) {
+        controller_->coherency_->set_rdma_transport(rdma_transport_.get());
+        controller_->coherency_->set_msg_manager(msg_manager_.get());
+        controller_->coherency_->activate_head(node_id_, memory_capacity_mb_ * 1024 * 1024);
+    }
 
     return true;
 }
@@ -1597,6 +1264,33 @@ bool DistributedMemoryServer::connect_rdma_node(uint32_t node_id, const std::str
     }
 
     SPDLOG_INFO("RDMA connected to node {} at {}:{}", node_id, addr, port);
+
+    // Create virtual endpoint for the remote node
+    uint64_t peer_capacity = memory_capacity_mb_ * 1024ULL * 1024ULL; // Assume same capacity
+    uint64_t peer_base_addr = node_id * peer_capacity;
+
+    // Get peer info from node registry if available
+    {
+        std::shared_lock<std::shared_mutex> lock(nodes_mutex_);
+        auto it = nodes_.find(node_id);
+        if (it != nodes_.end()) {
+            peer_base_addr = it->second.memory_base;
+            peer_capacity = it->second.memory_size;
+        }
+    }
+
+    FabricLinkConfig link_cfg{100.0, 25.0, 32};  // 100ns hop, 25GB/s, 32 credits
+    auto* remote = controller_->add_remote_endpoint(node_id, peer_base_addr, peer_capacity, link_cfg);
+    remote->rdma_transport_ = rdma_transport_.get();
+    remote->msg_manager_ = msg_manager_.get();
+    remote->coherency_engine_ = controller_->coherency_.get();
+
+    // Register in HDM decoder
+    controller_->hdm_decoder_->add_range(peer_base_addr, peer_capacity, node_id, true);
+
+    // Register fabric link with coherency engine
+    controller_->coherency_->register_fabric_link(node_id, remote->fabric_link_.get());
+
     return true;
 }
 
@@ -1663,10 +1357,12 @@ int DistributedMemoryServer::forward_read_rdma(uint32_t target_node, uint64_t ad
         network_latency = measured_ns;
     }
 
-    // Add MH-SLD coherency overhead if manager is active
+    // Add coherency overhead via CoherencyEngine
     double coherency_overhead = 0.0;
-    if (mhsld_manager_) {
-        coherency_overhead = mhsld_manager_->distributed_read(addr, req.header.timestamp);
+    if (controller_->coherency_) {
+        CoherencyRequest coh_req{addr, node_id_, 0, false, req.header.timestamp};
+        auto coh_resp = controller_->coherency_->process_read(coh_req);
+        coherency_overhead = coh_resp.latency_ns;
     }
 
     *latency_ns = resp.payload.mem.latency_ns +
@@ -1716,10 +1412,12 @@ int DistributedMemoryServer::forward_write_rdma(uint32_t target_node, uint64_t a
         network_latency = measured_ns;
     }
 
-    // Add MH-SLD coherency overhead for writes (includes invalidation cost)
+    // Add coherency overhead via CoherencyEngine (includes invalidation cost)
     double coherency_overhead = 0.0;
-    if (mhsld_manager_) {
-        coherency_overhead = mhsld_manager_->distributed_write(addr, req.header.timestamp);
+    if (controller_->coherency_) {
+        CoherencyRequest coh_req{addr, node_id_, 0, true, req.header.timestamp};
+        auto coh_resp = controller_->coherency_->process_write(coh_req);
+        coherency_overhead = coh_resp.latency_ns;
     }
 
     *latency_ns = resp.payload.mem.latency_ns +
@@ -2174,10 +1872,11 @@ RDMACalibrationResult DistributedRDMATransport::get_aggregate_calibration() cons
 }
 
 /* ============================================================================
- * DistributedMHSLDManager Implementation
+ * DistributedMHSLDManager removed - replaced by CoherencyEngine.
  * ============================================================================ */
 
-DistributedMHSLDManager::DistributedMHSLDManager(CXLController* ctrl,
+#if 0  // DistributedMHSLDManager removed
+DistributedMHSLDManager_removed::DistributedMHSLDManager(CXLController* ctrl,
                                                    DistributedRDMATransport* rdma,
                                                    DistributedMessageManager* msg_mgr,
                                                    uint32_t node_id, uint32_t head_id)
@@ -2424,3 +2123,4 @@ DistributedMHSLDManager::Stats DistributedMHSLDManager::get_stats() const {
         cache_hits_.load()
     };
 }
+#endif  // DistributedMHSLDManager removed

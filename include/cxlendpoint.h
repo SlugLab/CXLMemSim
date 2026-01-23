@@ -23,6 +23,8 @@
 #include <unordered_map>
 #include <vector>
 #include <mutex>
+#include <shared_mutex>
+#include <memory>
 #include <atomic>
 #include <cmath>
 #include <deque>
@@ -503,6 +505,87 @@ public:
     virtual std::tuple<double, std::vector<uint64_t>> calculate_congestion();
     void set_epoch(int epoch) override;
     void free_stats(double size) override;
+};
+
+/* ============================================================================
+ * FabricLink - Models inter-node CXL fabric link characteristics
+ *
+ * Each link has latency, bandwidth, and credit-based flow control.
+ * Congestion model: non-linear based on credit availability.
+ * ============================================================================ */
+
+struct FabricLinkConfig {
+    double latency_ns;           // Per-hop link latency (50-100ns typical)
+    double bandwidth_gbps;       // Link bandwidth (25-64 GB/s)
+    size_t max_credits;          // Credit-based flow control (32 typical)
+};
+
+class FabricLink {
+public:
+    FabricLinkConfig config_;
+    uint32_t src_node_, dst_node_;
+    std::atomic<size_t> available_credits_;
+    std::atomic<uint64_t> in_flight_flits_{0};
+    uint64_t last_flit_time_ = 0;
+    mutable std::mutex link_mutex_;
+
+    FabricLink(uint32_t src, uint32_t dst, const FabricLinkConfig& cfg);
+
+    double calculate_traversal_latency(uint64_t timestamp, size_t data_size);
+    bool acquire_credit();
+    void release_credit();
+    double get_congestion_delay(uint64_t timestamp) const;
+    double get_utilization(uint64_t window_ns = 20000000) const;
+};
+
+/* ============================================================================
+ * RemoteCXLExpander - Virtual endpoint for remote node memory
+ *
+ * Wraps RDMA transport to present remote memory as a local CXL endpoint
+ * in the topology tree. Includes shadow directory for cached coherency state.
+ * ============================================================================ */
+
+// Forward declarations for distributed components
+class CoherencyEngine;
+class HDMDecoder;
+class DistributedRDMATransport;
+class DistributedMessageManager;
+
+class RemoteCXLExpander : public CXLMemExpander {
+public:
+    uint32_t remote_node_id_;
+    uint32_t local_node_id_;
+    DistributedRDMATransport* rdma_transport_ = nullptr;
+    DistributedMessageManager* msg_manager_ = nullptr;
+    std::unique_ptr<FabricLink> fabric_link_;
+    CoherencyEngine* coherency_engine_ = nullptr;
+    HDMDecoder* hdm_decoder_ = nullptr;
+    uint64_t remote_base_addr_;
+    uint64_t remote_capacity_;
+
+    // Shadow directory (caches remote coherency state locally)
+    struct ShadowEntry {
+        MHSLDCacheState local_state;
+        uint64_t last_access_time;
+        bool valid;
+    };
+    std::unordered_map<uint64_t, ShadowEntry> shadow_directory_;
+    mutable std::shared_mutex shadow_mutex_;
+
+    RemoteCXLExpander(int id, uint32_t remote_node, uint32_t local_node,
+                      uint64_t remote_base, uint64_t remote_capacity,
+                      const FabricLinkConfig& link_cfg);
+
+    // Overrides - inject remote access latency into tree traversal
+    double calculate_latency(const std::vector<std::tuple<uint64_t, uint64_t>>& elem,
+                             double dramlatency) override;
+    double calculate_bandwidth(const std::vector<std::tuple<uint64_t, uint64_t>>& elem) override;
+    int insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr,
+               uint64_t virt_addr, int index) override;
+
+    // Shadow management
+    void invalidate_shadow(uint64_t addr);
+    void update_shadow(uint64_t addr, MHSLDCacheState state, uint64_t ts);
 };
 
 #endif // CXLMEMSIM_CXLENDPOINT_H

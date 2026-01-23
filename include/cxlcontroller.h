@@ -13,6 +13,8 @@
 #define CXLMEMSIM_CXLCONTROLLER_H
 
 #include "cxlendpoint.h"
+#include "hdm_decoder.h"
+#include "coherency_engine.h"
 #include "lbr.h"
 #include <memory>
 #include <queue>
@@ -247,8 +249,14 @@ public:
     // LogP queuing model for distributed/multi-node latency
     LogPModel logp_model;
 
-    // MH-SLD device for multi-headed pooling/sharing
+    // MH-SLD device for multi-headed pooling/sharing (legacy, use CoherencyEngine instead)
     std::unique_ptr<MHSLDDevice> mhsld_device;
+
+    // Distributed topology support
+    uint32_t local_node_id_ = 0;
+    std::unique_ptr<HDMDecoder> hdm_decoder_;
+    std::unique_ptr<CoherencyEngine> coherency_;
+    std::vector<RemoteCXLExpander*> remote_expanders_;
 
     explicit CXLController(std::array<Policy *, 4> p, int capacity, page_type page_type_, int epoch,
                            double dramlatency);
@@ -291,6 +299,12 @@ public:
     // Combined latency: local access + LogP network + MH-SLD coherency
     double calculate_distributed_latency(const std::vector<std::tuple<uint64_t, uint64_t>> &elem,
                                          uint32_t head_id, uint32_t target_node);
+
+    // Distributed topology configuration
+    void configure_distributed(uint32_t local_node_id, HDMDecoderMode mode);
+    RemoteCXLExpander* add_remote_endpoint(uint32_t remote_node, uint64_t base,
+                                            uint64_t capacity, const FabricLinkConfig& link_cfg);
+    RemoteCXLExpander* get_remote_expander(uint32_t node_id);
 };
 
 // C++20 std::formatter for CXLController

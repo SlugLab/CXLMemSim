@@ -10,6 +10,7 @@
  */
 
 #include "cxlendpoint.h"
+#include "coherency_engine.h"
 #include <random>
 #include <algorithm>
 
@@ -1153,4 +1154,214 @@ MHSLDDevice::Stats MHSLDDevice::get_stats() const {
     stats.avg_read_latency = base_read_latency; // Simplified
     stats.avg_write_latency = base_write_latency;
     return stats;
+}
+
+/* ============================================================================
+ * FabricLink Implementation
+ *
+ * Models CXL fabric link with latency, bandwidth, and congestion.
+ * ============================================================================ */
+
+FabricLink::FabricLink(uint32_t src, uint32_t dst, const FabricLinkConfig& cfg)
+    : config_(cfg), src_node_(src), dst_node_(dst),
+      available_credits_(cfg.max_credits) {}
+
+double FabricLink::calculate_traversal_latency(uint64_t timestamp, size_t data_size) {
+    std::lock_guard<std::mutex> lock(link_mutex_);
+
+    // Base link latency
+    double latency = config_.latency_ns;
+
+    // Serialization delay: time to push data onto the link
+    // bandwidth_gbps is in GB/s, data_size is in bytes
+    double serialization_ns = static_cast<double>(data_size) /
+                              (config_.bandwidth_gbps * 1e9) * 1e9;
+    latency += serialization_ns;
+
+    // Congestion delay based on credit availability
+    latency += get_congestion_delay(timestamp);
+
+    // Track flit time for utilization calculation
+    last_flit_time_ = timestamp;
+    in_flight_flits_++;
+
+    return latency;
+}
+
+bool FabricLink::acquire_credit() {
+    size_t current = available_credits_.load();
+    while (current > 0) {
+        if (available_credits_.compare_exchange_weak(current, current - 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void FabricLink::release_credit() {
+    size_t current = available_credits_.load();
+    if (current < config_.max_credits) {
+        available_credits_.fetch_add(1);
+    }
+}
+
+double FabricLink::get_congestion_delay(uint64_t timestamp) const {
+    // Non-linear congestion model based on credit availability
+    double utilization = 1.0 - (static_cast<double>(available_credits_.load()) /
+                                 config_.max_credits);
+
+    if (utilization < 0.5) {
+        return 0.0;  // No congestion
+    } else if (utilization < 0.8) {
+        // Linear 0-20ns in [0.5, 0.8] range
+        return (utilization - 0.5) / 0.3 * 20.0;
+    } else {
+        // Steep 20-100ns in [0.8, 1.0] range
+        return 20.0 + (utilization - 0.8) / 0.2 * 80.0;
+    }
+}
+
+double FabricLink::get_utilization(uint64_t window_ns) const {
+    // Simple utilization estimate based on credits used
+    double credit_util = 1.0 - (static_cast<double>(available_credits_.load()) /
+                                 config_.max_credits);
+    return credit_util;
+}
+
+/* ============================================================================
+ * RemoteCXLExpander Implementation
+ *
+ * Virtual endpoint that represents remote node memory in the topology tree.
+ * ============================================================================ */
+
+RemoteCXLExpander::RemoteCXLExpander(int id, uint32_t remote_node, uint32_t local_node,
+                                     uint64_t remote_base, uint64_t remote_capacity,
+                                     const FabricLinkConfig& link_cfg)
+    : CXLMemExpander(25, 25, 100, 150, id, static_cast<int>(remote_capacity / (1024*1024))),
+      remote_node_id_(remote_node), local_node_id_(local_node),
+      remote_base_addr_(remote_base), remote_capacity_(remote_capacity) {
+    fabric_link_ = std::make_unique<FabricLink>(local_node, remote_node, link_cfg);
+}
+
+double RemoteCXLExpander::calculate_latency(const std::vector<std::tuple<uint64_t, uint64_t>>& elem,
+                                             double dramlatency) {
+    if (elem.empty()) return 0.0;
+
+    double total_latency = 0.0;
+    size_t access_count = 0;
+
+    for (const auto& [timestamp, addr] : elem) {
+        // Check if this address belongs to our remote range
+        if (addr < remote_base_addr_ || addr >= remote_base_addr_ + remote_capacity_) {
+            continue;
+        }
+
+        double access_latency = 0.0;
+
+        // Frontend processing
+        access_latency += frontend_latency_;  // 10ns
+
+        // Forward path
+        access_latency += forward_latency_;   // 15ns
+
+        // Fabric link traversal
+        access_latency += fabric_link_->calculate_traversal_latency(timestamp, 64);
+
+        // Coherency engine check (if available)
+        if (coherency_engine_) {
+            CoherencyRequest req{addr, local_node_id_, 0, false, timestamp};
+            auto coh = coherency_engine_->process_read(req);
+            access_latency += coh.latency_ns;
+        }
+
+        // Remote device access latency
+        access_latency += this->latency.read;
+
+        // Response path
+        access_latency += response_latency_;  // 20ns
+
+        // Congestion
+        access_latency += calculate_congestion_delay(timestamp);
+
+        total_latency += access_latency;
+        access_count++;
+    }
+
+    return access_count > 0 ? total_latency / access_count : 0.0;
+}
+
+double RemoteCXLExpander::calculate_bandwidth(const std::vector<std::tuple<uint64_t, uint64_t>>& elem) {
+    if (elem.empty()) return 0.0;
+
+    // Remote bandwidth is limited by fabric link bandwidth
+    uint64_t current_time = std::get<0>(elem.back());
+    uint64_t window_start = current_time - 20000000; // 20ms window
+
+    size_t access_count = 0;
+    for (const auto& [timestamp, addr] : elem) {
+        if (timestamp >= window_start &&
+            addr >= remote_base_addr_ && addr < remote_base_addr_ + remote_capacity_) {
+            access_count++;
+        }
+    }
+
+    double time_window_seconds = 0.02;
+    uint64_t total_data = access_count * 64; // 64B cache lines
+    double bw_gbps = (total_data / time_window_seconds) / (1024.0 * 1024.0 * 1024.0);
+
+    // Cap at fabric link bandwidth
+    return std::min(bw_gbps - fabric_link_->config_.bandwidth_gbps, 0.0);
+}
+
+int RemoteCXLExpander::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr,
+                              uint64_t virt_addr, int index) {
+    if (index != this->id) return 0;
+
+    last_timestamp = std::max(last_timestamp, timestamp);
+
+    if (phys_addr == 0) {
+        this->counter.inc_store();
+        return 1;
+    }
+
+    // Record in local occupation for latency calculation
+    bool address_exists = address_cache.find(phys_addr) != address_cache.end();
+
+    if (address_exists) {
+        for (auto it = this->occupation.cbegin(); it != this->occupation.cend(); it++) {
+            if (it->address == phys_addr) {
+                this->occupation.erase(it);
+                this->occupation.emplace_back(timestamp, phys_addr, 0);
+                this->counter.inc_load();
+
+                // Update shadow directory
+                update_shadow(phys_addr, MHSLDCacheState::SHARED, timestamp);
+                return 2;
+            }
+        }
+    }
+
+    this->occupation.emplace_back(timestamp, phys_addr, 0);
+    address_cache.insert(phys_addr);
+    this->counter.inc_store();
+
+    // Update shadow directory for new entry
+    update_shadow(phys_addr, MHSLDCacheState::SHARED, timestamp);
+    return 1;
+}
+
+void RemoteCXLExpander::invalidate_shadow(uint64_t addr) {
+    uint64_t cl_addr = addr & ~63ULL;
+    std::unique_lock<std::shared_mutex> lock(shadow_mutex_);
+    auto it = shadow_directory_.find(cl_addr);
+    if (it != shadow_directory_.end()) {
+        it->second.valid = false;
+        it->second.local_state = MHSLDCacheState::INVALID;
+    }
+}
+
+void RemoteCXLExpander::update_shadow(uint64_t addr, MHSLDCacheState state, uint64_t ts) {
+    uint64_t cl_addr = addr & ~63ULL;
+    std::unique_lock<std::shared_mutex> lock(shadow_mutex_);
+    shadow_directory_[cl_addr] = {state, ts, true};
 }

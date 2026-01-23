@@ -20,7 +20,8 @@ void CXLController::construct_topo(std::string_view newick_tree) {
     auto tokens = tokenize(newick_tree);
     std::vector<CXLSwitch *> stk;
     stk.push_back(this);
-    for (const auto &token : tokens) {
+    for (size_t t = 0; t < tokens.size(); t++) {
+        const auto &token = tokens[t];
         if (token == "(" && num_switches == 0) {
             num_switches++;
         } else if (token == "(") {
@@ -35,6 +36,17 @@ void CXLController::construct_topo(std::string_view newick_tree) {
                 throw std::invalid_argument("Unbalanced number of parentheses");
             }
         } else if (token == ",") {
+        } else if (token == "R" && t + 4 < tokens.size() &&
+                   tokens[t+1] == ":" && tokens[t+3] == ":") {
+            // R:node_id:exp_id - creates RemoteCXLExpander
+            uint32_t remote_node = static_cast<uint32_t>(atoi(tokens[t+2].c_str()));
+            // Use default link config; can be overridden later
+            FabricLinkConfig link_cfg{100.0, 25.0, 32};
+            uint64_t default_capacity = 1024ULL * 1024 * 1024; // 1GB default
+            uint64_t default_base = remote_node * default_capacity;
+            auto* remote = add_remote_endpoint(remote_node, default_base, default_capacity, link_cfg);
+            stk.back()->expanders.emplace_back(remote);
+            t += 4; // Skip R:node_id:exp_id (5 tokens total: R, :, node_id, :, exp_id)
         } else {
             stk.back()->expanders.emplace_back(this->cur_expanders[atoi(token.c_str()) - 1]);
             device_map[num_end_points] = this->cur_expanders[atoi(token.c_str()) - 1];
@@ -242,46 +254,79 @@ int CXLController::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, 
             continue;
         }
 
-        // 缓存未命中，决定分配策略
-        auto numa_policy = allocation_policy->compute_once(this);
+        // HDM Decoder routing path (distributed mode)
+        if (hdm_decoder_) {
+            auto decode_result = hdm_decoder_->decode(phys_addr);
 
-        // 检查是否需要页表遍历，并获取额外延迟
-        uint64_t ptw_latency = 0;
-        if (paging_policy) {
-            // 判断是远程访问还是本地访问
-            bool is_remote = numa_policy != -1;
-            ptw_latency = paging_policy->check_page_table_walk(virt_addr, phys_addr, is_remote, page_type_);
-
-            // 如果需要页表遍历，增加延迟
-            if (ptw_latency > 0) {
-                // 这里可以根据需要处理额外延迟
-                latency_lat += ptw_latency;
-                // 或者在计算总延迟时考虑这个因素
+            // 检查是否需要页表遍历
+            uint64_t ptw_latency = 0;
+            if (paging_policy) {
+                bool is_remote = decode_result.is_remote;
+                ptw_latency = paging_policy->check_page_table_walk(virt_addr, phys_addr, is_remote, page_type_);
+                if (ptw_latency > 0) {
+                    latency_lat += ptw_latency;
+                }
             }
-        }
 
-        if (numa_policy == -1) {
-            // 本地访问
-            this->occupation.emplace(current_timestamp, occupation_info{phys_addr, 1, current_timestamp + ptw_latency});
-            this->counter.inc_local();
-            t_info.llcm_type.push(0);
-
-            // 更新缓存
-            update_cache(phys_addr, phys_addr, current_timestamp);
-        } else {
-            // 远程访问
-            this->counter.inc_remote();
-            for (auto switch_ : this->switches) {
-                res &= switch_->insert(current_timestamp + ptw_latency, tid, phys_addr, virt_addr, numa_policy);
+            if (decode_result.is_remote) {
+                // Remote access via RemoteCXLExpander
+                auto* remote = get_remote_expander(decode_result.target_id);
+                if (remote) {
+                    remote->insert(current_timestamp + ptw_latency, tid, phys_addr, virt_addr, remote->id);
+                }
+                this->counter.inc_remote();
+                t_info.llcm_type.push(1);
+            } else {
+                // Local access routed by HDM decoder
+                auto it = device_map.find(decode_result.target_id);
+                if (it != device_map.end()) {
+                    it->second->insert(current_timestamp + ptw_latency, tid, phys_addr, virt_addr, it->second->id);
+                } else {
+                    // No specific device, use local occupation
+                    this->occupation.emplace(current_timestamp, occupation_info{phys_addr, 1, current_timestamp + ptw_latency});
+                }
+                this->counter.inc_local();
+                t_info.llcm_type.push(0);
             }
-            for (auto expander_ : this->expanders) {
-                res &= expander_->insert(current_timestamp + ptw_latency, tid, phys_addr, virt_addr, numa_policy);
-            }
-            t_info.llcm_type.push(1); // 远程访问类型
 
-            // 如果缓存策略允许缓存远程访问的数据
-            if (caching_policy->should_cache(phys_addr, current_timestamp)) {
+            // Update cache if allowed
+            if (caching_policy && caching_policy->should_cache(phys_addr, current_timestamp)) {
                 update_cache(phys_addr, phys_addr, current_timestamp);
+            }
+        } else {
+            // Fallback: old allocation_policy path (backwards compat)
+            auto numa_policy = allocation_policy->compute_once(this);
+
+            // 检查是否需要页表遍历，并获取额外延迟
+            uint64_t ptw_latency = 0;
+            if (paging_policy) {
+                bool is_remote = numa_policy != -1;
+                ptw_latency = paging_policy->check_page_table_walk(virt_addr, phys_addr, is_remote, page_type_);
+                if (ptw_latency > 0) {
+                    latency_lat += ptw_latency;
+                }
+            }
+
+            if (numa_policy == -1) {
+                // 本地访问
+                this->occupation.emplace(current_timestamp, occupation_info{phys_addr, 1, current_timestamp + ptw_latency});
+                this->counter.inc_local();
+                t_info.llcm_type.push(0);
+                update_cache(phys_addr, phys_addr, current_timestamp);
+            } else {
+                // 远程访问
+                this->counter.inc_remote();
+                for (auto switch_ : this->switches) {
+                    res &= switch_->insert(current_timestamp + ptw_latency, tid, phys_addr, virt_addr, numa_policy);
+                }
+                for (auto expander_ : this->expanders) {
+                    res &= expander_->insert(current_timestamp + ptw_latency, tid, phys_addr, virt_addr, numa_policy);
+                }
+                t_info.llcm_type.push(1);
+
+                if (caching_policy->should_cache(phys_addr, current_timestamp)) {
+                    update_cache(phys_addr, phys_addr, current_timestamp);
+                }
             }
         }
     }
@@ -537,6 +582,52 @@ MHSLDDevice::Stats CXLController::get_mhsld_stats() const {
         return {0, 0, 0, 0, 0.0, 0.0, 0.0};
     }
     return mhsld_device->get_stats();
+}
+
+/* ============================================================================
+ * Distributed Topology Configuration
+ *
+ * Configures the controller for distributed multi-node operation with
+ * HDM decoder for address routing and unified CoherencyEngine.
+ * ============================================================================ */
+
+void CXLController::configure_distributed(uint32_t local_node_id, HDMDecoderMode mode) {
+    local_node_id_ = local_node_id;
+    hdm_decoder_ = std::make_unique<HDMDecoder>(mode);
+    coherency_ = std::make_unique<CoherencyEngine>(
+        local_node_id, hdm_decoder_.get(), &logp_model);
+
+    SPDLOG_INFO("CXLController configured for distributed mode: node={}, mode={}",
+                local_node_id, static_cast<int>(mode));
+}
+
+RemoteCXLExpander* CXLController::add_remote_endpoint(uint32_t remote_node, uint64_t base,
+                                                       uint64_t capacity, const FabricLinkConfig& link_cfg) {
+    int remote_id = num_end_points++;
+
+    auto* remote = new RemoteCXLExpander(remote_id, remote_node, local_node_id_,
+                                         base, capacity, link_cfg);
+    remote->coherency_engine_ = coherency_.get();
+    remote->hdm_decoder_ = hdm_decoder_.get();
+
+    // Add to topology
+    this->expanders.push_back(remote);
+    device_map[remote_id] = remote;
+    remote_expanders_.push_back(remote);
+
+    SPDLOG_INFO("Added remote endpoint: node={}, base=0x{:x}, capacity={}MB, id={}",
+                remote_node, base, capacity / (1024*1024), remote_id);
+
+    return remote;
+}
+
+RemoteCXLExpander* CXLController::get_remote_expander(uint32_t node_id) {
+    for (auto* remote : remote_expanders_) {
+        if (remote->remote_node_id_ == node_id) {
+            return remote;
+        }
+    }
+    return nullptr;
 }
 
 /*

@@ -14,9 +14,9 @@
 #include "monitor.h"
 #include "policy.h"
 #include "shared_memory_manager.h"
-#include "../include/shm_communication.h"
-#include "../include/cxl_backend.h"
-#include "../include/distributed_server.h"
+#include "shm_communication.h"
+#include "cxl_backend.h"
+#include "distributed_server.h"
 #include <cerrno>
 #include <cxxopts.hpp>
 #include <spdlog/cfg/env.h>
@@ -26,9 +26,6 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
-#include <condition_variable>
-#include <queue>
-#include <map>
 #include <atomic>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -40,11 +37,8 @@
 #include <sstream>
 #include <algorithm>
 #include <chrono>
-#include <set>
 #include <fstream>
 #include <iostream>
-#include <iterator>
-#include <queue>
 #include <sys/mman.h>  // For msync
 
 #ifndef MSG_WAITALL
