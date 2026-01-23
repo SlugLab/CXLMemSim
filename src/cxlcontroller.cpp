@@ -12,6 +12,7 @@
 #include "cxlcontroller.h"
 #include "lbr.h"
 #include "monitor.h"
+#include "../include/distributed_server.h"
 
 void CXLController::insert_end_point(CXLMemExpander *end_point) { this->cur_expanders.emplace_back(end_point); }
 
@@ -441,6 +442,35 @@ void CXLController::configure_logp(const LogPConfig& config) {
     logp_model.reconfigure(config);
     SPDLOG_INFO("CXLController LogP configured: L={:.1f}ns o_s={:.1f}ns o_r={:.1f}ns g={:.1f}ns P={}",
                 config.L, config.o_s, config.o_r, config.g, config.P);
+}
+
+void CXLController::calibrate_logp_from_rdma(const struct RDMACalibrationResult& result) {
+    if (!result.valid) {
+        SPDLOG_WARN("Invalid RDMA calibration result, keeping existing LogP config");
+        return;
+    }
+
+    // Clamp values to realistic ranges for RDMA
+    double L = std::max(0.5, std::min(result.L, 100.0));          // 0.5-100us latency
+    double o_s = std::max(0.1, std::min(result.o_s, 50.0));       // 0.1-50us send overhead
+    double o_r = std::max(0.1, std::min(result.o_r, 50.0));       // 0.1-50us recv overhead
+    double g = std::max(0.01, std::min(result.g, 10.0));           // 0.01-10us gap
+
+    // Convert from us to ns for LogP config (calibration measures in us)
+    LogPConfig calibrated_config(
+        L * 1000.0,        // L in ns
+        o_s * 1000.0,      // o_s in ns
+        o_r * 1000.0,      // o_r in ns
+        g * 1000.0,         // g in ns
+        logp_model.config.P // Keep existing P (number of nodes)
+    );
+
+    logp_model.reconfigure(calibrated_config);
+    SPDLOG_INFO("CXLController LogP calibrated from RDMA ({} samples): "
+                "L={:.1f}ns o_s={:.1f}ns o_r={:.1f}ns g={:.1f}ns",
+                result.samples,
+                calibrated_config.L, calibrated_config.o_s,
+                calibrated_config.o_r, calibrated_config.g);
 }
 
 double CXLController::calculate_logp_latency(uint32_t src_node, uint32_t dst_node, uint64_t timestamp) {

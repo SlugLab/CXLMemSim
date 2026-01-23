@@ -275,7 +275,11 @@ int main(int argc, char *argv[]) {
         ("pgas-shm-name", "PGAS shared memory name (for pgas-shm mode)", cxxopts::value<std::string>()->default_value("/cxlmemsim_pgas"))
         ("node-id", "Node ID for distributed mode (0 = coordinator)", cxxopts::value<uint32_t>()->default_value("0"))
         ("dist-shm-name", "Shared memory name for distributed inter-node communication", cxxopts::value<std::string>()->default_value("/cxlmemsim_dist"))
-        ("coordinator-shm", "Coordinator's shared memory name (for joining existing cluster)", cxxopts::value<std::string>()->default_value(""));
+        ("coordinator-shm", "Coordinator's shared memory name (for joining existing cluster)", cxxopts::value<std::string>()->default_value(""))
+        ("transport-mode", "Transport mode for distributed: shm, rdma, or hybrid", cxxopts::value<std::string>()->default_value("shm"))
+        ("rdma-addr", "RDMA bind address for distributed RDMA transport", cxxopts::value<std::string>()->default_value("0.0.0.0"))
+        ("rdma-port", "RDMA port for distributed RDMA transport", cxxopts::value<uint16_t>()->default_value("5555"))
+        ("rdma-peers", "Comma-separated list of RDMA peer addresses (node_id:addr:port,...)", cxxopts::value<std::string>()->default_value(""));
 
     auto result = options.parse(argc, argv);
     
@@ -299,6 +303,53 @@ int main(int argc, char *argv[]) {
     uint32_t node_id = result["node-id"].as<uint32_t>();
     std::string dist_shm_name = result["dist-shm-name"].as<std::string>();
     std::string coordinator_shm = result["coordinator-shm"].as<std::string>();
+
+    // Parse RDMA transport options
+    std::string transport_mode_str = result["transport-mode"].as<std::string>();
+    std::string rdma_addr = result["rdma-addr"].as<std::string>();
+    uint16_t rdma_port = result["rdma-port"].as<uint16_t>();
+    std::string rdma_peers_str = result["rdma-peers"].as<std::string>();
+
+    // Map transport mode string to enum
+    DistTransportMode transport_mode = DistTransportMode::SHM;
+    if (transport_mode_str == "rdma") {
+        transport_mode = DistTransportMode::RDMA;
+    } else if (transport_mode_str == "hybrid") {
+        transport_mode = DistTransportMode::HYBRID;
+    } else if (transport_mode_str != "shm") {
+        SPDLOG_ERROR("Invalid transport mode: {}. Use 'shm', 'rdma', or 'hybrid'", transport_mode_str);
+        return 1;
+    }
+
+    // Parse RDMA peers list: "node_id:addr:port,node_id:addr:port,..."
+    struct RDMAPeerInfo {
+        uint32_t node_id;
+        std::string addr;
+        uint16_t port;
+    };
+    std::vector<RDMAPeerInfo> rdma_peers;
+    if (!rdma_peers_str.empty()) {
+        std::istringstream peers_stream(rdma_peers_str);
+        std::string peer_entry;
+        while (std::getline(peers_stream, peer_entry, ',')) {
+            // Parse "node_id:addr:port"
+            std::istringstream entry_stream(peer_entry);
+            std::string token;
+            std::vector<std::string> tokens;
+            while (std::getline(entry_stream, token, ':')) {
+                tokens.push_back(token);
+            }
+            if (tokens.size() == 3) {
+                RDMAPeerInfo peer;
+                peer.node_id = std::stoul(tokens[0]);
+                peer.addr = tokens[1];
+                peer.port = std::stoul(tokens[2]);
+                rdma_peers.push_back(peer);
+            } else {
+                SPDLOG_WARN("Invalid RDMA peer entry: '{}', expected format node_id:addr:port", peer_entry);
+            }
+        }
+    }
 
     // Parse communication mode
     CommMode comm_mode = CommMode::TCP;
@@ -354,6 +405,18 @@ int main(int argc, char *argv[]) {
     if (comm_mode == CommMode::DISTRIBUTED) {
         SPDLOG_INFO("  Node ID: {}", node_id);
         SPDLOG_INFO("  Distributed SHM Name: {}", dist_shm_name);
+        const char* transport_str = (transport_mode == DistTransportMode::RDMA) ? "RDMA" :
+                                    (transport_mode == DistTransportMode::HYBRID) ? "Hybrid (SHM+RDMA)" : "SHM";
+        SPDLOG_INFO("  Transport Mode: {}", transport_str);
+        if (transport_mode != DistTransportMode::SHM) {
+            SPDLOG_INFO("  RDMA Address: {}:{}", rdma_addr, rdma_port);
+            if (!rdma_peers.empty()) {
+                SPDLOG_INFO("  RDMA Peers: {} configured", rdma_peers.size());
+                for (const auto& peer : rdma_peers) {
+                    SPDLOG_INFO("    Node {}: {}:{}", peer.node_id, peer.addr, peer.port);
+                }
+            }
+        }
         if (!coordinator_shm.empty()) {
             SPDLOG_INFO("  Joining cluster via: {}", coordinator_shm);
         } else {
@@ -371,6 +434,11 @@ int main(int argc, char *argv[]) {
     if (comm_mode == CommMode::DISTRIBUTED) {
         SPDLOG_INFO("  - Distributed coherency protocol");
         SPDLOG_INFO("  - Inter-node message passing");
+        if (transport_mode != DistTransportMode::SHM) {
+            SPDLOG_INFO("  - RDMA one-sided READ/WRITE");
+            SPDLOG_INFO("  - RDMA-calibrated LogP model");
+            SPDLOG_INFO("  - Distributed MH-SLD coherency via RDMA");
+        }
     }
     SPDLOG_INFO("========================================");
     
@@ -383,7 +451,8 @@ int main(int argc, char *argv[]) {
         try {
             SPDLOG_INFO("Starting distributed memory server node {}...", node_id);
 
-            DistributedMemoryServer dist_server(node_id, dist_shm_name, port, capacity, controller);
+            DistributedMemoryServer dist_server(node_id, dist_shm_name, port, capacity, controller,
+                                                transport_mode, rdma_addr, rdma_port);
 
             if (!dist_server.initialize()) {
                 SPDLOG_ERROR("Failed to initialize distributed server");
@@ -396,6 +465,25 @@ int main(int argc, char *argv[]) {
                     SPDLOG_ERROR("Failed to join cluster");
                     return 1;
                 }
+            }
+
+            // Connect to RDMA peers if transport mode is RDMA or HYBRID
+            if (transport_mode != DistTransportMode::SHM && !rdma_peers.empty()) {
+                SPDLOG_INFO("Connecting to {} RDMA peer(s)...", rdma_peers.size());
+                for (const auto& peer : rdma_peers) {
+                    if (dist_server.connect_rdma_node(peer.node_id, peer.addr, peer.port)) {
+                        SPDLOG_INFO("Connected to RDMA peer node {} at {}:{}",
+                                   peer.node_id, peer.addr, peer.port);
+                    } else {
+                        SPDLOG_WARN("Failed to connect to RDMA peer node {} at {}:{}",
+                                   peer.node_id, peer.addr, peer.port);
+                    }
+                }
+
+                // Run LogP calibration on all connected peers
+                SPDLOG_INFO("Running RDMA LogP calibration...");
+                dist_server.calibrate_rdma_logp();
+                SPDLOG_INFO("RDMA LogP calibration complete");
             }
 
             if (!dist_server.start()) {

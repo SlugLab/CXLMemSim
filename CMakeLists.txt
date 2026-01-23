@@ -27,7 +27,7 @@ list(APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR})
 find_package(cxxopts REQUIRED)
 find_package(spdlog REQUIRED)
 file(GLOB_RECURSE SOURCE_FILES src/cxl*.cpp src/policy.cpp src/helper.cpp src/incore.cpp src/uncore.cpp src/perf.cpp src/monitor.cpp)
-set(SERVER_SOURCES src/main_server.cc src/shared_memory_manager.cc src/shm_communication.cpp src/distributed_server.cpp)
+set(SERVER_SOURCES src/main_server.cc src/shared_memory_manager.cc src/shm_communication.cpp src/distributed_server.cpp src/rdma_communication.cpp)
 
 execute_process(COMMAND uname -r OUTPUT_VARIABLE arch OUTPUT_STRIP_TRAILING_WHITESPACE)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fPIC -pthread")
@@ -69,25 +69,9 @@ if(ENABLE_RDMA)
         # Add RDMA libraries
         set(RDMA_LIBRARIES ${RDMACM_LIBRARIES} ${IBV_LIBRARIES})
 
-        # Add RDMA source files
-        set(RDMA_SOURCES
-            src/rdma_communication.cpp
-            qemu_integration/src/cxlmemsim_server_rdma.cpp
-        )
-
-        # Create RDMA-enabled server executable
-        add_executable(cxlmemsim_server_rdma ${RDMA_SOURCES})
-        target_link_libraries(cxlmemsim_server_rdma
-            ${RDMA_LIBRARIES}
-            pthread
-        )
-
-        # Set RDMA-specific compile flags
-        target_compile_options(cxlmemsim_server_rdma PRIVATE
-            ${RDMACM_CFLAGS_OTHER}
-            ${IBV_CFLAGS_OTHER}
-        )
-
+        # Link RDMA libraries to main server (distributed_server.cpp uses RDMA)
+        target_link_libraries(cxlmemsim_server ${RDMA_LIBRARIES})
+        target_compile_options(cxlmemsim_server PRIVATE ${RDMACM_CFLAGS_OTHER} ${IBV_CFLAGS_OTHER})
     else()
         message(WARNING "RDMA libraries not found. RDMA support disabled.")
         set(ENABLE_RDMA OFF)
@@ -96,7 +80,7 @@ endif()
 
 # Installation targets
 if(ENABLE_RDMA)
-    install(TARGETS cxlmemsim_server_rdma
+    install(TARGETS cxlmemsim_server
             RUNTIME DESTINATION bin)
 
     install(FILES include/rdma_communication.h

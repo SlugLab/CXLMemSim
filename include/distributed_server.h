@@ -257,10 +257,49 @@ typedef struct {
 
 #include <functional>
 #include <memory>
+#include <unordered_map>
+
+/* RDMA transport support */
+#include "rdma_communication.h"
 
 /* Forward declarations */
 class CXLController;
 class SharedMemoryManager;
+struct MHSLDDevice;
+enum class MHSLDCacheState : uint8_t;
+
+/* Transport mode for distributed server */
+enum class DistTransportMode {
+    SHM,        // Shared memory ring buffers (existing)
+    RDMA,       // RDMA verbs
+    HYBRID      // SHM for local, RDMA for remote
+};
+
+/* RDMA calibration result for LogP parameter extraction */
+struct RDMACalibrationResult {
+    double L;           // Measured latency (ns)
+    double o_s;         // Measured send overhead (ns)
+    double o_r;         // Measured receive overhead (ns)
+    double g;           // Measured gap - 1/bandwidth (ns)
+    uint64_t samples;   // Number of samples taken
+    bool valid;         // Whether calibration succeeded
+
+    RDMACalibrationResult() : L(0), o_s(0), o_r(0), g(0), samples(0), valid(false) {}
+};
+
+/* Per-node RDMA connection state */
+struct RDMANodeConnection {
+    std::unique_ptr<RDMAClient> client;     // Outgoing RDMA connection
+    uint64_t remote_addr;                    // Remote base address for one-sided ops
+    uint32_t remote_rkey;                    // Remote region key
+    uint32_t remote_mr_lkey;                 // Remote MR local key
+    size_t remote_buffer_size;               // Remote buffer size
+    bool connected;                          // Connection state
+    RDMACalibrationResult calibration;       // Per-node calibration data
+
+    RDMANodeConnection() : remote_addr(0), remote_rkey(0), remote_mr_lkey(0),
+                           remote_buffer_size(0), connected(false) {}
+};
 
 /* Message handler callback type */
 using DistMessageHandler = std::function<void(const dist_message_t&, dist_message_t&)>;
@@ -478,6 +517,116 @@ public:
     Stats get_stats() const;
 };
 
+/* RDMA Transport Layer for Distributed Server */
+class DistributedRDMATransport {
+private:
+    uint32_t local_node_id_;
+    std::string bind_addr_;
+    uint16_t port_;
+
+    // Per-node RDMA connections
+    std::map<uint32_t, RDMANodeConnection> connections_;
+    std::mutex connections_mutex_;
+
+    // RDMA server for incoming connections
+    std::unique_ptr<RDMAServer> server_;
+    std::thread accept_thread_;
+    std::atomic<bool> running_;
+
+    // Calibration results per node
+    std::map<uint32_t, RDMACalibrationResult> calibration_results_;
+    std::mutex calibration_mutex_;
+
+public:
+    DistributedRDMATransport(uint32_t node_id, const std::string& bind_addr, uint16_t port);
+    ~DistributedRDMATransport();
+
+    // Lifecycle
+    bool initialize();
+    void shutdown();
+
+    // Connection management
+    bool connect_to_node(uint32_t node_id, const std::string& addr, uint16_t port);
+    void disconnect_node(uint32_t node_id);
+    bool is_connected(uint32_t node_id) const;
+    std::vector<uint32_t> get_connected_nodes() const;
+
+    // Two-sided messaging (for coherency protocol)
+    bool send_message(uint32_t dst_node, const dist_message_t& msg);
+    bool send_message_wait_response(uint32_t dst_node, const dist_message_t& req,
+                                     dist_message_t& resp, int timeout_ms = 5000);
+
+    // One-sided operations (for data access - bypasses remote CPU)
+    bool rdma_read(uint32_t dst_node, uint64_t remote_offset, void* local_buf, size_t size);
+    bool rdma_write(uint32_t dst_node, uint64_t remote_offset, const void* local_buf, size_t size);
+
+    // LogP calibration via RDMA ping-pong
+    RDMACalibrationResult calibrate_node(uint32_t dst_node, uint32_t num_samples = 1000);
+    RDMACalibrationResult get_calibration(uint32_t node_id) const;
+    RDMACalibrationResult get_aggregate_calibration() const;
+
+    // Exchange memory region info for one-sided ops
+    bool exchange_mr_info(uint32_t node_id);
+
+    // Getters
+    uint32_t get_local_node_id() const { return local_node_id_; }
+    uint16_t get_port() const { return port_; }
+
+private:
+    void accept_loop();
+    bool send_rdma_msg(uint32_t dst_node, const void* data, size_t size);
+    bool recv_rdma_msg(uint32_t src_node, void* data, size_t size, int timeout_ms);
+};
+
+/* Distributed MH-SLD Manager - Cross-node coherency via RDMA */
+class DistributedMHSLDManager {
+private:
+    CXLController* controller_;
+    DistributedRDMATransport* rdma_transport_;
+    DistributedMessageManager* msg_manager_;
+    uint32_t local_node_id_;
+    uint32_t local_head_id_;
+
+    // Remote directory cache (avoids repeated RDMA reads)
+    std::unordered_map<uint64_t, DistDirectoryEntry> remote_dir_cache_;
+    mutable std::shared_mutex cache_mutex_;
+
+    // Statistics
+    std::atomic<uint64_t> remote_invalidations_;
+    std::atomic<uint64_t> remote_fetches_;
+    std::atomic<uint64_t> remote_updates_;
+    std::atomic<uint64_t> cache_hits_;
+
+public:
+    DistributedMHSLDManager(CXLController* ctrl, DistributedRDMATransport* rdma,
+                            DistributedMessageManager* msg_mgr,
+                            uint32_t node_id, uint32_t head_id);
+    ~DistributedMHSLDManager() = default;
+
+    // Distributed coherency operations (returns additional latency in ns)
+    double distributed_read(uint64_t addr, uint64_t timestamp);
+    double distributed_write(uint64_t addr, uint64_t timestamp);
+    double distributed_atomic(uint64_t addr, uint64_t timestamp);
+
+    // RDMA-based coherency protocol
+    double rdma_invalidate_remote(uint32_t target_node, uint64_t addr, uint64_t timestamp);
+    double rdma_fetch_directory(uint32_t home_node, uint64_t addr);
+    double rdma_update_directory(uint32_t home_node, uint64_t addr,
+                                  uint8_t new_state, uint32_t new_owner);
+
+    // Invalidate local cache entry
+    void invalidate_cache_entry(uint64_t addr);
+
+    // Statistics
+    struct Stats {
+        uint64_t remote_invalidations;
+        uint64_t remote_fetches;
+        uint64_t remote_updates;
+        uint64_t cache_hits;
+    };
+    Stats get_stats() const;
+};
+
 /* Main distributed memory server class */
 class DistributedMemoryServer {
 private:
@@ -486,12 +635,19 @@ private:
     std::string shm_name_;
     int tcp_port_;
     size_t memory_capacity_mb_;
+    DistTransportMode transport_mode_;
+
+    /* RDMA configuration */
+    std::string rdma_addr_;
+    uint16_t rdma_port_;
 
     /* Core components */
     CXLController* controller_;
     std::unique_ptr<SharedMemoryManager> local_memory_;
     std::unique_ptr<DistributedMessageManager> msg_manager_;
     std::unique_ptr<DistributedDirectory> directory_;
+    std::unique_ptr<DistributedRDMATransport> rdma_transport_;
+    std::unique_ptr<DistributedMHSLDManager> mhsld_manager_;
 
     /* Node registry */
     std::map<uint32_t, DistNodeInfo> nodes_;
@@ -517,7 +673,10 @@ private:
 public:
     DistributedMemoryServer(uint32_t node_id, const std::string& shm_name,
                              int tcp_port, size_t capacity_mb,
-                             CXLController* controller);
+                             CXLController* controller,
+                             DistTransportMode transport_mode = DistTransportMode::SHM,
+                             const std::string& rdma_addr = "0.0.0.0",
+                             uint16_t rdma_port = 5555);
     ~DistributedMemoryServer();
 
     /* Lifecycle */
@@ -548,6 +707,12 @@ public:
     uint32_t get_node_id() const { return node_id_; }
     node_state_t get_state() const { return state_.load(); }
     bool is_running() const { return running_.load(); }
+    DistTransportMode get_transport_mode() const { return transport_mode_; }
+
+    /* RDMA transport management */
+    bool connect_rdma_node(uint32_t node_id, const std::string& addr, uint16_t port);
+    bool calibrate_rdma_logp(uint32_t target_node = UINT32_MAX);
+    DistributedRDMATransport* get_rdma_transport() { return rdma_transport_.get(); }
 
     /* Statistics */
     struct Stats {
@@ -580,9 +745,19 @@ private:
     int forward_write(uint32_t target_node, uint64_t addr, const void* data,
                       size_t size, uint64_t* latency_ns);
 
+    /* RDMA-based forwarding (used when transport_mode_ is RDMA or HYBRID) */
+    int forward_read_rdma(uint32_t target_node, uint64_t addr, void* data,
+                          size_t size, uint64_t* latency_ns);
+    int forward_write_rdma(uint32_t target_node, uint64_t addr, const void* data,
+                           size_t size, uint64_t* latency_ns);
+
     /* Coherency */
     bool ensure_coherency_for_read(uint64_t addr, uint32_t requesting_node);
     bool ensure_coherency_for_write(uint64_t addr, uint32_t requesting_node);
+
+    /* RDMA initialization helpers */
+    bool initialize_rdma_transport();
+    void calibrate_all_rdma_nodes();
 };
 
 #endif /* __cplusplus */

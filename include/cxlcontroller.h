@@ -23,6 +23,7 @@ struct mem_stats;
 struct proc_info;
 struct lbr;
 struct cntr;
+struct RDMACalibrationResult;
 enum page_type { CACHELINE, PAGE, HUGEPAGE_2M, HUGEPAGE_1G };
 
 class Policy {
@@ -276,6 +277,7 @@ public:
 
     // LogP model configuration and access
     void configure_logp(const LogPConfig& config);
+    void calibrate_logp_from_rdma(const struct RDMACalibrationResult& result);
     double calculate_logp_latency(uint32_t src_node, uint32_t dst_node, uint64_t timestamp);
     double calculate_logp_broadcast_latency();
 
