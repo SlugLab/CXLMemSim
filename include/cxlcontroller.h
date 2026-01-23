@@ -14,6 +14,7 @@
 
 #include "cxlendpoint.h"
 #include "lbr.h"
+#include <memory>
 #include <queue>
 #include <shared_mutex>
 #include <string_view>
@@ -242,6 +243,12 @@ public:
     // LRU cache
     LRUCache lru_cache;
 
+    // LogP queuing model for distributed/multi-node latency
+    LogPModel logp_model;
+
+    // MH-SLD device for multi-headed pooling/sharing
+    std::unique_ptr<MHSLDDevice> mhsld_device;
+
     explicit CXLController(std::array<Policy *, 4> p, int capacity, page_type page_type_, int epoch,
                            double dramlatency);
     void construct_topo(std::string_view newick_tree);
@@ -266,6 +273,22 @@ public:
     void perform_back_invalidation();
     void invalidate_in_expanders(uint64_t addr);
     void invalidate_in_switch(CXLSwitch *switch_, uint64_t addr);
+
+    // LogP model configuration and access
+    void configure_logp(const LogPConfig& config);
+    double calculate_logp_latency(uint32_t src_node, uint32_t dst_node, uint64_t timestamp);
+    double calculate_logp_broadcast_latency();
+
+    // MH-SLD pooling/sharing
+    void enable_mhsld(uint32_t num_heads, double bandwidth_gbps);
+    double mhsld_read(uint32_t head_id, uint64_t addr, uint64_t timestamp);
+    double mhsld_write(uint32_t head_id, uint64_t addr, uint64_t timestamp);
+    double mhsld_atomic(uint32_t head_id, uint64_t addr, uint64_t timestamp);
+    MHSLDDevice::Stats get_mhsld_stats() const;
+
+    // Combined latency: local access + LogP network + MH-SLD coherency
+    double calculate_distributed_latency(const std::vector<std::tuple<uint64_t, uint64_t>> &elem,
+                                         uint32_t head_id, uint32_t target_node);
 };
 
 // C++20 std::formatter for CXLController

@@ -427,3 +427,130 @@ void CXLController::invalidate_in_switch(CXLSwitch *switch_, uint64_t addr) {
         invalidate_in_switch(child_switch, addr);
     }
 }
+
+/* ============================================================================
+ * LogP Queuing Model Integration
+ *
+ * Integrates the LogP model into the controller's latency calculation
+ * for distributed/multi-node CXL topologies. The LogP parameters model
+ * the inter-node communication cost which is added to the base CXL
+ * device access latency.
+ * ============================================================================ */
+
+void CXLController::configure_logp(const LogPConfig& config) {
+    logp_model.reconfigure(config);
+    SPDLOG_INFO("CXLController LogP configured: L={:.1f}ns o_s={:.1f}ns o_r={:.1f}ns g={:.1f}ns P={}",
+                config.L, config.o_s, config.o_r, config.g, config.P);
+}
+
+double CXLController::calculate_logp_latency(uint32_t src_node, uint32_t dst_node, uint64_t timestamp) {
+    if (src_node == dst_node) return 0.0;
+    return logp_model.message_latency(timestamp, dst_node);
+}
+
+double CXLController::calculate_logp_broadcast_latency() {
+    return logp_model.broadcast_latency();
+}
+
+/* ============================================================================
+ * MH-SLD (Multi-Headed Single Logical Device) Integration
+ *
+ * Enables MH-SLD mode on the controller. In this mode, the controller's
+ * expanders are treated as a shared device with multiple heads (one per
+ * host/node). Cacheline-state-aware coherency is used for all accesses.
+ *
+ * The MH-SLD model leverages:
+ *   - Per-cacheline MOESI states for tracking cross-head sharing
+ *   - LogP-based latency for coherency messages between heads
+ *   - Fair-share bandwidth allocation across active heads
+ *   - Memory pooling with per-head capacity quotas
+ * ============================================================================ */
+
+void CXLController::enable_mhsld(uint32_t num_heads, double bandwidth_gbps) {
+    // Compute total capacity across all expanders
+    uint64_t total_bytes = 0;
+    for (auto* exp : cur_expanders) {
+        total_bytes += static_cast<uint64_t>(exp->capacity) * 1024ULL * 1024ULL;
+    }
+
+    // Use average read/write latency from first expander as base
+    double read_lat = 100.0, write_lat = 150.0;
+    if (!cur_expanders.empty()) {
+        read_lat = cur_expanders[0]->latency.read;
+        write_lat = cur_expanders[0]->latency.write;
+    }
+
+    mhsld_device = std::make_unique<MHSLDDevice>(
+        total_bytes, num_heads, read_lat, write_lat, bandwidth_gbps, logp_model.config);
+
+    SPDLOG_INFO("MH-SLD enabled on controller: {} heads, {} MB total, {:.1f} GB/s BW",
+                num_heads, total_bytes / (1024 * 1024), bandwidth_gbps);
+}
+
+double CXLController::mhsld_read(uint32_t head_id, uint64_t addr, uint64_t timestamp) {
+    if (!mhsld_device) return 0.0;
+    return mhsld_device->read_with_coherency(head_id, addr, timestamp);
+}
+
+double CXLController::mhsld_write(uint32_t head_id, uint64_t addr, uint64_t timestamp) {
+    if (!mhsld_device) return 0.0;
+    return mhsld_device->write_with_coherency(head_id, addr, timestamp);
+}
+
+double CXLController::mhsld_atomic(uint32_t head_id, uint64_t addr, uint64_t timestamp) {
+    if (!mhsld_device) return 0.0;
+    return mhsld_device->atomic_with_coherency(head_id, addr, timestamp);
+}
+
+MHSLDDevice::Stats CXLController::get_mhsld_stats() const {
+    if (!mhsld_device) {
+        return {0, 0, 0, 0, 0.0, 0.0, 0.0};
+    }
+    return mhsld_device->get_stats();
+}
+
+/*
+ * Calculate distributed latency combining:
+ *   1. Base CXL device access latency (from endpoint tree traversal)
+ *   2. LogP network latency (if remote node access)
+ *   3. MH-SLD coherency overhead (if multi-headed sharing active)
+ *
+ * This is the main entry point for latency calculation in distributed mode.
+ */
+double CXLController::calculate_distributed_latency(
+    const std::vector<std::tuple<uint64_t, uint64_t>> &elem,
+    uint32_t head_id, uint32_t target_node) {
+
+    if (elem.empty()) return 0.0;
+
+    // 1. Base CXL device latency from tree traversal
+    double base_latency = calculate_latency(elem, dramlatency);
+
+    // 2. LogP network latency for remote access
+    uint64_t timestamp = std::get<0>(elem.back());
+    double network_latency = 0.0;
+    if (target_node != head_id) {
+        network_latency = calculate_logp_latency(head_id, target_node, timestamp);
+        // Update LogP model statistics
+        logp_model.record_message(target_node, static_cast<uint64_t>(network_latency));
+    }
+
+    // 3. MH-SLD coherency overhead
+    double coherency_latency = 0.0;
+    if (mhsld_device) {
+        // Process each access through MH-SLD coherency
+        double total_mhsld = 0.0;
+        size_t count = 0;
+        for (const auto &[ts, addr] : elem) {
+            total_mhsld += mhsld_device->read_with_coherency(head_id, addr, ts);
+            count++;
+        }
+        // Coherency overhead is the difference from base read latency
+        if (count > 0) {
+            double avg_mhsld = total_mhsld / count;
+            coherency_latency = std::max(0.0, avg_mhsld - mhsld_device->base_read_latency);
+        }
+    }
+
+    return base_latency + network_latency + coherency_latency;
+}

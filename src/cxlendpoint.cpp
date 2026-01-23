@@ -637,9 +637,520 @@ double CXLMemExpander::calculate_congestion_delay(uint64_t timestamp) {
 double CXLMemExpander::calculate_protocol_overhead(size_t data_size) {
     // Calculate number of flits needed
     size_t num_flits = (data_size + FLIT_SIZE - 1) / FLIT_SIZE;
-    
+
     // Add data flit overhead
     double overhead = num_flits * DATA_FLIT * 0.1;  // 0.1ns per byte overhead
-    
+
     return overhead;
+}
+
+/* ============================================================================
+ * MH-SLD (Multi-Headed Single Logical Device) Implementation
+ *
+ * Provides pooling and sharing of CXL memory across multiple hosts,
+ * with cacheline-state-aware coherency protocol and LogP-based latency.
+ * ============================================================================ */
+
+MHSLDDevice::MHSLDDevice(uint64_t capacity, uint32_t num_heads, double read_lat,
+                         double write_lat, double bandwidth, const LogPConfig& logp_cfg)
+    : total_capacity(capacity), num_heads(num_heads),
+      base_read_latency(read_lat), base_write_latency(write_lat),
+      max_bandwidth(bandwidth), logp_model(logp_cfg) {
+
+    heads.resize(MAX_HEADS);
+    for (uint32_t i = 0; i < MAX_HEADS; i++) {
+        heads[i].head_id = i;
+        heads[i].active = false;
+        heads[i].bandwidth_share = 0.0;
+    }
+}
+
+bool MHSLDDevice::activate_head(uint32_t head_id, uint64_t capacity_alloc) {
+    if (head_id >= MAX_HEADS) return false;
+
+    heads[head_id].active = true;
+    heads[head_id].allocated_capacity = capacity_alloc;
+    heads[head_id].used_capacity = 0;
+
+    rebalance_bandwidth();
+    return true;
+}
+
+void MHSLDDevice::deactivate_head(uint32_t head_id) {
+    if (head_id >= MAX_HEADS) return;
+
+    heads[head_id].active = false;
+    heads[head_id].bandwidth_share = 0.0;
+
+    // Invalidate all cachelines owned by this head
+    std::shared_lock<std::shared_mutex> lock(directory_mutex);
+    for (auto& [addr, info] : directory) {
+        std::lock_guard<std::mutex> cl_lock(info->lock);
+        if (info->owner_head == head_id) {
+            if (info->owner_state == MHSLDCacheState::MODIFIED) {
+                info->has_dirty_data = true;
+            }
+            info->owner_head = UINT32_MAX;
+            info->owner_state = MHSLDCacheState::INVALID;
+        }
+        info->sharers.erase(head_id);
+    }
+
+    rebalance_bandwidth();
+}
+
+void MHSLDDevice::rebalance_bandwidth() {
+    uint32_t active_count = 0;
+    for (const auto& h : heads) {
+        if (h.active) active_count++;
+    }
+
+    if (active_count == 0) return;
+
+    // Weighted fair share based on allocated capacity
+    uint64_t total_alloc = 0;
+    for (const auto& h : heads) {
+        if (h.active) total_alloc += h.allocated_capacity;
+    }
+
+    for (auto& h : heads) {
+        if (h.active && total_alloc > 0) {
+            h.bandwidth_share = static_cast<double>(h.allocated_capacity) / total_alloc;
+        } else if (h.active) {
+            h.bandwidth_share = 1.0 / active_count;
+        } else {
+            h.bandwidth_share = 0.0;
+        }
+    }
+}
+
+uint64_t MHSLDDevice::allocate_pool(uint32_t head_id, uint64_t size) {
+    if (head_id >= MAX_HEADS || !heads[head_id].active) return 0;
+
+    // Check if head has capacity
+    if (heads[head_id].used_capacity + size > heads[head_id].allocated_capacity) {
+        return 0; // Out of pool
+    }
+
+    // Simple allocation: use head_id as base offset + used_capacity
+    uint64_t base = static_cast<uint64_t>(head_id) * (total_capacity / MAX_HEADS);
+    uint64_t addr = base + heads[head_id].used_capacity;
+    heads[head_id].used_capacity += size;
+
+    return addr;
+}
+
+void MHSLDDevice::release_pool(uint32_t head_id, uint64_t addr, uint64_t size) {
+    if (head_id >= MAX_HEADS || !heads[head_id].active) return;
+
+    // Invalidate cachelines in the released region
+    uint64_t cl_addr = addr & ~(CACHELINE_SIZE - 1);
+    uint64_t end_addr = addr + size;
+
+    while (cl_addr < end_addr) {
+        auto* entry = get_entry(cl_addr);
+        if (entry) {
+            std::lock_guard<std::mutex> lock(entry->lock);
+            entry->sharers.erase(head_id);
+            if (entry->owner_head == head_id) {
+                entry->owner_head = UINT32_MAX;
+                entry->owner_state = MHSLDCacheState::INVALID;
+            }
+        }
+        cl_addr += CACHELINE_SIZE;
+    }
+
+    if (heads[head_id].used_capacity >= size) {
+        heads[head_id].used_capacity -= size;
+    }
+}
+
+double MHSLDDevice::get_pool_utilization() const {
+    uint64_t total_used = 0;
+    for (const auto& h : heads) {
+        if (h.active) total_used += h.used_capacity;
+    }
+    return total_capacity > 0 ? static_cast<double>(total_used) / total_capacity : 0.0;
+}
+
+MHSLDCachelineInfo* MHSLDDevice::get_or_create_entry(uint64_t addr) {
+    uint64_t cl_addr = addr & ~(CACHELINE_SIZE - 1);
+
+    {
+        std::shared_lock<std::shared_mutex> lock(directory_mutex);
+        auto it = directory.find(cl_addr);
+        if (it != directory.end()) {
+            return it->second.get();
+        }
+    }
+
+    std::unique_lock<std::shared_mutex> lock(directory_mutex);
+    auto& entry = directory[cl_addr];
+    if (!entry) {
+        entry = std::make_unique<MHSLDCachelineInfo>();
+        entry->address = cl_addr;
+    }
+    return entry.get();
+}
+
+MHSLDCachelineInfo* MHSLDDevice::get_entry(uint64_t addr) {
+    uint64_t cl_addr = addr & ~(CACHELINE_SIZE - 1);
+    std::shared_lock<std::shared_mutex> lock(directory_mutex);
+    auto it = directory.find(cl_addr);
+    return (it != directory.end()) ? it->second.get() : nullptr;
+}
+
+/*
+ * Read with coherency protocol using LogP model for latency calculation.
+ *
+ * State transitions for read:
+ *   INVALID -> SHARED (fetch from memory or from owner)
+ *   SHARED  -> SHARED (hit, no state change)
+ *   EXCLUSIVE -> SHARED (if another head reads, owner downgrades)
+ *   MODIFIED -> OWNED+SHARED (owner provides data, keeps dirty copy)
+ */
+double MHSLDDevice::read_with_coherency(uint32_t head_id, uint64_t addr, uint64_t timestamp) {
+    if (head_id >= MAX_HEADS || !heads[head_id].active) return 0.0;
+
+    MHSLDCachelineInfo* entry = get_or_create_entry(addr);
+    std::lock_guard<std::mutex> lock(entry->lock);
+
+    double latency = base_read_latency;
+    entry->access_count++;
+    entry->last_access_time = timestamp;
+    heads[head_id].total_reads++;
+
+    // Check if this head already has access
+    if (entry->owner_head == head_id &&
+        (entry->owner_state == MHSLDCacheState::EXCLUSIVE ||
+         entry->owner_state == MHSLDCacheState::MODIFIED ||
+         entry->owner_state == MHSLDCacheState::OWNED)) {
+        // Local hit - no coherency overhead
+        latency += calculate_contention_latency(head_id, timestamp);
+        return latency;
+    }
+
+    if (entry->sharers.count(head_id) > 0) {
+        // Already a sharer - local hit
+        latency += calculate_contention_latency(head_id, timestamp);
+        return latency;
+    }
+
+    // Need to acquire shared access
+    switch (entry->owner_state) {
+        case MHSLDCacheState::INVALID:
+            // First access - fetch from device memory
+            entry->sharers.insert(head_id);
+            entry->owner_state = MHSLDCacheState::SHARED;
+            entry->owner_head = head_id;
+            // Memory access latency only
+            break;
+
+        case MHSLDCacheState::SHARED:
+            // Add as sharer, no invalidation needed
+            entry->sharers.insert(head_id);
+            break;
+
+        case MHSLDCacheState::EXCLUSIVE:
+        case MHSLDCacheState::MODIFIED: {
+            // Must downgrade owner to SHARED/OWNED
+            // LogP latency for snoop message to owner + response
+            double snoop_latency = logp_model.message_latency(timestamp, entry->owner_head);
+
+            if (entry->owner_state == MHSLDCacheState::MODIFIED) {
+                // Owner transitions to OWNED (keeps dirty copy, allows shared reads)
+                entry->owner_state = MHSLDCacheState::OWNED;
+                total_downgrades++;
+            } else {
+                // EXCLUSIVE -> SHARED
+                entry->sharers.insert(entry->owner_head);
+                entry->owner_state = MHSLDCacheState::SHARED;
+            }
+            entry->sharers.insert(head_id);
+            heads[head_id].coherency_stalls++;
+            total_coherency_messages++;
+
+            latency += snoop_latency;
+            break;
+        }
+
+        case MHSLDCacheState::OWNED:
+            // Owner has dirty copy; just add as sharer
+            entry->sharers.insert(head_id);
+            // LogP latency for data forward from owner
+            latency += logp_model.message_latency(timestamp, entry->owner_head);
+            total_coherency_messages++;
+            break;
+    }
+
+    latency += calculate_contention_latency(head_id, timestamp);
+    logp_model.record_message(head_id, static_cast<uint64_t>(latency));
+    return latency;
+}
+
+/*
+ * Write with coherency protocol using LogP model.
+ *
+ * State transitions for write:
+ *   INVALID -> MODIFIED (acquire exclusive, no sharers)
+ *   SHARED -> MODIFIED (invalidate all sharers)
+ *   EXCLUSIVE -> MODIFIED (already exclusive, just mark dirty)
+ *   MODIFIED -> MODIFIED (hit if same head, else invalidate+acquire)
+ *   OWNED -> MODIFIED (invalidate sharers, keep ownership)
+ */
+double MHSLDDevice::write_with_coherency(uint32_t head_id, uint64_t addr, uint64_t timestamp) {
+    if (head_id >= MAX_HEADS || !heads[head_id].active) return 0.0;
+
+    MHSLDCachelineInfo* entry = get_or_create_entry(addr);
+    std::lock_guard<std::mutex> lock(entry->lock);
+
+    double latency = base_write_latency;
+    entry->access_count++;
+    entry->last_access_time = timestamp;
+    entry->version++;
+    heads[head_id].total_writes++;
+
+    // Check if this head already has exclusive/modified access
+    if (entry->owner_head == head_id) {
+        if (entry->owner_state == MHSLDCacheState::EXCLUSIVE ||
+            entry->owner_state == MHSLDCacheState::MODIFIED) {
+            // Local hit - just mark as modified
+            entry->owner_state = MHSLDCacheState::MODIFIED;
+            entry->has_dirty_data = true;
+            latency += calculate_contention_latency(head_id, timestamp);
+            return latency;
+        }
+        if (entry->owner_state == MHSLDCacheState::OWNED) {
+            // Need to invalidate sharers first
+            double inv_latency = invalidate_sharers(addr, head_id, timestamp);
+            entry->owner_state = MHSLDCacheState::MODIFIED;
+            entry->has_dirty_data = true;
+            latency += inv_latency;
+            latency += calculate_contention_latency(head_id, timestamp);
+            return latency;
+        }
+    }
+
+    // Need to acquire exclusive access
+    double coherency_latency = 0.0;
+
+    switch (entry->owner_state) {
+        case MHSLDCacheState::INVALID:
+            // First access - no coherency needed
+            break;
+
+        case MHSLDCacheState::SHARED:
+            // Invalidate all sharers
+            coherency_latency = invalidate_sharers(addr, head_id, timestamp);
+            break;
+
+        case MHSLDCacheState::EXCLUSIVE:
+        case MHSLDCacheState::MODIFIED:
+        case MHSLDCacheState::OWNED: {
+            // Must invalidate owner and all sharers
+            if (entry->owner_head != head_id) {
+                // Snoop to current owner
+                double snoop_latency = logp_model.message_latency(timestamp, entry->owner_head);
+                coherency_latency += snoop_latency;
+
+                if (entry->owner_state == MHSLDCacheState::MODIFIED ||
+                    entry->owner_state == MHSLDCacheState::OWNED) {
+                    // Owner must writeback before relinquishing
+                    total_writebacks++;
+                }
+                heads[entry->owner_head].back_invalidations++;
+                total_coherency_messages++;
+            }
+            // Invalidate sharers
+            coherency_latency += invalidate_sharers(addr, head_id, timestamp);
+            break;
+        }
+    }
+
+    // Transition to MODIFIED for the requesting head
+    entry->owner_head = head_id;
+    entry->owner_state = MHSLDCacheState::MODIFIED;
+    entry->sharers.clear();
+    entry->has_dirty_data = true;
+    heads[head_id].coherency_stalls += (coherency_latency > 0) ? 1 : 0;
+
+    latency += coherency_latency;
+    latency += calculate_contention_latency(head_id, timestamp);
+    logp_model.record_message(head_id, static_cast<uint64_t>(latency));
+    return latency;
+}
+
+/*
+ * Atomic operation with coherency.
+ * Atomics always require exclusive access with serialization.
+ */
+double MHSLDDevice::atomic_with_coherency(uint32_t head_id, uint64_t addr, uint64_t timestamp) {
+    // Atomic requires exclusive access + serialization penalty
+    double latency = write_with_coherency(head_id, addr, timestamp);
+
+    // Additional serialization overhead for atomic operations
+    // LogP model: atomic requires round-trip to device
+    double atomic_overhead = logp_model.config.o_s + logp_model.config.o_r;
+    latency += atomic_overhead;
+
+    return latency;
+}
+
+/*
+ * Invalidate all sharers of a cacheline except the requesting head.
+ * Uses LogP model for parallel invalidation with max latency.
+ */
+double MHSLDDevice::invalidate_sharers(uint64_t addr, uint32_t except_head, uint64_t timestamp) {
+    MHSLDCachelineInfo* entry = get_entry(addr);
+    if (!entry) return 0.0;
+
+    double max_inv_latency = 0.0;
+    std::set<uint32_t> to_invalidate;
+
+    for (uint32_t sharer : entry->sharers) {
+        if (sharer != except_head && heads[sharer].active) {
+            to_invalidate.insert(sharer);
+        }
+    }
+
+    // Parallel invalidations: latency = max of all individual invalidations
+    // (LogP allows concurrent sends with gap constraint)
+    double accumulated_gap = 0.0;
+    for (uint32_t sharer : to_invalidate) {
+        // Each invalidation incurs sender gap + network latency + receiver overhead
+        double inv_latency = accumulated_gap + logp_model.config.L + logp_model.config.o_r;
+        max_inv_latency = std::max(max_inv_latency, inv_latency);
+        accumulated_gap += logp_model.config.g; // Gap between consecutive sends
+
+        heads[sharer].back_invalidations++;
+        total_invalidations++;
+        total_coherency_messages++;
+    }
+
+    // Add sender overhead (paid once)
+    if (!to_invalidate.empty()) {
+        max_inv_latency += logp_model.config.o_s;
+    }
+
+    entry->sharers.clear();
+    return max_inv_latency;
+}
+
+/*
+ * Downgrade owner from EXCLUSIVE/MODIFIED to SHARED.
+ * Owner retains a copy but transitions to shared state.
+ */
+double MHSLDDevice::downgrade_owner(uint64_t addr, uint32_t requesting_head, uint64_t timestamp) {
+    MHSLDCachelineInfo* entry = get_entry(addr);
+    if (!entry || entry->owner_head == UINT32_MAX) return 0.0;
+
+    uint32_t owner = entry->owner_head;
+    if (owner == requesting_head) return 0.0;
+
+    // LogP round-trip for downgrade request + acknowledgement
+    double down_latency = logp_model.message_latency(timestamp, owner);
+
+    // Owner transitions state
+    if (entry->owner_state == MHSLDCacheState::MODIFIED) {
+        entry->owner_state = MHSLDCacheState::OWNED;
+        entry->has_dirty_data = true;
+    } else if (entry->owner_state == MHSLDCacheState::EXCLUSIVE) {
+        entry->sharers.insert(owner);
+        entry->owner_state = MHSLDCacheState::SHARED;
+        entry->owner_head = UINT32_MAX;
+    }
+
+    total_downgrades++;
+    total_coherency_messages++;
+    return down_latency;
+}
+
+/*
+ * Writeback dirty data from a head.
+ */
+double MHSLDDevice::writeback(uint64_t addr, uint32_t head_id, uint64_t timestamp) {
+    MHSLDCachelineInfo* entry = get_entry(addr);
+    if (!entry) return 0.0;
+
+    std::lock_guard<std::mutex> lock(entry->lock);
+
+    if (entry->owner_head != head_id) return 0.0;
+
+    double wb_latency = base_write_latency;
+
+    if (entry->owner_state == MHSLDCacheState::MODIFIED ||
+        entry->owner_state == MHSLDCacheState::OWNED) {
+        // LogP latency for data transfer back to device
+        wb_latency += logp_model.config.o_s + logp_model.config.L;
+        entry->has_dirty_data = false;
+    }
+
+    entry->owner_state = MHSLDCacheState::INVALID;
+    entry->owner_head = UINT32_MAX;
+    entry->sharers.erase(head_id);
+
+    total_writebacks++;
+    return wb_latency;
+}
+
+/*
+ * Calculate bandwidth contention latency for a head.
+ * When multiple heads contend for bandwidth, each head gets its fair share.
+ * Additional latency = (1/fair_share - 1) * base_latency when contended.
+ */
+double MHSLDDevice::calculate_contention_latency(uint32_t head_id, uint64_t timestamp) const {
+    if (head_id >= MAX_HEADS || !heads[head_id].active) return 0.0;
+
+    // Count active heads with recent activity
+    uint32_t contending_heads = 0;
+    for (const auto& h : heads) {
+        if (h.active && (h.total_reads + h.total_writes) > 0) {
+            contending_heads++;
+        }
+    }
+
+    if (contending_heads <= 1) return 0.0;
+
+    // Fair share bandwidth for this head
+    double fair_share = heads[head_id].bandwidth_share;
+    if (fair_share <= 0.0) fair_share = 1.0 / contending_heads;
+
+    // Contention delay: inversely proportional to fair share
+    // When fully contended (N heads), each gets 1/N of bandwidth
+    // Additional latency = base_latency * (1/share - 1) * contention_factor
+    double contention_factor = 0.3; // How much contention affects latency
+    double additional_latency = base_read_latency * (1.0 / fair_share - 1.0) * contention_factor;
+
+    // Cap at reasonable maximum
+    return std::min(additional_latency, base_read_latency * 5.0);
+}
+
+/*
+ * Calculate the fair share bandwidth available to a specific head.
+ * Returns bandwidth in GB/s.
+ */
+double MHSLDDevice::calculate_fair_share_bandwidth(uint32_t head_id) const {
+    if (head_id >= MAX_HEADS || !heads[head_id].active) return 0.0;
+    return max_bandwidth * heads[head_id].bandwidth_share;
+}
+
+MHSLDDevice::Stats MHSLDDevice::get_stats() const {
+    Stats stats;
+    stats.coherency_messages = total_coherency_messages.load();
+    stats.invalidations = total_invalidations.load();
+    stats.downgrades = total_downgrades.load();
+    stats.writebacks = total_writebacks.load();
+    stats.pool_utilization = get_pool_utilization();
+
+    // Calculate average latencies from head stats
+    uint64_t total_reads = 0, total_writes = 0;
+    for (const auto& h : heads) {
+        if (h.active) {
+            total_reads += h.total_reads;
+            total_writes += h.total_writes;
+        }
+    }
+    stats.avg_read_latency = base_read_latency; // Simplified
+    stats.avg_write_latency = base_write_latency;
+    return stats;
 }

@@ -857,6 +857,18 @@ bool DistributedMemoryServer::initialize() {
     // Setup message handlers
     setup_message_handlers();
 
+    // Configure LogP model on the controller for distributed latency
+    auto active_nodes = msg_manager_->get_active_nodes();
+    uint32_t num_nodes = std::max(static_cast<uint32_t>(active_nodes.size()), 2u);
+    LogPConfig logp_cfg(
+        150.0,   // L: 150ns network latency (typical CXL switch hop)
+        20.0,    // o_s: 20ns sender overhead
+        20.0,    // o_r: 20ns receiver overhead
+        4.0,     // g: 4ns gap (250MHz message rate)
+        num_nodes
+    );
+    controller_->configure_logp(logp_cfg);
+
     state_ = NODE_STATE_READY;
     SPDLOG_INFO("Distributed node {} initialized: memory 0x{:x}-0x{:x} ({} MB)",
                 node_id_, shm_info.base_addr, shm_info.base_addr + shm_info.size,
@@ -1328,7 +1340,10 @@ int DistributedMemoryServer::forward_read(uint32_t target_node, uint64_t addr, v
     }
 
     memcpy(data, resp.payload.mem.data, size);
-    *latency_ns = resp.payload.mem.latency_ns + 50; // Add network latency
+    // Use LogP model from controller for network latency
+    double logp_lat = controller_->calculate_logp_latency(node_id_, target_node,
+                                                           req.header.timestamp);
+    *latency_ns = resp.payload.mem.latency_ns + static_cast<uint64_t>(logp_lat);
 
     return 0;
 }
@@ -1359,7 +1374,10 @@ int DistributedMemoryServer::forward_write(uint32_t target_node, uint64_t addr, 
         return -1;
     }
 
-    *latency_ns = resp.payload.mem.latency_ns + 50; // Add network latency
+    // Use LogP model from controller for network latency
+    double logp_lat_w = controller_->calculate_logp_latency(node_id_, target_node,
+                                                             req.header.timestamp);
+    *latency_ns = resp.payload.mem.latency_ns + static_cast<uint64_t>(logp_lat_w);
 
     return 0;
 }
