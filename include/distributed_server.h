@@ -557,7 +557,13 @@ private:
     /* Worker threads */
     std::thread heartbeat_thread_;
     std::thread request_processor_thread_;
+    std::thread tcp_accept_thread_;
     std::vector<std::thread> client_threads_;
+    std::mutex client_threads_mutex_;
+
+    /* TCP server for QEMU guests */
+    int tcp_server_fd_;
+    std::atomic<int> next_client_id_;
 
     /* Statistics */
     std::atomic<uint64_t> local_reads_;
@@ -658,6 +664,11 @@ private:
     /* RDMA initialization helpers */
     bool initialize_rdma_transport();
     void calibrate_all_rdma_nodes();
+
+    /* TCP server for QEMU guest connections */
+    bool start_tcp_server();
+    void tcp_accept_loop();
+    void handle_tcp_client(int client_fd, int client_id);
 };
 
 #endif /* __cplusplus */

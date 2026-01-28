@@ -125,7 +125,28 @@ typedef enum {
     CXL_GPU_CMD_CACHE_FLUSH     = 0x80,  /* Flush cache lines to device */
     CXL_GPU_CMD_CACHE_INVALIDATE= 0x81,  /* Invalidate cache lines */
     CXL_GPU_CMD_CACHE_WRITEBACK = 0x82,  /* Writeback dirty cache lines */
+
+    /* P2P DMA commands (GPU <-> Type3 CXL memory) */
+    CXL_GPU_CMD_P2P_DISCOVER        = 0x90,  /* Discover P2P peers */
+    CXL_GPU_CMD_P2P_GET_PEER_INFO   = 0x91,  /* Get peer device info */
+    CXL_GPU_CMD_P2P_GPU_TO_MEM      = 0x92,  /* GPU -> Type3 transfer */
+    CXL_GPU_CMD_P2P_MEM_TO_GPU      = 0x93,  /* Type3 -> GPU transfer */
+    CXL_GPU_CMD_P2P_MEM_TO_MEM      = 0x94,  /* Type3 -> Type3 transfer */
+    CXL_GPU_CMD_P2P_SYNC            = 0x95,  /* Wait for P2P completion */
+    CXL_GPU_CMD_P2P_GET_STATUS      = 0x96,  /* Get transfer status */
 } CXLGPUCommand;
+
+/* P2P register offsets (in GPU command region) */
+#define CXL_GPU_REG_P2P_NUM_PEERS       0x0200  /* Number of discovered peers */
+#define CXL_GPU_REG_P2P_PEER_ID         0x0204  /* Current peer ID for queries */
+#define CXL_GPU_REG_P2P_PEER_TYPE       0x0208  /* Peer device type */
+#define CXL_GPU_REG_P2P_PEER_MEM_SIZE   0x0210  /* Peer memory size */
+#define CXL_GPU_REG_P2P_STATUS          0x0218  /* P2P engine status */
+#define CXL_GPU_REG_P2P_XFER_COUNT      0x0220  /* Transfer counter */
+
+/* P2P peer device types */
+#define CXL_P2P_PEER_TYPE2              2       /* Type 2 accelerator (GPU) */
+#define CXL_P2P_PEER_TYPE3              3       /* Type 3 memory expander */
 
 /* Error codes (matching CUDA error codes) */
 typedef enum {

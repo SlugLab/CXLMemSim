@@ -16,12 +16,41 @@
 #include <spdlog/spdlog.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstring>
 #include <algorithm>
 #include <chrono>
 #include <numeric>
+
+/* TCP Client Request/Response structures (matching QEMU's cxl_type3.c) */
+struct DistServerRequest {
+    uint8_t op_type;      /* 0=READ, 1=WRITE, 2=GET_SHM_INFO, 3=ATOMIC_FAA, 4=ATOMIC_CAS, 5=FENCE */
+    uint64_t addr;
+    uint64_t size;
+    uint64_t timestamp;
+    uint64_t value;       /* Value for FAA (add value) or CAS (desired value) */
+    uint64_t expected;    /* Expected value for CAS operation */
+    uint8_t data[64];     /* Cacheline data */
+};
+
+struct DistServerResponse {
+    uint8_t status;
+    uint64_t latency_ns;
+    uint64_t old_value;   /* Previous value returned by atomic operations */
+    uint8_t data[64];
+};
+
+/* Operation type constants */
+static constexpr uint8_t DIST_OP_READ = 0;
+static constexpr uint8_t DIST_OP_WRITE = 1;
+static constexpr uint8_t DIST_OP_GET_SHM_INFO = 2;
+static constexpr uint8_t DIST_OP_ATOMIC_FAA = 3;
+static constexpr uint8_t DIST_OP_ATOMIC_CAS = 4;
+static constexpr uint8_t DIST_OP_FENCE = 5;
 
 /* ============================================================================
  * DistributedMessageManager Implementation
@@ -485,6 +514,7 @@ DistributedMemoryServer::DistributedMemoryServer(uint32_t node_id, const std::st
       memory_capacity_mb_(capacity_mb), transport_mode_(transport_mode),
       rdma_addr_(rdma_addr), rdma_port_(rdma_port),
       controller_(controller),
+      tcp_server_fd_(-1), next_client_id_(0),
       running_(false), state_(NODE_STATE_UNKNOWN),
       local_reads_(0), local_writes_(0), remote_reads_(0), remote_writes_(0),
       forwarded_requests_(0), coherency_messages_(0) {
@@ -593,7 +623,13 @@ bool DistributedMemoryServer::start() {
     // Start request processor
     request_processor_thread_ = std::thread(&DistributedMemoryServer::process_requests_loop, this);
 
-    SPDLOG_INFO("Distributed node {} started", node_id_);
+    // Start TCP server for QEMU guest connections
+    if (!start_tcp_server()) {
+        SPDLOG_ERROR("Failed to start TCP server for node {}", node_id_);
+        // Continue without TCP (inter-node communication still works)
+    }
+
+    SPDLOG_INFO("Distributed node {} started (TCP port: {})", node_id_, tcp_port_);
     return true;
 }
 
@@ -603,17 +639,30 @@ void DistributedMemoryServer::stop() {
     running_ = false;
     state_ = NODE_STATE_DRAINING;
 
+    // Close TCP server socket to interrupt accept()
+    if (tcp_server_fd_ >= 0) {
+        shutdown(tcp_server_fd_, SHUT_RDWR);
+        close(tcp_server_fd_);
+        tcp_server_fd_ = -1;
+    }
+
     // Wait for threads
+    if (tcp_accept_thread_.joinable()) {
+        tcp_accept_thread_.join();
+    }
     if (heartbeat_thread_.joinable()) {
         heartbeat_thread_.join();
     }
     if (request_processor_thread_.joinable()) {
         request_processor_thread_.join();
     }
-    for (auto& t : client_threads_) {
-        if (t.joinable()) t.join();
+    {
+        std::lock_guard<std::mutex> lock(client_threads_mutex_);
+        for (auto& t : client_threads_) {
+            if (t.joinable()) t.join();
+        }
+        client_threads_.clear();
     }
-    client_threads_.clear();
 
     // Stop message processing
     if (msg_manager_) {
@@ -2124,3 +2173,188 @@ DistributedMHSLDManager::Stats DistributedMHSLDManager::get_stats() const {
     };
 }
 #endif  // DistributedMHSLDManager removed
+
+/* ============================================================================
+ * TCP Server for QEMU Guest Connections
+ * ============================================================================ */
+
+bool DistributedMemoryServer::start_tcp_server() {
+    tcp_server_fd_ = socket(AF_INET, SOCK_STREAM, 0);
+    if (tcp_server_fd_ < 0) {
+        SPDLOG_ERROR("Failed to create TCP server socket: {}", strerror(errno));
+        return false;
+    }
+
+    // Allow address reuse
+    int opt = 1;
+    if (setsockopt(tcp_server_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        SPDLOG_WARN("Failed to set SO_REUSEADDR: {}", strerror(errno));
+    }
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(tcp_port_);
+
+    if (bind(tcp_server_fd_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        SPDLOG_ERROR("Failed to bind TCP server to port {}: {}", tcp_port_, strerror(errno));
+        close(tcp_server_fd_);
+        tcp_server_fd_ = -1;
+        return false;
+    }
+
+    if (listen(tcp_server_fd_, 16) < 0) {
+        SPDLOG_ERROR("Failed to listen on TCP socket: {}", strerror(errno));
+        close(tcp_server_fd_);
+        tcp_server_fd_ = -1;
+        return false;
+    }
+
+    SPDLOG_INFO("Distributed node {} TCP server listening on port {}", node_id_, tcp_port_);
+
+    // Start accept thread
+    tcp_accept_thread_ = std::thread(&DistributedMemoryServer::tcp_accept_loop, this);
+
+    return true;
+}
+
+void DistributedMemoryServer::tcp_accept_loop() {
+    while (running_) {
+        struct sockaddr_in client_addr;
+        socklen_t addr_len = sizeof(client_addr);
+
+        int client_fd = accept(tcp_server_fd_, (struct sockaddr*)&client_addr, &addr_len);
+        if (client_fd < 0) {
+            if (running_) {
+                SPDLOG_ERROR("Failed to accept TCP client: {}", strerror(errno));
+            }
+            continue;
+        }
+
+        // Get client info for logging
+        char client_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
+
+        int client_id = next_client_id_++;
+        SPDLOG_INFO("Node {} accepted TCP client {} from {}:{}",
+                    node_id_, client_id, client_ip, ntohs(client_addr.sin_port));
+
+        // Start client handler thread
+        {
+            std::lock_guard<std::mutex> lock(client_threads_mutex_);
+            client_threads_.emplace_back(&DistributedMemoryServer::handle_tcp_client,
+                                          this, client_fd, client_id);
+            client_threads_.back().detach();
+        }
+    }
+
+    if (tcp_server_fd_ >= 0) {
+        close(tcp_server_fd_);
+        tcp_server_fd_ = -1;
+    }
+}
+
+void DistributedMemoryServer::handle_tcp_client(int client_fd, int client_id) {
+    SPDLOG_INFO("Node {} handling TCP client {}", node_id_, client_id);
+
+    while (running_) {
+        DistServerRequest req;
+        ssize_t received = recv(client_fd, &req, sizeof(req), MSG_WAITALL);
+
+        if (received != sizeof(req)) {
+            if (received == 0) {
+                SPDLOG_DEBUG("Node {} client {} disconnected", node_id_, client_id);
+            } else if (received < 0) {
+                int err = errno;
+                if (err == ECONNRESET) {
+                    SPDLOG_INFO("Node {} client {}: Connection reset", node_id_, client_id);
+                } else if (err != EAGAIN && err != EWOULDBLOCK) {
+                    SPDLOG_ERROR("Node {} client {}: recv failed: {} ({})",
+                                node_id_, client_id, strerror(err), err);
+                }
+            } else {
+                SPDLOG_ERROR("Node {} client {}: Incomplete request - got {} bytes, expected {}",
+                            node_id_, client_id, received, sizeof(req));
+            }
+            break;
+        }
+
+        DistServerResponse resp;
+        memset(&resp, 0, sizeof(resp));
+
+        // Handle the request using distributed read/write (with proper forwarding)
+        switch (req.op_type) {
+            case DIST_OP_READ: {
+                uint8_t buffer[64];
+                uint64_t latency_ns = 0;
+                int ret = read(req.addr, buffer, req.size, &latency_ns);
+                if (ret == 0) {
+                    resp.status = 0;
+                    resp.latency_ns = latency_ns;
+                    memcpy(resp.data, buffer, std::min(req.size, (uint64_t)64));
+                } else {
+                    resp.status = 1;
+                }
+                break;
+            }
+
+            case DIST_OP_WRITE: {
+                uint64_t latency_ns = 0;
+                int ret = write(req.addr, req.data, req.size, &latency_ns);
+                resp.status = (ret == 0) ? 0 : 1;
+                resp.latency_ns = latency_ns;
+                break;
+            }
+
+            case DIST_OP_ATOMIC_FAA: {
+                uint64_t old_value = 0;
+                int ret = atomic_faa(req.addr, req.value, &old_value);
+                resp.status = (ret == 0) ? 0 : 1;
+                resp.old_value = old_value;
+                break;
+            }
+
+            case DIST_OP_ATOMIC_CAS: {
+                uint64_t old_value = 0;
+                int ret = atomic_cas(req.addr, req.expected, req.value, &old_value);
+                resp.status = (ret == 0 && old_value == req.expected) ? 0 : 1;
+                resp.old_value = old_value;
+                break;
+            }
+
+            case DIST_OP_FENCE: {
+                fence();
+                resp.status = 0;
+                break;
+            }
+
+            case DIST_OP_GET_SHM_INFO: {
+                // Return shared memory info
+                auto shm_info = local_memory_->get_shm_info();
+                uint64_t* data_ptr = reinterpret_cast<uint64_t*>(resp.data);
+                data_ptr[0] = shm_info.base_addr;
+                data_ptr[1] = shm_info.size;
+                data_ptr[2] = shm_info.num_cachelines;
+                resp.status = 0;
+                break;
+            }
+
+            default:
+                SPDLOG_WARN("Node {} client {}: Unknown operation type {}",
+                            node_id_, client_id, req.op_type);
+                resp.status = 1;
+                break;
+        }
+
+        // Send response
+        if (send(client_fd, &resp, sizeof(resp), MSG_NOSIGNAL) != sizeof(resp)) {
+            SPDLOG_ERROR("Node {} client {}: Failed to send response: {}",
+                        node_id_, client_id, strerror(errno));
+            break;
+        }
+    }
+
+    close(client_fd);
+    SPDLOG_INFO("Node {} client {} connection closed", node_id_, client_id);
+}
