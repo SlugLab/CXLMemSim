@@ -489,17 +489,17 @@ void CXLController::configure_logp(const LogPConfig& config) {
                 config.L, config.o_s, config.o_r, config.g, config.P);
 }
 
-void CXLController::calibrate_logp_from_rdma(const struct RDMACalibrationResult& result) {
+void CXLController::calibrate_logp_from_tcp(const struct TCPCalibrationResult& result) {
     if (!result.valid) {
-        SPDLOG_WARN("Invalid RDMA calibration result, keeping existing LogP config");
+        SPDLOG_WARN("Invalid TCP calibration result, keeping existing LogP config");
         return;
     }
 
-    // Clamp values to realistic ranges for RDMA
-    double L = std::max(0.5, std::min(result.L, 100.0));          // 0.5-100us latency
-    double o_s = std::max(0.1, std::min(result.o_s, 50.0));       // 0.1-50us send overhead
-    double o_r = std::max(0.1, std::min(result.o_r, 50.0));       // 0.1-50us recv overhead
-    double g = std::max(0.01, std::min(result.g, 10.0));           // 0.01-10us gap
+    // Clamp values to realistic ranges for TCP
+    double L = std::max(0.5, std::min(result.L, 500.0));          // 0.5-500us latency
+    double o_s = std::max(0.1, std::min(result.o_s, 100.0));      // 0.1-100us send overhead
+    double o_r = std::max(0.1, std::min(result.o_r, 100.0));      // 0.1-100us recv overhead
+    double g = std::max(0.01, std::min(result.g, 50.0));           // 0.01-50us gap
 
     // Convert from us to ns for LogP config (calibration measures in us)
     LogPConfig calibrated_config(
@@ -511,7 +511,7 @@ void CXLController::calibrate_logp_from_rdma(const struct RDMACalibrationResult&
     );
 
     logp_model.reconfigure(calibrated_config);
-    SPDLOG_INFO("CXLController LogP calibrated from RDMA ({} samples): "
+    SPDLOG_INFO("CXLController LogP calibrated from TCP ({} samples): "
                 "L={:.1f}ns o_s={:.1f}ns o_r={:.1f}ns g={:.1f}ns",
                 result.samples,
                 calibrated_config.L, calibrated_config.o_s,

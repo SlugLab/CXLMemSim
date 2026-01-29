@@ -259,8 +259,8 @@ typedef struct {
 #include <memory>
 #include <unordered_map>
 
-/* RDMA transport support */
-#include "rdma_communication.h"
+/* TCP transport support */
+#include "tcp_communication.h"
 
 /* Forward declarations */
 class CXLController;
@@ -273,12 +273,12 @@ enum class MHSLDCacheState : uint8_t;
 /* Transport mode for distributed server */
 enum class DistTransportMode {
     SHM,        // Shared memory ring buffers (existing)
-    RDMA,       // RDMA verbs
-    HYBRID      // SHM for local, RDMA for remote
+    TCP,        // TCP sockets
+    HYBRID      // SHM for local, TCP for remote
 };
 
-/* RDMA calibration result for LogP parameter extraction */
-struct RDMACalibrationResult {
+/* TCP calibration result for LogP parameter extraction */
+struct TCPCalibrationResult {
     double L;           // Measured latency (ns)
     double o_s;         // Measured send overhead (ns)
     double o_r;         // Measured receive overhead (ns)
@@ -286,20 +286,18 @@ struct RDMACalibrationResult {
     uint64_t samples;   // Number of samples taken
     bool valid;         // Whether calibration succeeded
 
-    RDMACalibrationResult() : L(0), o_s(0), o_r(0), g(0), samples(0), valid(false) {}
+    TCPCalibrationResult() : L(0), o_s(0), o_r(0), g(0), samples(0), valid(false) {}
 };
 
-/* Per-node RDMA connection state */
-struct RDMANodeConnection {
-    std::unique_ptr<RDMAClient> client;     // Outgoing RDMA connection
-    uint64_t remote_addr;                    // Remote base address for one-sided ops
-    uint32_t remote_rkey;                    // Remote region key
-    uint32_t remote_mr_lkey;                 // Remote MR local key
+/* Per-node TCP connection state */
+struct TCPNodeConnection {
+    std::unique_ptr<TCPClient> client;       // Outgoing TCP connection
+    uint64_t remote_addr;                    // Remote base address
     size_t remote_buffer_size;               // Remote buffer size
     bool connected;                          // Connection state
-    RDMACalibrationResult calibration;       // Per-node calibration data
+    TCPCalibrationResult calibration;        // Per-node calibration data
 
-    RDMANodeConnection() : remote_addr(0), remote_rkey(0), remote_mr_lkey(0),
+    TCPNodeConnection() : remote_addr(0),
                            remote_buffer_size(0), connected(false) {}
 };
 
@@ -463,29 +461,29 @@ private:
 
 /* DistributedDirectory removed - replaced by CoherencyEngine */
 
-/* RDMA Transport Layer for Distributed Server */
-class DistributedRDMATransport {
+/* TCP Transport Layer for Distributed Server */
+class DistributedTCPTransport {
 private:
     uint32_t local_node_id_;
     std::string bind_addr_;
     uint16_t port_;
 
-    // Per-node RDMA connections
-    std::map<uint32_t, RDMANodeConnection> connections_;
+    // Per-node TCP connections
+    std::map<uint32_t, TCPNodeConnection> connections_;
     std::mutex connections_mutex_;
 
-    // RDMA server for incoming connections
-    std::unique_ptr<RDMAServer> server_;
+    // TCP server for incoming connections
+    std::unique_ptr<TCPServer> server_;
     std::thread accept_thread_;
     std::atomic<bool> running_;
 
     // Calibration results per node
-    std::map<uint32_t, RDMACalibrationResult> calibration_results_;
+    std::map<uint32_t, TCPCalibrationResult> calibration_results_;
     std::mutex calibration_mutex_;
 
 public:
-    DistributedRDMATransport(uint32_t node_id, const std::string& bind_addr, uint16_t port);
-    ~DistributedRDMATransport();
+    DistributedTCPTransport(uint32_t node_id, const std::string& bind_addr, uint16_t port);
+    ~DistributedTCPTransport();
 
     // Lifecycle
     bool initialize();
@@ -502,17 +500,14 @@ public:
     bool send_message_wait_response(uint32_t dst_node, const dist_message_t& req,
                                      dist_message_t& resp, int timeout_ms = 5000);
 
-    // One-sided operations (for data access - bypasses remote CPU)
-    bool rdma_read(uint32_t dst_node, uint64_t remote_offset, void* local_buf, size_t size);
-    bool rdma_write(uint32_t dst_node, uint64_t remote_offset, const void* local_buf, size_t size);
+    // TCP read/write (emulate remote data access via request/response)
+    bool tcp_read(uint32_t dst_node, uint64_t remote_offset, void* local_buf, size_t size);
+    bool tcp_write(uint32_t dst_node, uint64_t remote_offset, const void* local_buf, size_t size);
 
-    // LogP calibration via RDMA ping-pong
-    RDMACalibrationResult calibrate_node(uint32_t dst_node, uint32_t num_samples = 1000);
-    RDMACalibrationResult get_calibration(uint32_t node_id) const;
-    RDMACalibrationResult get_aggregate_calibration() const;
-
-    // Exchange memory region info for one-sided ops
-    bool exchange_mr_info(uint32_t node_id);
+    // LogP calibration via TCP ping-pong
+    TCPCalibrationResult calibrate_node(uint32_t dst_node, uint32_t num_samples = 1000);
+    TCPCalibrationResult get_calibration(uint32_t node_id) const;
+    TCPCalibrationResult get_aggregate_calibration() const;
 
     // Getters
     uint32_t get_local_node_id() const { return local_node_id_; }
@@ -520,8 +515,6 @@ public:
 
 private:
     void accept_loop();
-    bool send_rdma_msg(uint32_t dst_node, const void* data, size_t size);
-    bool recv_rdma_msg(uint32_t src_node, void* data, size_t size, int timeout_ms);
 };
 
 /* DistributedMHSLDManager removed - replaced by CoherencyEngine */
@@ -536,15 +529,15 @@ private:
     size_t memory_capacity_mb_;
     DistTransportMode transport_mode_;
 
-    /* RDMA configuration */
-    std::string rdma_addr_;
-    uint16_t rdma_port_;
+    /* TCP configuration */
+    std::string tcp_addr_;
+    uint16_t tcp_transport_port_;
 
     /* Core components */
     CXLController* controller_;
     std::unique_ptr<SharedMemoryManager> local_memory_;
     std::unique_ptr<DistributedMessageManager> msg_manager_;
-    std::unique_ptr<DistributedRDMATransport> rdma_transport_;
+    std::unique_ptr<DistributedTCPTransport> tcp_transport_;
 
     /* Node registry */
     std::map<uint32_t, DistNodeInfo> nodes_;
@@ -578,8 +571,8 @@ public:
                              int tcp_port, size_t capacity_mb,
                              CXLController* controller,
                              DistTransportMode transport_mode = DistTransportMode::SHM,
-                             const std::string& rdma_addr = "0.0.0.0",
-                             uint16_t rdma_port = 5555);
+                             const std::string& tcp_addr = "0.0.0.0",
+                             uint16_t tcp_transport_port = 5555);
     ~DistributedMemoryServer();
 
     /* Lifecycle */
@@ -612,10 +605,10 @@ public:
     bool is_running() const { return running_.load(); }
     DistTransportMode get_transport_mode() const { return transport_mode_; }
 
-    /* RDMA transport management */
-    bool connect_rdma_node(uint32_t node_id, const std::string& addr, uint16_t port);
-    bool calibrate_rdma_logp(uint32_t target_node = UINT32_MAX);
-    DistributedRDMATransport* get_rdma_transport() { return rdma_transport_.get(); }
+    /* TCP transport management */
+    bool connect_tcp_node(uint32_t node_id, const std::string& addr, uint16_t port);
+    bool calibrate_tcp_logp(uint32_t target_node = UINT32_MAX);
+    DistributedTCPTransport* get_tcp_transport() { return tcp_transport_.get(); }
 
     /* CoherencyEngine access (delegates to controller) */
     CoherencyEngine* coherency();
@@ -651,19 +644,19 @@ private:
     int forward_write(uint32_t target_node, uint64_t addr, const void* data,
                       size_t size, uint64_t* latency_ns);
 
-    /* RDMA-based forwarding (used when transport_mode_ is RDMA or HYBRID) */
-    int forward_read_rdma(uint32_t target_node, uint64_t addr, void* data,
+    /* TCP-based forwarding (used when transport_mode_ is TCP or HYBRID) */
+    int forward_read_tcp(uint32_t target_node, uint64_t addr, void* data,
                           size_t size, uint64_t* latency_ns);
-    int forward_write_rdma(uint32_t target_node, uint64_t addr, const void* data,
+    int forward_write_tcp(uint32_t target_node, uint64_t addr, const void* data,
                            size_t size, uint64_t* latency_ns);
 
     /* Coherency */
     bool ensure_coherency_for_read(uint64_t addr, uint32_t requesting_node);
     bool ensure_coherency_for_write(uint64_t addr, uint32_t requesting_node);
 
-    /* RDMA initialization helpers */
-    bool initialize_rdma_transport();
-    void calibrate_all_rdma_nodes();
+    /* TCP initialization helpers */
+    bool initialize_tcp_transport();
+    void calibrate_all_tcp_nodes();
 
     /* TCP server for QEMU guest connections */
     bool start_tcp_server();

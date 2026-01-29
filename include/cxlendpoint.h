@@ -541,21 +541,21 @@ public:
 /* ============================================================================
  * RemoteCXLExpander - Virtual endpoint for remote node memory
  *
- * Wraps RDMA transport to present remote memory as a local CXL endpoint
+ * Wraps TCP transport to present remote memory as a local CXL endpoint
  * in the topology tree. Includes shadow directory for cached coherency state.
  * ============================================================================ */
 
 // Forward declarations for distributed components
 class CoherencyEngine;
 class HDMDecoder;
-class DistributedRDMATransport;
+class DistributedTCPTransport;
 class DistributedMessageManager;
 
 class RemoteCXLExpander : public CXLMemExpander {
 public:
     uint32_t remote_node_id_;
     uint32_t local_node_id_;
-    DistributedRDMATransport* rdma_transport_ = nullptr;
+    DistributedTCPTransport* tcp_transport_ = nullptr;
     DistributedMessageManager* msg_manager_ = nullptr;
     std::unique_ptr<FabricLink> fabric_link_;
     CoherencyEngine* coherency_engine_ = nullptr;

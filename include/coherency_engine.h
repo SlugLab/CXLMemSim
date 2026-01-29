@@ -26,7 +26,7 @@
 class HDMDecoder;
 class LogPModel;
 class FabricLink;
-class DistributedRDMATransport;
+class DistributedTCPTransport;
 class DistributedMessageManager;
 
 // Reuse MHSLDCacheState from cxlendpoint.h
@@ -81,7 +81,7 @@ public:
     CoherencyResponse process_write(const CoherencyRequest& req);
     CoherencyResponse process_atomic(const CoherencyRequest& req);
 
-    // Remote coherency message handlers (from RDMA/SHM messages)
+    // Remote coherency message handlers (from TCP/SHM messages)
     void handle_remote_invalidate(uint64_t addr, uint32_t from_node);
     void handle_remote_downgrade(uint64_t addr, uint32_t from_node);
     void handle_remote_writeback(uint64_t addr, uint32_t from_node, const uint8_t* data);
@@ -94,7 +94,7 @@ public:
     void register_fabric_link(uint32_t node_id, FabricLink* link);
 
     // Transport registration (for sending remote coherency messages)
-    void set_rdma_transport(DistributedRDMATransport* rdma);
+    void set_tcp_transport(DistributedTCPTransport* tcp);
     void set_msg_manager(DistributedMessageManager* msg);
 
     // Statistics
@@ -114,7 +114,7 @@ private:
     uint32_t local_node_id_;
     HDMDecoder* hdm_decoder_;
     LogPModel* logp_model_;
-    DistributedRDMATransport* rdma_transport_ = nullptr;
+    DistributedTCPTransport* tcp_transport_ = nullptr;
     DistributedMessageManager* msg_manager_ = nullptr;
     double bandwidth_gbps_;
 

@@ -496,8 +496,8 @@ void CoherencyEngine::register_fabric_link(uint32_t node_id, FabricLink* link) {
     fabric_links_[node_id] = link;
 }
 
-void CoherencyEngine::set_rdma_transport(DistributedRDMATransport* rdma) {
-    rdma_transport_ = rdma;
+void CoherencyEngine::set_tcp_transport(DistributedTCPTransport* tcp) {
+    tcp_transport_ = tcp;
 }
 
 void CoherencyEngine::set_msg_manager(DistributedMessageManager* msg) {

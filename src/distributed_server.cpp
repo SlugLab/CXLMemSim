@@ -508,11 +508,11 @@ DistributedMemoryServer::DistributedMemoryServer(uint32_t node_id, const std::st
                                                    int tcp_port, size_t capacity_mb,
                                                    CXLController* controller,
                                                    DistTransportMode transport_mode,
-                                                   const std::string& rdma_addr,
-                                                   uint16_t rdma_port)
+                                                   const std::string& tcp_addr,
+                                                   uint16_t tcp_transport_port)
     : node_id_(node_id), shm_name_(shm_name), tcp_port_(tcp_port),
       memory_capacity_mb_(capacity_mb), transport_mode_(transport_mode),
-      rdma_addr_(rdma_addr), rdma_port_(rdma_port),
+      tcp_addr_(tcp_addr), tcp_transport_port_(tcp_transport_port),
       controller_(controller),
       tcp_server_fd_(-1), next_client_id_(0),
       running_(false), state_(NODE_STATE_UNKNOWN),
@@ -575,22 +575,22 @@ bool DistributedMemoryServer::initialize() {
     controller_->configure_logp(logp_cfg);
 
     // Configure controller for distributed mode with HDM decoder + CoherencyEngine
-    HDMDecoderMode hdm_mode = (transport_mode_ == DistTransportMode::RDMA)
+    HDMDecoderMode hdm_mode = (transport_mode_ == DistTransportMode::TCP)
         ? HDMDecoderMode::INTERLEAVED : HDMDecoderMode::RANGE_BASED;
     controller_->configure_distributed(node_id_, hdm_mode);
 
     // Add local range to HDM decoder
     controller_->hdm_decoder_->add_range(shm_info.base_addr, shm_info.size, node_id_, false);
 
-    // Initialize RDMA transport if requested
-    if (transport_mode_ == DistTransportMode::RDMA || transport_mode_ == DistTransportMode::HYBRID) {
-        if (!initialize_rdma_transport()) {
-            if (transport_mode_ == DistTransportMode::RDMA) {
-                SPDLOG_ERROR("Failed to initialize RDMA transport");
+    // Initialize TCP transport if requested
+    if (transport_mode_ == DistTransportMode::TCP || transport_mode_ == DistTransportMode::HYBRID) {
+        if (!initialize_tcp_transport()) {
+            if (transport_mode_ == DistTransportMode::TCP) {
+                SPDLOG_ERROR("Failed to initialize TCP transport");
                 return false;
             }
             // HYBRID mode: fall back to SHM only
-            SPDLOG_WARN("RDMA initialization failed, falling back to SHM-only mode");
+            SPDLOG_WARN("TCP initialization failed, falling back to SHM-only mode");
             transport_mode_ = DistTransportMode::SHM;
         }
     }
@@ -599,7 +599,7 @@ bool DistributedMemoryServer::initialize() {
     SPDLOG_INFO("Distributed node {} initialized: memory 0x{:x}-0x{:x} ({} MB), transport={}",
                 node_id_, shm_info.base_addr, shm_info.base_addr + shm_info.size,
                 memory_capacity_mb_,
-                transport_mode_ == DistTransportMode::RDMA ? "RDMA" :
+                transport_mode_ == DistTransportMode::TCP ? "TCP" :
                 transport_mode_ == DistTransportMode::HYBRID ? "HYBRID" : "SHM");
 
     return true;
@@ -1016,9 +1016,9 @@ int DistributedMemoryServer::read(uint64_t addr, void* data, size_t size, uint64
     }
 
     // Remote read - dispatch based on transport mode
-    if ((transport_mode_ == DistTransportMode::RDMA || transport_mode_ == DistTransportMode::HYBRID) &&
-        rdma_transport_ && rdma_transport_->is_connected(target_node)) {
-        return forward_read_rdma(target_node, addr, data, size, latency_ns);
+    if ((transport_mode_ == DistTransportMode::TCP || transport_mode_ == DistTransportMode::HYBRID) &&
+        tcp_transport_ && tcp_transport_->is_connected(target_node)) {
+        return forward_read_tcp(target_node, addr, data, size, latency_ns);
     }
     return forward_read(target_node, addr, data, size, latency_ns);
 }
@@ -1043,9 +1043,9 @@ int DistributedMemoryServer::write(uint64_t addr, const void* data, size_t size,
     }
 
     // Remote write - dispatch based on transport mode
-    if ((transport_mode_ == DistTransportMode::RDMA || transport_mode_ == DistTransportMode::HYBRID) &&
-        rdma_transport_ && rdma_transport_->is_connected(target_node)) {
-        return forward_write_rdma(target_node, addr, data, size, latency_ns);
+    if ((transport_mode_ == DistTransportMode::TCP || transport_mode_ == DistTransportMode::HYBRID) &&
+        tcp_transport_ && tcp_transport_->is_connected(target_node)) {
+        return forward_write_tcp(target_node, addr, data, size, latency_ns);
     }
     return forward_write(target_node, addr, data, size, latency_ns);
 }
@@ -1252,29 +1252,24 @@ CoherencyEngine* DistributedMemoryServer::coherency() {
 }
 
 /* ============================================================================
- * RDMA-based forwarding for DistributedMemoryServer
+ * TCP-based forwarding for DistributedMemoryServer
  * ============================================================================ */
 
-bool DistributedMemoryServer::initialize_rdma_transport() {
-    if (!RDMATransport::is_rdma_available()) {
-        SPDLOG_WARN("No RDMA device available on this system");
+bool DistributedMemoryServer::initialize_tcp_transport() {
+    tcp_transport_ = std::make_unique<DistributedTCPTransport>(
+        node_id_, tcp_addr_, tcp_transport_port_);
+
+    if (!tcp_transport_->initialize()) {
+        SPDLOG_ERROR("Failed to initialize TCP transport on {}:{}", tcp_addr_, tcp_transport_port_);
+        tcp_transport_.reset();
         return false;
     }
 
-    rdma_transport_ = std::make_unique<DistributedRDMATransport>(
-        node_id_, rdma_addr_, rdma_port_);
+    SPDLOG_INFO("TCP transport initialized on {}:{}", tcp_addr_, tcp_transport_port_);
 
-    if (!rdma_transport_->initialize()) {
-        SPDLOG_ERROR("Failed to initialize RDMA transport on {}:{}", rdma_addr_, rdma_port_);
-        rdma_transport_.reset();
-        return false;
-    }
-
-    SPDLOG_INFO("RDMA transport initialized on {}:{}", rdma_addr_, rdma_port_);
-
-    // Register RDMA transport and message manager with the CoherencyEngine
+    // Register TCP transport and message manager with the CoherencyEngine
     if (controller_->coherency_) {
-        controller_->coherency_->set_rdma_transport(rdma_transport_.get());
+        controller_->coherency_->set_tcp_transport(tcp_transport_.get());
         controller_->coherency_->set_msg_manager(msg_manager_.get());
         controller_->coherency_->activate_head(node_id_, memory_capacity_mb_ * 1024 * 1024);
     }
@@ -1282,37 +1277,37 @@ bool DistributedMemoryServer::initialize_rdma_transport() {
     return true;
 }
 
-void DistributedMemoryServer::calibrate_all_rdma_nodes() {
-    if (!rdma_transport_) return;
+void DistributedMemoryServer::calibrate_all_tcp_nodes() {
+    if (!tcp_transport_) return;
 
-    auto connected = rdma_transport_->get_connected_nodes();
+    auto connected = tcp_transport_->get_connected_nodes();
     for (uint32_t node_id : connected) {
-        auto result = rdma_transport_->calibrate_node(node_id);
+        auto result = tcp_transport_->calibrate_node(node_id);
         if (result.valid) {
-            SPDLOG_INFO("RDMA calibration to node {}: L={:.2f}us o_s={:.2f}us o_r={:.2f}us g={:.3f}us",
+            SPDLOG_INFO("TCP calibration to node {}: L={:.2f}us o_s={:.2f}us o_r={:.2f}us g={:.3f}us",
                         node_id, result.L, result.o_s, result.o_r, result.g);
         }
     }
 
     // Apply aggregate calibration to controller's LogP model
-    auto aggregate = rdma_transport_->get_aggregate_calibration();
+    auto aggregate = tcp_transport_->get_aggregate_calibration();
     if (aggregate.valid) {
-        controller_->calibrate_logp_from_rdma(aggregate);
+        controller_->calibrate_logp_from_tcp(aggregate);
     }
 }
 
-bool DistributedMemoryServer::connect_rdma_node(uint32_t node_id, const std::string& addr, uint16_t port) {
-    if (!rdma_transport_) {
-        SPDLOG_ERROR("RDMA transport not initialized");
+bool DistributedMemoryServer::connect_tcp_node(uint32_t node_id, const std::string& addr, uint16_t port) {
+    if (!tcp_transport_) {
+        SPDLOG_ERROR("TCP transport not initialized");
         return false;
     }
 
-    if (!rdma_transport_->connect_to_node(node_id, addr, port)) {
-        SPDLOG_ERROR("Failed to connect RDMA to node {} at {}:{}", node_id, addr, port);
+    if (!tcp_transport_->connect_to_node(node_id, addr, port)) {
+        SPDLOG_ERROR("Failed to connect TCP to node {} at {}:{}", node_id, addr, port);
         return false;
     }
 
-    SPDLOG_INFO("RDMA connected to node {} at {}:{}", node_id, addr, port);
+    SPDLOG_INFO("TCP connected to node {} at {}:{}", node_id, addr, port);
 
     // Create virtual endpoint for the remote node
     uint64_t peer_capacity = memory_capacity_mb_ * 1024ULL * 1024ULL; // Assume same capacity
@@ -1330,7 +1325,7 @@ bool DistributedMemoryServer::connect_rdma_node(uint32_t node_id, const std::str
 
     FabricLinkConfig link_cfg{100.0, 25.0, 32};  // 100ns hop, 25GB/s, 32 credits
     auto* remote = controller_->add_remote_endpoint(node_id, peer_base_addr, peer_capacity, link_cfg);
-    remote->rdma_transport_ = rdma_transport_.get();
+    remote->tcp_transport_ = tcp_transport_.get();
     remote->msg_manager_ = msg_manager_.get();
     remote->coherency_engine_ = controller_->coherency_.get();
 
@@ -1343,34 +1338,34 @@ bool DistributedMemoryServer::connect_rdma_node(uint32_t node_id, const std::str
     return true;
 }
 
-bool DistributedMemoryServer::calibrate_rdma_logp(uint32_t target_node) {
-    if (!rdma_transport_) {
-        SPDLOG_ERROR("RDMA transport not initialized");
+bool DistributedMemoryServer::calibrate_tcp_logp(uint32_t target_node) {
+    if (!tcp_transport_) {
+        SPDLOG_ERROR("TCP transport not initialized");
         return false;
     }
 
     if (target_node == UINT32_MAX) {
         // Calibrate all connected nodes
-        calibrate_all_rdma_nodes();
+        calibrate_all_tcp_nodes();
         return true;
     }
 
-    auto result = rdma_transport_->calibrate_node(target_node);
+    auto result = tcp_transport_->calibrate_node(target_node);
     if (result.valid) {
-        controller_->calibrate_logp_from_rdma(result);
+        controller_->calibrate_logp_from_tcp(result);
         return true;
     }
     return false;
 }
 
-int DistributedMemoryServer::forward_read_rdma(uint32_t target_node, uint64_t addr,
+int DistributedMemoryServer::forward_read_tcp(uint32_t target_node, uint64_t addr,
                                                 void* data, size_t size, uint64_t* latency_ns) {
     forwarded_requests_++;
     remote_reads_++;
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    // Use RDMA two-sided messaging (wraps dist_message_t in RDMAMessage)
+    // Use TCP two-sided messaging (wraps dist_message_t in TCPMessage)
     dist_message_t req, resp;
     memset(&req, 0, sizeof(req));
     req.header.msg_type = DIST_MSG_READ_REQ;
@@ -1382,8 +1377,8 @@ int DistributedMemoryServer::forward_read_rdma(uint32_t target_node, uint64_t ad
     req.payload.mem.size = size;
     req.payload.mem.client_id = node_id_;
 
-    if (!rdma_transport_->send_message_wait_response(target_node, req, resp)) {
-        SPDLOG_ERROR("RDMA forward read to node {} failed", target_node);
+    if (!tcp_transport_->send_message_wait_response(target_node, req, resp)) {
+        SPDLOG_ERROR("TCP forward read to node {} failed", target_node);
         return -1;
     }
 
@@ -1397,7 +1392,7 @@ int DistributedMemoryServer::forward_read_rdma(uint32_t target_node, uint64_t ad
     double measured_ns = std::chrono::duration<double, std::nano>(end - start).count();
 
     // Use calibrated LogP latency, or measured if no calibration
-    auto calib = rdma_transport_->get_calibration(target_node);
+    auto calib = tcp_transport_->get_calibration(target_node);
     double network_latency;
     if (calib.valid) {
         network_latency = controller_->calculate_logp_latency(node_id_, target_node,
@@ -1421,7 +1416,7 @@ int DistributedMemoryServer::forward_read_rdma(uint32_t target_node, uint64_t ad
     return 0;
 }
 
-int DistributedMemoryServer::forward_write_rdma(uint32_t target_node, uint64_t addr,
+int DistributedMemoryServer::forward_write_tcp(uint32_t target_node, uint64_t addr,
                                                  const void* data, size_t size, uint64_t* latency_ns) {
     forwarded_requests_++;
     remote_writes_++;
@@ -1440,8 +1435,8 @@ int DistributedMemoryServer::forward_write_rdma(uint32_t target_node, uint64_t a
     req.payload.mem.client_id = node_id_;
     memcpy(req.payload.mem.data, data, std::min(size, sizeof(req.payload.mem.data)));
 
-    if (!rdma_transport_->send_message_wait_response(target_node, req, resp)) {
-        SPDLOG_ERROR("RDMA forward write to node {} failed", target_node);
+    if (!tcp_transport_->send_message_wait_response(target_node, req, resp)) {
+        SPDLOG_ERROR("TCP forward write to node {} failed", target_node);
         return -1;
     }
 
@@ -1452,7 +1447,7 @@ int DistributedMemoryServer::forward_write_rdma(uint32_t target_node, uint64_t a
     auto end = std::chrono::high_resolution_clock::now();
     double measured_ns = std::chrono::duration<double, std::nano>(end - start).count();
 
-    auto calib = rdma_transport_->get_calibration(target_node);
+    auto calib = tcp_transport_->get_calibration(target_node);
     double network_latency;
     if (calib.valid) {
         network_latency = controller_->calculate_logp_latency(node_id_, target_node,
@@ -1477,29 +1472,23 @@ int DistributedMemoryServer::forward_write_rdma(uint32_t target_node, uint64_t a
 }
 
 /* ============================================================================
- * DistributedRDMATransport Implementation
+ * DistributedTCPTransport Implementation
  * ============================================================================ */
 
-DistributedRDMATransport::DistributedRDMATransport(uint32_t node_id,
+DistributedTCPTransport::DistributedTCPTransport(uint32_t node_id,
                                                      const std::string& bind_addr, uint16_t port)
     : local_node_id_(node_id), bind_addr_(bind_addr), port_(port), running_(false) {
 }
 
-DistributedRDMATransport::~DistributedRDMATransport() {
+DistributedTCPTransport::~DistributedTCPTransport() {
     shutdown();
 }
 
-bool DistributedRDMATransport::initialize() {
-    // Check RDMA availability
-    if (!RDMATransport::is_rdma_available()) {
-        SPDLOG_ERROR("No RDMA devices available");
-        return false;
-    }
-
-    // Create RDMA server for incoming connections
-    server_ = std::make_unique<RDMAServer>(bind_addr_, port_);
+bool DistributedTCPTransport::initialize() {
+    // Create TCP server for incoming connections
+    server_ = std::make_unique<TCPServer>(bind_addr_, port_);
     if (server_->start() != 0) {
-        SPDLOG_ERROR("Failed to start RDMA server on {}:{}", bind_addr_, port_);
+        SPDLOG_ERROR("Failed to start TCP server on {}:{}", bind_addr_, port_);
         server_.reset();
         return false;
     }
@@ -1507,14 +1496,14 @@ bool DistributedRDMATransport::initialize() {
     running_ = true;
 
     // Start accept thread for incoming connections
-    accept_thread_ = std::thread(&DistributedRDMATransport::accept_loop, this);
+    accept_thread_ = std::thread(&DistributedTCPTransport::accept_loop, this);
 
-    SPDLOG_INFO("DistributedRDMATransport initialized: node={} bind={}:{}",
+    SPDLOG_INFO("DistributedTCPTransport initialized: node={} bind={}:{}",
                 local_node_id_, bind_addr_, port_);
     return true;
 }
 
-void DistributedRDMATransport::shutdown() {
+void DistributedTCPTransport::shutdown() {
     running_ = false;
 
     // Disconnect all nodes
@@ -1540,13 +1529,13 @@ void DistributedRDMATransport::shutdown() {
     }
 
     server_.reset();
-    SPDLOG_INFO("DistributedRDMATransport shutdown complete");
+    SPDLOG_INFO("DistributedTCPTransport shutdown complete");
 }
 
-void DistributedRDMATransport::accept_loop() {
+void DistributedTCPTransport::accept_loop() {
     while (running_) {
         if (server_->accept_connection() == 0) {
-            SPDLOG_INFO("Accepted incoming RDMA connection");
+            SPDLOG_INFO("Accepted incoming TCP connection");
             // Handle client in a separate thread
             std::thread handler([this]() {
                 server_->handle_client();
@@ -1557,7 +1546,7 @@ void DistributedRDMATransport::accept_loop() {
     }
 }
 
-bool DistributedRDMATransport::connect_to_node(uint32_t node_id, const std::string& addr, uint16_t port) {
+bool DistributedTCPTransport::connect_to_node(uint32_t node_id, const std::string& addr, uint16_t port) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
 
     // Check if already connected
@@ -1569,25 +1558,22 @@ bool DistributedRDMATransport::connect_to_node(uint32_t node_id, const std::stri
 
     // Create new client connection
     auto& conn = connections_[node_id];
-    conn.client = std::make_unique<RDMAClient>(addr, port);
+    conn.client = std::make_unique<TCPClient>(addr, port);
 
     if (conn.client->connect() != 0) {
-        SPDLOG_ERROR("Failed to connect RDMA to node {} at {}:{}", node_id, addr, port);
+        SPDLOG_ERROR("Failed to connect TCP to node {} at {}:{}", node_id, addr, port);
         conn.client.reset();
         connections_.erase(node_id);
         return false;
     }
 
     conn.connected = true;
-    SPDLOG_INFO("RDMA connected to node {} at {}:{}", node_id, addr, port);
-
-    // Exchange MR info for potential one-sided operations
-    exchange_mr_info(node_id);
+    SPDLOG_INFO("TCP connected to node {} at {}:{}", node_id, addr, port);
 
     return true;
 }
 
-void DistributedRDMATransport::disconnect_node(uint32_t node_id) {
+void DistributedTCPTransport::disconnect_node(uint32_t node_id) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
     auto it = connections_.find(node_id);
     if (it != connections_.end()) {
@@ -1595,17 +1581,17 @@ void DistributedRDMATransport::disconnect_node(uint32_t node_id) {
             it->second.client->disconnect();
         }
         connections_.erase(it);
-        SPDLOG_INFO("Disconnected RDMA from node {}", node_id);
+        SPDLOG_INFO("Disconnected TCP from node {}", node_id);
     }
 }
 
-bool DistributedRDMATransport::is_connected(uint32_t node_id) const {
+bool DistributedTCPTransport::is_connected(uint32_t node_id) const {
     std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(connections_mutex_));
     auto it = connections_.find(node_id);
     return it != connections_.end() && it->second.connected;
 }
 
-std::vector<uint32_t> DistributedRDMATransport::get_connected_nodes() const {
+std::vector<uint32_t> DistributedTCPTransport::get_connected_nodes() const {
     std::vector<uint32_t> nodes;
     std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(connections_mutex_));
     for (const auto& [id, conn] : connections_) {
@@ -1616,36 +1602,36 @@ std::vector<uint32_t> DistributedRDMATransport::get_connected_nodes() const {
     return nodes;
 }
 
-bool DistributedRDMATransport::send_message(uint32_t dst_node, const dist_message_t& msg) {
+bool DistributedTCPTransport::send_message(uint32_t dst_node, const dist_message_t& msg) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
     auto it = connections_.find(dst_node);
     if (it == connections_.end() || !it->second.connected || !it->second.client) {
-        SPDLOG_ERROR("Cannot send RDMA message to node {}: not connected", dst_node);
+        SPDLOG_ERROR("Cannot send TCP message to node {}: not connected", dst_node);
         return false;
     }
 
-    // Wrap dist_message_t into an RDMAMessage
-    RDMAMessage rdma_msg;
-    memset(&rdma_msg, 0, sizeof(rdma_msg));
-    rdma_msg.request.op_type = RDMA_OP_WRITE;
-    rdma_msg.request.addr = msg.payload.mem.addr;
-    rdma_msg.request.size = sizeof(dist_message_t);
-    rdma_msg.request.timestamp = msg.header.timestamp;
-    rdma_msg.request.host_id = static_cast<uint8_t>(local_node_id_);
+    // Wrap dist_message_t into a TCPMessage
+    TCPMessage tcp_msg;
+    memset(&tcp_msg, 0, sizeof(tcp_msg));
+    tcp_msg.request.op_type = TCP_OP_WRITE;
+    tcp_msg.request.addr = msg.payload.mem.addr;
+    tcp_msg.request.size = sizeof(dist_message_t);
+    tcp_msg.request.timestamp = msg.header.timestamp;
+    tcp_msg.request.host_id = static_cast<uint8_t>(local_node_id_);
 
     // Serialize the dist_message into the data field (truncated to fit)
-    size_t copy_size = std::min(sizeof(rdma_msg.request.data), sizeof(dist_message_t));
-    memcpy(rdma_msg.request.data, &msg, copy_size);
+    size_t copy_size = std::min(sizeof(tcp_msg.request.data), sizeof(dist_message_t));
+    memcpy(tcp_msg.request.data, &msg, copy_size);
 
-    if (it->second.client->send_message(rdma_msg) != 0) {
-        SPDLOG_ERROR("Failed to send RDMA message to node {}", dst_node);
+    if (it->second.client->send_message(tcp_msg) != 0) {
+        SPDLOG_ERROR("Failed to send TCP message to node {}", dst_node);
         return false;
     }
 
     return true;
 }
 
-bool DistributedRDMATransport::send_message_wait_response(uint32_t dst_node,
+bool DistributedTCPTransport::send_message_wait_response(uint32_t dst_node,
                                                             const dist_message_t& req,
                                                             dist_message_t& resp,
                                                             int timeout_ms) {
@@ -1655,28 +1641,28 @@ bool DistributedRDMATransport::send_message_wait_response(uint32_t dst_node,
         return false;
     }
 
-    // Build RDMA request from dist_message
-    RDMARequest rdma_req;
-    memset(&rdma_req, 0, sizeof(rdma_req));
-    rdma_req.op_type = (req.header.msg_type == DIST_MSG_READ_REQ) ? RDMA_OP_READ : RDMA_OP_WRITE;
-    rdma_req.addr = req.payload.mem.addr;
-    rdma_req.size = req.payload.mem.size;
-    rdma_req.timestamp = req.header.timestamp;
-    rdma_req.host_id = static_cast<uint8_t>(local_node_id_);
+    // Build TCP request from dist_message
+    TCPRequest tcp_req;
+    memset(&tcp_req, 0, sizeof(tcp_req));
+    tcp_req.op_type = (req.header.msg_type == DIST_MSG_READ_REQ) ? TCP_OP_READ : TCP_OP_WRITE;
+    tcp_req.addr = req.payload.mem.addr;
+    tcp_req.size = req.payload.mem.size;
+    tcp_req.timestamp = req.header.timestamp;
+    tcp_req.host_id = static_cast<uint8_t>(local_node_id_);
 
     // Copy data for write requests
-    if (rdma_req.op_type == RDMA_OP_WRITE) {
-        memcpy(rdma_req.data, req.payload.mem.data,
-               std::min(sizeof(rdma_req.data), sizeof(req.payload.mem.data)));
+    if (tcp_req.op_type == TCP_OP_WRITE) {
+        memcpy(tcp_req.data, req.payload.mem.data,
+               std::min(sizeof(tcp_req.data), sizeof(req.payload.mem.data)));
     }
 
-    RDMAResponse rdma_resp;
-    if (it->second.client->send_request(rdma_req, rdma_resp) != 0) {
-        SPDLOG_ERROR("RDMA send_request to node {} failed", dst_node);
+    TCPResponse tcp_resp;
+    if (it->second.client->send_request(tcp_req, tcp_resp) != 0) {
+        SPDLOG_ERROR("TCP send_request to node {} failed", dst_node);
         return false;
     }
 
-    // Convert RDMA response back to dist_message_t
+    // Convert TCP response back to dist_message_t
     memset(&resp, 0, sizeof(resp));
     resp.header.msg_type = (req.header.msg_type == DIST_MSG_READ_REQ) ?
                            DIST_MSG_READ_RESP : DIST_MSG_WRITE_RESP;
@@ -1684,16 +1670,16 @@ bool DistributedRDMATransport::send_message_wait_response(uint32_t dst_node,
     resp.header.src_node_id = dst_node;
     resp.header.dst_node_id = local_node_id_;
     resp.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    resp.payload.mem.status = rdma_resp.status;
-    resp.payload.mem.latency_ns = rdma_resp.latency_ns;
-    resp.payload.mem.cache_state = rdma_resp.cache_state;
-    memcpy(resp.payload.mem.data, rdma_resp.data,
-           std::min(sizeof(resp.payload.mem.data), sizeof(rdma_resp.data)));
+    resp.payload.mem.status = tcp_resp.status;
+    resp.payload.mem.latency_ns = tcp_resp.latency_ns;
+    resp.payload.mem.cache_state = tcp_resp.cache_state;
+    memcpy(resp.payload.mem.data, tcp_resp.data,
+           std::min(sizeof(resp.payload.mem.data), sizeof(tcp_resp.data)));
 
     return true;
 }
 
-bool DistributedRDMATransport::rdma_read(uint32_t dst_node, uint64_t remote_offset,
+bool DistributedTCPTransport::tcp_read(uint32_t dst_node, uint64_t remote_offset,
                                           void* local_buf, size_t size) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
     auto it = connections_.find(dst_node);
@@ -1701,16 +1687,15 @@ bool DistributedRDMATransport::rdma_read(uint32_t dst_node, uint64_t remote_offs
         return false;
     }
 
-    // For one-sided RDMA read, we use send_request with OP_READ
-    RDMARequest req;
+    TCPRequest req;
     memset(&req, 0, sizeof(req));
-    req.op_type = RDMA_OP_READ;
+    req.op_type = TCP_OP_READ;
     req.addr = remote_offset;
     req.size = size;
     req.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
     req.host_id = static_cast<uint8_t>(local_node_id_);
 
-    RDMAResponse resp;
+    TCPResponse resp;
     if (it->second.client->send_request(req, resp) != 0) {
         return false;
     }
@@ -1723,7 +1708,7 @@ bool DistributedRDMATransport::rdma_read(uint32_t dst_node, uint64_t remote_offs
     return true;
 }
 
-bool DistributedRDMATransport::rdma_write(uint32_t dst_node, uint64_t remote_offset,
+bool DistributedTCPTransport::tcp_write(uint32_t dst_node, uint64_t remote_offset,
                                            const void* local_buf, size_t size) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
     auto it = connections_.find(dst_node);
@@ -1731,16 +1716,16 @@ bool DistributedRDMATransport::rdma_write(uint32_t dst_node, uint64_t remote_off
         return false;
     }
 
-    RDMARequest req;
+    TCPRequest req;
     memset(&req, 0, sizeof(req));
-    req.op_type = RDMA_OP_WRITE;
+    req.op_type = TCP_OP_WRITE;
     req.addr = remote_offset;
     req.size = size;
     req.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
     req.host_id = static_cast<uint8_t>(local_node_id_);
     memcpy(req.data, local_buf, std::min(size, sizeof(req.data)));
 
-    RDMAResponse resp;
+    TCPResponse resp;
     if (it->second.client->send_request(req, resp) != 0) {
         return false;
     }
@@ -1748,24 +1733,8 @@ bool DistributedRDMATransport::rdma_write(uint32_t dst_node, uint64_t remote_off
     return resp.status == 0;
 }
 
-bool DistributedRDMATransport::exchange_mr_info(uint32_t node_id) {
-    // MR info exchange is implicit in the RDMA connection setup
-    // The remote side's buffer info is available after connect
-    std::lock_guard<std::mutex> lock(connections_mutex_);
-    auto it = connections_.find(node_id);
-    if (it == connections_.end() || !it->second.client) {
-        return false;
-    }
-
-    // For now, mark as having basic info from connection
-    it->second.remote_buffer_size = RDMA_BUFFER_SIZE * sizeof(RDMAMessage);
-    SPDLOG_DEBUG("MR info exchanged with node {}: buffer_size={}",
-                 node_id, it->second.remote_buffer_size);
-    return true;
-}
-
-RDMACalibrationResult DistributedRDMATransport::calibrate_node(uint32_t dst_node, uint32_t num_samples) {
-    RDMACalibrationResult result;
+TCPCalibrationResult DistributedTCPTransport::calibrate_node(uint32_t dst_node, uint32_t num_samples) {
+    TCPCalibrationResult result;
 
     if (!is_connected(dst_node)) {
         SPDLOG_ERROR("Cannot calibrate: not connected to node {}", dst_node);
@@ -1781,15 +1750,15 @@ RDMACalibrationResult DistributedRDMATransport::calibrate_node(uint32_t dst_node
 
     // Warmup: send a few messages to prime the path
     for (uint32_t i = 0; i < std::min(num_samples / 10, 100u); i++) {
-        RDMARequest req;
+        TCPRequest req;
         memset(&req, 0, sizeof(req));
-        req.op_type = RDMA_OP_READ;
+        req.op_type = TCP_OP_READ;
         req.addr = 0;
         req.size = 0;
         req.timestamp = std::chrono::high_resolution_clock::now().time_since_epoch().count();
         req.host_id = static_cast<uint8_t>(local_node_id_);
 
-        RDMAResponse resp;
+        TCPResponse resp;
         std::lock_guard<std::mutex> lock(connections_mutex_);
         auto it = connections_.find(dst_node);
         if (it != connections_.end() && it->second.client) {
@@ -1801,9 +1770,9 @@ RDMACalibrationResult DistributedRDMATransport::calibrate_node(uint32_t dst_node
     auto prev_send_time = std::chrono::high_resolution_clock::now();
 
     for (uint32_t i = 0; i < num_samples; i++) {
-        RDMARequest req;
+        TCPRequest req;
         memset(&req, 0, sizeof(req));
-        req.op_type = RDMA_OP_READ;
+        req.op_type = TCP_OP_READ;
         req.addr = 0;
         req.size = 8; // Small payload for calibration
         req.host_id = static_cast<uint8_t>(local_node_id_);
@@ -1811,7 +1780,7 @@ RDMACalibrationResult DistributedRDMATransport::calibrate_node(uint32_t dst_node
         auto send_start = std::chrono::high_resolution_clock::now();
         req.timestamp = send_start.time_since_epoch().count();
 
-        RDMAResponse resp;
+        TCPResponse resp;
         bool success = false;
         {
             std::lock_guard<std::mutex> lock(connections_mutex_);
@@ -1871,7 +1840,7 @@ RDMACalibrationResult DistributedRDMATransport::calibrate_node(uint32_t dst_node
         calibration_results_[dst_node] = result;
     }
 
-    SPDLOG_INFO("RDMA calibration to node {} ({} samples): "
+    SPDLOG_INFO("TCP calibration to node {} ({} samples): "
                 "L={:.3f}us o_s={:.3f}us o_r={:.3f}us g={:.3f}us median_rtt={:.3f}us",
                 dst_node, result.samples, result.L, result.o_s, result.o_r,
                 result.g, median_rtt);
@@ -1879,24 +1848,24 @@ RDMACalibrationResult DistributedRDMATransport::calibrate_node(uint32_t dst_node
     return result;
 }
 
-RDMACalibrationResult DistributedRDMATransport::get_calibration(uint32_t node_id) const {
+TCPCalibrationResult DistributedTCPTransport::get_calibration(uint32_t node_id) const {
     std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(calibration_mutex_));
     auto it = calibration_results_.find(node_id);
     if (it != calibration_results_.end()) {
         return it->second;
     }
-    return RDMACalibrationResult();
+    return TCPCalibrationResult();
 }
 
-RDMACalibrationResult DistributedRDMATransport::get_aggregate_calibration() const {
+TCPCalibrationResult DistributedTCPTransport::get_aggregate_calibration() const {
     std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(calibration_mutex_));
 
     if (calibration_results_.empty()) {
-        return RDMACalibrationResult();
+        return TCPCalibrationResult();
     }
 
     // Aggregate: take the average of all node calibrations
-    RDMACalibrationResult aggregate;
+    TCPCalibrationResult aggregate;
     aggregate.valid = true;
     aggregate.samples = 0;
 
@@ -1926,10 +1895,10 @@ RDMACalibrationResult DistributedRDMATransport::get_aggregate_calibration() cons
 
 #if 0  // DistributedMHSLDManager removed
 DistributedMHSLDManager_removed::DistributedMHSLDManager(CXLController* ctrl,
-                                                   DistributedRDMATransport* rdma,
+                                                   DistributedTCPTransport* tcp,
                                                    DistributedMessageManager* msg_mgr,
                                                    uint32_t node_id, uint32_t head_id)
-    : controller_(ctrl), rdma_transport_(rdma), msg_manager_(msg_mgr),
+    : controller_(ctrl), tcp_transport_(tcp), msg_manager_(msg_mgr),
       local_node_id_(node_id), local_head_id_(head_id),
       remote_invalidations_(0), remote_fetches_(0),
       remote_updates_(0), cache_hits_(0) {
@@ -1950,10 +1919,10 @@ double DistributedMHSLDManager::distributed_read(uint64_t addr, uint64_t timesta
         if (it != remote_dir_cache_.end()) {
             cache_hits_++;
             // If the entry shows another node owns this exclusively,
-            // we need to issue a downgrade via RDMA
+            // we need to issue a downgrade via TCP
             if (it->second.state == DIST_CACHE_MODIFIED &&
                 it->second.owner_node != local_node_id_) {
-                total_latency += rdma_fetch_directory(it->second.home_node, addr);
+                total_latency += tcp_fetch_directory(it->second.home_node, addr);
             }
             return total_latency;
         }
@@ -1968,7 +1937,7 @@ double DistributedMHSLDManager::distributed_read(uint64_t addr, uint64_t timesta
             uint32_t home_node = active_nodes[cacheline_idx % active_nodes.size()];
 
             if (home_node != local_node_id_) {
-                total_latency += rdma_fetch_directory(home_node, addr);
+                total_latency += tcp_fetch_directory(home_node, addr);
             }
         }
     }
@@ -1985,11 +1954,11 @@ double DistributedMHSLDManager::distributed_write(uint64_t addr, uint64_t timest
     }
 
     // For writes, we need to invalidate remote copies
-    if (rdma_transport_) {
-        auto connected = rdma_transport_->get_connected_nodes();
+    if (tcp_transport_) {
+        auto connected = tcp_transport_->get_connected_nodes();
         for (uint32_t node_id : connected) {
             if (node_id != local_node_id_) {
-                total_latency += rdma_invalidate_remote(node_id, addr, timestamp);
+                total_latency += tcp_invalidate_remote(node_id, addr, timestamp);
             }
         }
     }
@@ -2002,7 +1971,7 @@ double DistributedMHSLDManager::distributed_write(uint64_t addr, uint64_t timest
             uint32_t home_node = active_nodes[cacheline_idx % active_nodes.size()];
 
             if (home_node != local_node_id_) {
-                total_latency += rdma_update_directory(home_node, addr,
+                total_latency += tcp_update_directory(home_node, addr,
                                                        static_cast<uint8_t>(DIST_CACHE_MODIFIED),
                                                        local_node_id_);
             }
@@ -2020,9 +1989,9 @@ double DistributedMHSLDManager::distributed_atomic(uint64_t addr, uint64_t times
     return latency;
 }
 
-double DistributedMHSLDManager::rdma_invalidate_remote(uint32_t target_node, uint64_t addr,
+double DistributedMHSLDManager::tcp_invalidate_remote(uint32_t target_node, uint64_t addr,
                                                          uint64_t timestamp) {
-    if (!rdma_transport_ || !rdma_transport_->is_connected(target_node)) {
+    if (!tcp_transport_ || !tcp_transport_->is_connected(target_node)) {
         // Fall back to message-based invalidation
         if (msg_manager_) {
             dist_message_t inv_msg;
@@ -2041,7 +2010,7 @@ double DistributedMHSLDManager::rdma_invalidate_remote(uint32_t target_node, uin
         return 50.0; // Estimated SHM invalidation latency in ns
     }
 
-    // Use RDMA to send invalidation
+    // Use TCP to send invalidation
     dist_message_t inv_msg;
     memset(&inv_msg, 0, sizeof(inv_msg));
     inv_msg.header.msg_type = DIST_MSG_INVALIDATE;
@@ -2052,23 +2021,23 @@ double DistributedMHSLDManager::rdma_invalidate_remote(uint32_t target_node, uin
     inv_msg.payload.coherency.cacheline_addr = addr & ~(DIST_CACHELINE_SIZE - 1);
     inv_msg.payload.coherency.requesting_node = local_node_id_;
 
-    rdma_transport_->send_message(target_node, inv_msg);
+    tcp_transport_->send_message(target_node, inv_msg);
     remote_invalidations_++;
 
     // Return calibrated latency for the invalidation
-    auto calib = rdma_transport_->get_calibration(target_node);
+    auto calib = tcp_transport_->get_calibration(target_node);
     if (calib.valid) {
         return (calib.o_s + calib.L) * 1000.0; // Convert us to ns
     }
-    return 10.0; // Default RDMA invalidation latency in ns
+    return 10.0; // Default TCP invalidation latency in ns
 }
 
-double DistributedMHSLDManager::rdma_fetch_directory(uint32_t home_node, uint64_t addr) {
+double DistributedMHSLDManager::tcp_fetch_directory(uint32_t home_node, uint64_t addr) {
     remote_fetches_++;
 
     uint64_t cacheline_addr = addr & ~(DIST_CACHELINE_SIZE - 1);
 
-    if (!rdma_transport_ || !rdma_transport_->is_connected(home_node)) {
+    if (!tcp_transport_ || !tcp_transport_->is_connected(home_node)) {
         // Fall back to SHM message-based directory lookup
         if (msg_manager_) {
             dist_message_t req, resp;
@@ -2094,7 +2063,7 @@ double DistributedMHSLDManager::rdma_fetch_directory(uint32_t home_node, uint64_
         return 100.0; // SHM directory fetch latency in ns
     }
 
-    // Use RDMA send/recv for directory query
+    // Use TCP send/recv for directory query
     dist_message_t req, resp;
     memset(&req, 0, sizeof(req));
     req.header.msg_type = DIST_MSG_DIR_QUERY;
@@ -2104,7 +2073,7 @@ double DistributedMHSLDManager::rdma_fetch_directory(uint32_t home_node, uint64_
     req.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
     req.payload.coherency.cacheline_addr = cacheline_addr;
 
-    if (rdma_transport_->send_message_wait_response(home_node, req, resp)) {
+    if (tcp_transport_->send_message_wait_response(home_node, req, resp)) {
         // Update local cache
         std::unique_lock<std::shared_mutex> lock(cache_mutex_);
         auto& entry = remote_dir_cache_[cacheline_addr];
@@ -2116,14 +2085,14 @@ double DistributedMHSLDManager::rdma_fetch_directory(uint32_t home_node, uint64_
     }
 
     // Return calibrated latency
-    auto calib = rdma_transport_->get_calibration(home_node);
+    auto calib = tcp_transport_->get_calibration(home_node);
     if (calib.valid) {
         return (calib.o_s + calib.L + calib.o_r) * 1000.0; // Full RTT in ns
     }
-    return 20.0; // Default RDMA directory fetch latency in ns
+    return 20.0; // Default TCP directory fetch latency in ns
 }
 
-double DistributedMHSLDManager::rdma_update_directory(uint32_t home_node, uint64_t addr,
+double DistributedMHSLDManager::tcp_update_directory(uint32_t home_node, uint64_t addr,
                                                         uint8_t new_state, uint32_t new_owner) {
     remote_updates_++;
 
@@ -2141,13 +2110,13 @@ double DistributedMHSLDManager::rdma_update_directory(uint32_t home_node, uint64
     update_msg.payload.coherency.owner_node = new_owner;
     update_msg.payload.coherency.requesting_node = local_node_id_;
 
-    if (rdma_transport_ && rdma_transport_->is_connected(home_node)) {
-        rdma_transport_->send_message(home_node, update_msg);
-        auto calib = rdma_transport_->get_calibration(home_node);
+    if (tcp_transport_ && tcp_transport_->is_connected(home_node)) {
+        tcp_transport_->send_message(home_node, update_msg);
+        auto calib = tcp_transport_->get_calibration(home_node);
         if (calib.valid) {
             return calib.o_s * 1000.0; // Just send overhead for fire-and-forget in ns
         }
-        return 5.0; // Default RDMA update latency
+        return 5.0; // Default TCP update latency
     }
 
     // Fall back to SHM

@@ -44,64 +44,25 @@ set_target_properties(cxlmemsim_latency PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-# Find RDMA libraries
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(RDMACM REQUIRED librdmacm)
-pkg_check_modules(IBV REQUIRED libibverbs)
-
-# Check if RDMA is available
-option(ENABLE_RDMA "Enable RDMA support" ON)
-
-if(ENABLE_RDMA)
-    if(RDMACM_FOUND AND IBV_FOUND)
-        message(STATUS "RDMA support enabled")
-        add_definitions(-DHAVE_RDMA)
-        include_directories(${RDMACM_INCLUDE_DIRS})
-        include_directories(${IBV_INCLUDE_DIRS})
-        set(RDMA_LIBRARIES ${RDMACM_LIBRARIES} ${IBV_LIBRARIES})
-    else()
-        message(WARNING "RDMA libraries not found. RDMA support disabled.")
-        set(ENABLE_RDMA OFF)
-    endif()
-endif()
-
 # Server library (shared between server executable and tests)
-set(SERVER_LIB_SOURCES src/shared_memory_manager.cc src/shm_communication.cpp src/distributed_server.cpp src/rdma_communication.cpp src/hdm_decoder.cpp src/coherency_engine.cpp)
+set(SERVER_LIB_SOURCES src/shared_memory_manager.cc src/shm_communication.cpp src/distributed_server.cpp src/tcp_communication.cpp src/hdm_decoder.cpp src/coherency_engine.cpp)
 add_library(cxlmemsim_server_lib STATIC ${SERVER_LIB_SOURCES})
 target_include_directories(cxlmemsim_server_lib PUBLIC include src ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
 target_link_libraries(cxlmemsim_server_lib cxlmemsim cxxopts::cxxopts spdlog::spdlog_header_only rt)
-if(ENABLE_RDMA)
-    target_link_libraries(cxlmemsim_server_lib ${RDMA_LIBRARIES})
-    target_compile_options(cxlmemsim_server_lib PRIVATE ${RDMACM_CFLAGS_OTHER} ${IBV_CFLAGS_OTHER})
-endif()
 
 # Build server (uses server library + main)
 add_executable(cxlmemsim_server src/main_server.cc)
 target_include_directories(cxlmemsim_server PRIVATE include src ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
 target_link_libraries(cxlmemsim_server cxlmemsim_server_lib cxlmemsim cxxopts::cxxopts spdlog::spdlog_header_only rt)
-if(ENABLE_RDMA)
-    target_link_libraries(cxlmemsim_server ${RDMA_LIBRARIES})
-endif()
 
 # Distributed SHM test
 add_executable(test_distributed_shm tests/test_distributed_shm.cpp)
 target_include_directories(test_distributed_shm PRIVATE include src ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
 target_link_libraries(test_distributed_shm cxlmemsim_server_lib cxlmemsim cxxopts::cxxopts spdlog::spdlog_header_only rt)
-if(ENABLE_RDMA)
-    target_link_libraries(test_distributed_shm ${RDMA_LIBRARIES})
-endif()
 
 # Installation targets
-if(ENABLE_RDMA)
-    install(TARGETS cxlmemsim_server
-            RUNTIME DESTINATION bin)
+install(TARGETS cxlmemsim_server
+        RUNTIME DESTINATION bin)
 
-    install(FILES include/rdma_communication.h
-            DESTINATION include/cxlmemsim)
-endif()
-
-# Export RDMA configuration
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/rdma_config.h.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/rdma_config.h"
-)
+install(FILES include/tcp_communication.h
+        DESTINATION include/cxlmemsim)
