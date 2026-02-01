@@ -241,6 +241,13 @@ void SharedMemoryManager::cleanup() {
     // Call shm_unlink(shm_name.c_str()) explicitly if you want to remove
 }
 
+void SharedMemoryManager::set_base_addr(uint64_t addr) {
+    if (header) {
+        header->base_addr = addr;
+        SPDLOG_INFO("SharedMemoryManager base address set to 0x{:x}", addr);
+    }
+}
+
 SharedMemoryManager::SharedMemoryInfo SharedMemoryManager::get_shm_info() const {
     SharedMemoryInfo info;
     info.shm_name = shm_name;

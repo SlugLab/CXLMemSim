@@ -27,7 +27,7 @@
 #include <numeric>
 
 /* TCP Client Request/Response structures (matching QEMU's cxl_type3.c) */
-struct DistServerRequest {
+struct __attribute__((packed)) DistServerRequest {
     uint8_t op_type;      /* 0=READ, 1=WRITE, 2=GET_SHM_INFO, 3=ATOMIC_FAA, 4=ATOMIC_CAS, 5=FENCE */
     uint64_t addr;
     uint64_t size;
@@ -37,7 +37,7 @@ struct DistServerRequest {
     uint8_t data[64];     /* Cacheline data */
 };
 
-struct DistServerResponse {
+struct __attribute__((packed)) DistServerResponse {
     uint8_t status;
     uint64_t latency_ns;
     uint64_t old_value;   /* Previous value returned by atomic operations */
@@ -535,6 +535,10 @@ bool DistributedMemoryServer::initialize() {
         return false;
     }
 
+    // In distributed mode, each node needs a unique base address: node_id * capacity
+    uint64_t node_base_addr = node_id_ * memory_capacity_mb_ * 1024ULL * 1024ULL;
+    local_memory_->set_base_addr(node_base_addr);
+
     auto shm_info = local_memory_->get_shm_info();
 
     // Initialize message manager
@@ -575,8 +579,9 @@ bool DistributedMemoryServer::initialize() {
     controller_->configure_logp(logp_cfg);
 
     // Configure controller for distributed mode with HDM decoder + CoherencyEngine
+    // Use HYBRID mode for TCP: tries range-based first (from add_range), then interleaved
     HDMDecoderMode hdm_mode = (transport_mode_ == DistTransportMode::TCP)
-        ? HDMDecoderMode::INTERLEAVED : HDMDecoderMode::RANGE_BASED;
+        ? HDMDecoderMode::HYBRID : HDMDecoderMode::RANGE_BASED;
     controller_->configure_distributed(node_id_, hdm_mode);
 
     // Add local range to HDM decoder
@@ -999,8 +1004,8 @@ bool DistributedMemoryServer::is_local_address(uint64_t addr) const {
 int DistributedMemoryServer::read(uint64_t addr, void* data, size_t size, uint64_t* latency_ns) {
     uint32_t target_node = get_node_for_address(addr);
 
-    if (target_node == node_id_ || is_local_address(addr)) {
-        // Local read
+    if (target_node == node_id_ || is_local_address(addr) || target_node == UINT32_MAX) {
+        // Local read (also handles unresolved addresses by falling back to local)
         ensure_coherency_for_read(addr, node_id_);
 
         if (!local_memory_->read_cacheline(addr, static_cast<uint8_t*>(data), size)) {
@@ -1026,8 +1031,8 @@ int DistributedMemoryServer::read(uint64_t addr, void* data, size_t size, uint64
 int DistributedMemoryServer::write(uint64_t addr, const void* data, size_t size, uint64_t* latency_ns) {
     uint32_t target_node = get_node_for_address(addr);
 
-    if (target_node == node_id_ || is_local_address(addr)) {
-        // Local write
+    if (target_node == node_id_ || is_local_address(addr) || target_node == UINT32_MAX) {
+        // Local write (also handles unresolved addresses by falling back to local)
         ensure_coherency_for_write(addr, node_id_);
 
         if (!local_memory_->write_cacheline(addr, static_cast<const uint8_t*>(data), size)) {
@@ -2257,11 +2262,12 @@ void DistributedMemoryServer::handle_tcp_client(int client_fd, int client_id) {
             case DIST_OP_READ: {
                 uint8_t buffer[64];
                 uint64_t latency_ns = 0;
-                int ret = read(req.addr, buffer, req.size, &latency_ns);
+                uint64_t clamped_size = std::min(req.size, (uint64_t)64);
+                int ret = read(req.addr, buffer, clamped_size, &latency_ns);
                 if (ret == 0) {
                     resp.status = 0;
                     resp.latency_ns = latency_ns;
-                    memcpy(resp.data, buffer, std::min(req.size, (uint64_t)64));
+                    memcpy(resp.data, buffer, clamped_size);
                 } else {
                     resp.status = 1;
                 }
@@ -2270,7 +2276,8 @@ void DistributedMemoryServer::handle_tcp_client(int client_fd, int client_id) {
 
             case DIST_OP_WRITE: {
                 uint64_t latency_ns = 0;
-                int ret = write(req.addr, req.data, req.size, &latency_ns);
+                uint64_t clamped_size = std::min(req.size, (uint64_t)64);
+                int ret = write(req.addr, req.data, clamped_size, &latency_ns);
                 resp.status = (ret == 0) ? 0 : 1;
                 resp.latency_ns = latency_ns;
                 break;

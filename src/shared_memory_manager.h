@@ -117,6 +117,9 @@ public:
     // Metadata access (uses local cache)
     CachelineMetadata* get_cacheline_metadata(uint64_t cacheline_addr);
     
+    // Set the base address (for distributed mode where each node needs a unique range)
+    void set_base_addr(uint64_t addr);
+
     // Memory region management
     bool allocate_region(uint64_t addr, size_t size);
     bool deallocate_region(uint64_t addr);

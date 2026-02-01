@@ -59,7 +59,7 @@ constexpr uint8_t OP_ATOMIC_CAS = 4;   // Compare-and-Swap
 constexpr uint8_t OP_FENCE = 5;        // Memory fence
 
 // Server request/response structures (matching qemu_integration)
-struct ServerRequest {
+struct __attribute__((packed)) ServerRequest {
     uint8_t op_type;      // 0=READ, 1=WRITE, 2=GET_SHM_INFO, 3=ATOMIC_FAA, 4=ATOMIC_CAS, 5=FENCE
     uint64_t addr;
     uint64_t size;
@@ -69,7 +69,7 @@ struct ServerRequest {
     uint8_t data[64];     // Cacheline data
 };
 
-struct ServerResponse {
+struct __attribute__((packed)) ServerResponse {
     uint8_t status;
     uint64_t latency_ns;
     uint64_t old_value;   // Previous value returned by atomic operations
@@ -77,7 +77,7 @@ struct ServerResponse {
 };
 
 // Extended response for shared memory info
-struct SharedMemoryInfoResponse {
+struct __attribute__((packed)) SharedMemoryInfoResponse {
     uint8_t status;
     uint64_t base_addr;
     uint64_t size;
@@ -850,7 +850,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     
     // Calculate base latency using CXL controller
     std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
-    access_elem.push_back(std::make_tuple(req.addr, req.size));
+    access_elem.push_back(std::make_tuple((uint64_t)req.addr, (uint64_t)req.size));
     double base_latency = controller->calculate_latency(access_elem, controller->dramlatency);
     
     // Handle coherency and memory operation
@@ -898,7 +898,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
                     msync(metadata_ptr, sizeof(CachelineMetadata), MS_INVALIDATE | MS_SYNC);
                 }
                 SPDLOG_ERROR("Thread {}: Failed to read from shared memory at 0x{:x}",
-                            thread_id, req.addr);
+                            thread_id, (uint64_t)req.addr);
                 resp.status = 1;
                 congestion_info.active_requests--;
                 return;
@@ -954,7 +954,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             // Write data to shared memory
             if (!shm_manager->write_cacheline(req.addr, req.data, req.size)) {
                 SPDLOG_ERROR("Thread {}: Failed to write to shared memory at 0x{:x}",
-                            thread_id, req.addr);
+                            thread_id, (uint64_t)req.addr);
                 resp.status = 1;
                 congestion_info.active_requests--;
                 return;
@@ -1048,7 +1048,7 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
 
     // Calculate base latency using CXL controller
     std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
-    access_elem.push_back(std::make_tuple(req.addr, sizeof(uint64_t)));
+    access_elem.push_back(std::make_tuple((uint64_t)req.addr, (uint64_t)sizeof(uint64_t)));
     double base_latency = controller->calculate_latency(access_elem, controller->dramlatency);
 
     // Atomic operations require exclusive access with proper coherency

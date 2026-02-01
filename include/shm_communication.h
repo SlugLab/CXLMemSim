@@ -27,7 +27,7 @@ constexpr uint8_t SHM_OP_ATOMIC_CAS = 4;   // Compare-and-Swap
 constexpr uint8_t SHM_OP_FENCE = 5;        // Memory fence
 
 // Request/Response structures matching TCP version
-struct ShmRequest {
+struct __attribute__((packed)) ShmRequest {
     uint8_t op_type;      // 0=READ, 1=WRITE, 2=GET_SHM_INFO, 3=ATOMIC_FAA, 4=ATOMIC_CAS, 5=FENCE
     uint64_t addr;
     uint64_t size;
@@ -37,7 +37,7 @@ struct ShmRequest {
     uint8_t data[64];     // Cacheline data
 };
 
-struct ShmResponse {
+struct __attribute__((packed)) ShmResponse {
     uint8_t status;
     uint64_t latency_ns;
     uint64_t old_value;   // Previous value returned by atomic operations
