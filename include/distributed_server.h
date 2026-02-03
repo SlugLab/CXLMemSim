@@ -558,6 +558,11 @@ private:
     int tcp_server_fd_;
     std::atomic<int> next_client_id_;
 
+    /* LSA (Label Storage Area) - shared across all QEMU guests */
+    std::vector<uint8_t> lsa_data_;
+    size_t lsa_size_;
+    std::mutex lsa_mutex_;
+
     /* Statistics */
     std::atomic<uint64_t> local_reads_;
     std::atomic<uint64_t> local_writes_;
@@ -589,6 +594,10 @@ public:
     int atomic_cas(uint64_t addr, uint64_t expected, uint64_t desired,
                    uint64_t* old_value);
     void fence();
+
+    /* LSA operations */
+    int lsa_read(uint64_t offset, void* data, size_t size);
+    int lsa_write(uint64_t offset, const void* data, size_t size);
 
     /* Node management */
     bool add_remote_node(const DistNodeInfo& info);

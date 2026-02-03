@@ -51,6 +51,8 @@ static constexpr uint8_t DIST_OP_GET_SHM_INFO = 2;
 static constexpr uint8_t DIST_OP_ATOMIC_FAA = 3;
 static constexpr uint8_t DIST_OP_ATOMIC_CAS = 4;
 static constexpr uint8_t DIST_OP_FENCE = 5;
+static constexpr uint8_t DIST_OP_LSA_READ = 6;
+static constexpr uint8_t DIST_OP_LSA_WRITE = 7;
 
 /* ============================================================================
  * DistributedMessageManager Implementation
@@ -514,10 +516,13 @@ DistributedMemoryServer::DistributedMemoryServer(uint32_t node_id, const std::st
       memory_capacity_mb_(capacity_mb), transport_mode_(transport_mode),
       tcp_addr_(tcp_addr), tcp_transport_port_(tcp_transport_port),
       controller_(controller),
+      lsa_size_(256 * 1024),  /* 256KB default LSA size per CXL spec */
       tcp_server_fd_(-1), next_client_id_(0),
       running_(false), state_(NODE_STATE_UNKNOWN),
       local_reads_(0), local_writes_(0), remote_reads_(0), remote_writes_(0),
       forwarded_requests_(0), coherency_messages_(0) {
+    lsa_data_.resize(lsa_size_, 0);
+    SPDLOG_INFO("Node {} LSA initialized: {} bytes", node_id_, lsa_size_);
 }
 
 DistributedMemoryServer::~DistributedMemoryServer() {
@@ -1197,6 +1202,30 @@ void DistributedMemoryServer::fence() {
     fence_msg.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
 
     msg_manager_->broadcast_message(fence_msg);
+}
+
+int DistributedMemoryServer::lsa_read(uint64_t offset, void* data, size_t size) {
+    std::lock_guard<std::mutex> lock(lsa_mutex_);
+    if (offset + size > lsa_size_) {
+        SPDLOG_ERROR("Node {} LSA read out of bounds: offset=0x{:x} size={} lsa_size={}",
+                     node_id_, offset, size, lsa_size_);
+        return -1;
+    }
+    memcpy(data, lsa_data_.data() + offset, size);
+    return 0;
+}
+
+int DistributedMemoryServer::lsa_write(uint64_t offset, const void* data, size_t size) {
+    std::lock_guard<std::mutex> lock(lsa_mutex_);
+    if (offset + size > lsa_size_) {
+        /* Auto-grow LSA if needed */
+        size_t new_size = offset + size;
+        SPDLOG_INFO("Node {} growing LSA from {} to {} bytes", node_id_, lsa_size_, new_size);
+        lsa_data_.resize(new_size, 0);
+        lsa_size_ = new_size;
+    }
+    memcpy(lsa_data_.data() + offset, data, size);
+    return 0;
 }
 
 bool DistributedMemoryServer::ensure_coherency_for_read(uint64_t addr, uint32_t requesting_node) {
@@ -2302,6 +2331,20 @@ void DistributedMemoryServer::handle_tcp_client(int client_fd, int client_id) {
             case DIST_OP_FENCE: {
                 fence();
                 resp.status = 0;
+                break;
+            }
+
+            case DIST_OP_LSA_READ: {
+                uint64_t clamped_size = std::min(req.size, (uint64_t)64);
+                int ret = lsa_read(req.addr, resp.data, clamped_size);
+                resp.status = (ret == 0) ? 0 : 1;
+                break;
+            }
+
+            case DIST_OP_LSA_WRITE: {
+                uint64_t clamped_size = std::min(req.size, (uint64_t)64);
+                int ret = lsa_write(req.addr, req.data, clamped_size);
+                resp.status = (ret == 0) ? 0 : 1;
                 break;
             }
 
