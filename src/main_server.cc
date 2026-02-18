@@ -57,6 +57,8 @@ constexpr uint8_t OP_GET_SHM_INFO = 2;
 constexpr uint8_t OP_ATOMIC_FAA = 3;   // Fetch-and-Add
 constexpr uint8_t OP_ATOMIC_CAS = 4;   // Compare-and-Swap
 constexpr uint8_t OP_FENCE = 5;        // Memory fence
+constexpr uint8_t OP_LSA_READ = 6;     // Label Storage Area read
+constexpr uint8_t OP_LSA_WRITE = 7;    // Label Storage Area write
 
 // Server request/response structures (matching qemu_integration)
 struct __attribute__((packed)) ServerRequest {
@@ -161,6 +163,11 @@ private:
     std::atomic<uint64_t> coherency_downgrades{0};
     std::atomic<uint64_t> back_invalidations{0};
 
+    // LSA (Label Storage Area) - shared across all QEMU guests
+    std::vector<uint8_t> lsa_data_;
+    size_t lsa_size_;
+    std::mutex lsa_mutex_;
+
     // Periodic logging interval
     static constexpr uint64_t LOG_INTERVAL = 100000;
 
@@ -200,6 +207,11 @@ public:
         } else {
             shm_manager = std::make_unique<SharedMemoryManager>(capacity_mb);
         }
+
+        // Initialize LSA storage (256KB default per CXL spec)
+        lsa_size_ = 256 * 1024;
+        lsa_data_.resize(lsa_size_, 0);
+        SPDLOG_INFO("LSA initialized: {} bytes", lsa_size_);
     }
     
     bool start();
@@ -813,6 +825,34 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     // Dispatch atomic operations to dedicated handler
     if (req.op_type == OP_ATOMIC_FAA || req.op_type == OP_ATOMIC_CAS || req.op_type == OP_FENCE) {
         handle_atomic_request(thread_id, req, resp);
+        return;
+    }
+
+    // Handle LSA operations
+    if (req.op_type == OP_LSA_READ) {
+        std::lock_guard<std::mutex> lock(lsa_mutex_);
+        uint64_t clamped_size = std::min((uint64_t)req.size, (uint64_t)64);
+        if (req.addr + clamped_size <= lsa_size_) {
+            memcpy(resp.data, lsa_data_.data() + req.addr, clamped_size);
+            resp.status = 0;
+        } else {
+            SPDLOG_ERROR("Thread {}: LSA read out of bounds: offset=0x{:x} size={}",
+                         thread_id, (uint64_t)req.addr, clamped_size);
+            resp.status = 1;
+        }
+        return;
+    }
+    if (req.op_type == OP_LSA_WRITE) {
+        std::lock_guard<std::mutex> lock(lsa_mutex_);
+        uint64_t clamped_size = std::min((uint64_t)req.size, (uint64_t)64);
+        if (req.addr + clamped_size > lsa_size_) {
+            size_t new_size = req.addr + clamped_size;
+            SPDLOG_INFO("Thread {}: Growing LSA from {} to {} bytes", thread_id, lsa_size_, new_size);
+            lsa_data_.resize(new_size, 0);
+            lsa_size_ = new_size;
+        }
+        memcpy(lsa_data_.data() + req.addr, req.data, clamped_size);
+        resp.status = 0;
         return;
     }
 
