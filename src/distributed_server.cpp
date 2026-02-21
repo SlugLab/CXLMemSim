@@ -8,23 +8,23 @@
  * UC Santa Cruz Sluglab.
  */
 
-#include "../include/distributed_server.h"
-#include "cxlcontroller.h"
-#include "coherency_engine.h"
-#include "hdm_decoder.h"
+#include "distributed_server.h"
 #include "shared_memory_manager.h"
+#include "coherency_engine.h"
+#include "cxlcontroller.h"
+#include "hdm_decoder.h"
+#include <algorithm>
+#include <arpa/inet.h>
+#include <chrono>
+#include <cstring>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <numeric>
 #include <spdlog/spdlog.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
-#include <cstring>
-#include <algorithm>
-#include <chrono>
-#include <numeric>
 
 /* TCP Client Request/Response structures (matching QEMU's cxl_type3.c) */
 struct __attribute__((packed)) DistServerRequest {

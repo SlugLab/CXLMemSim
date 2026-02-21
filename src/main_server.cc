@@ -8,38 +8,39 @@
  *  UC Santa Cruz Sluglab.
  */
 
+#include "../include/shared_memory_manager.h"
+#include "cxl_backend.h"
 #include "cxlcontroller.h"
 #include "cxlendpoint.h"
+#include "distributed_server.h"
 #include "helper.h"
 #include "monitor.h"
 #include "policy.h"
-#include "shared_memory_manager.h"
 #include "shm_communication.h"
-#include "cxl_backend.h"
-#include "distributed_server.h"
-#include <cerrno>
-#include <cxxopts.hpp>
-#include <spdlog/cfg/env.h>
-#include <spdlog/spdlog.h>
-#include <thread>
-#include <vector>
-#include <memory>
-#include <mutex>
-#include <shared_mutex>
-#include <atomic>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <signal.h>
-#include <cstring>
-#include <errno.h>
-#include <sstream>
 #include <algorithm>
+#include <arpa/inet.h>
+#include <atomic>
+#include <cerrno>
 #include <chrono>
+#include <cstring>
+#include <cxxopts.hpp>
+#include <errno.h>
+#include <format>
 #include <fstream>
 #include <iostream>
-#include <sys/mman.h>  // For msync
+#include <memory>
+#include <mutex>
+#include <netinet/in.h>
+#include <shared_mutex>
+#include <signal.h>
+#include <spdlog/cfg/env.h>
+#include <spdlog/spdlog.h>
+#include <sstream>
+#include <sys/mman.h> // For msync
+#include <sys/socket.h>
+#include <thread>
+#include <unistd.h>
+#include <vector>
 
 #ifndef MSG_WAITALL
 #define MSG_WAITALL 0x100
@@ -380,7 +381,19 @@ int main(int argc, char *argv[]) {
 
     // Create controller
     controller = new CXLController(policies, capacity, PAGE, 10, default_latency);
-    
+
+    // Create a CXL memory expander endpoint for the server's memory pool.
+    // This must happen BEFORE construct_topo() so the topology parser can
+    // reference the expander by index.
+    auto *ep = new CXLMemExpander(
+        25, 25,                   // read/write bandwidth (GB/s)
+        default_latency,          // read latency (ns)
+        default_latency + 50,     // write latency (ns)
+        0,                        // expander id
+        capacity                  // capacity (MB)
+    );
+    controller->insert_end_point(ep);
+
     // Load topology if file exists
     if (access(topology.c_str(), F_OK) == 0) {
         SPDLOG_INFO("Loading topology from {}", topology);
@@ -393,7 +406,9 @@ int main(int argc, char *argv[]) {
             topo_file.close();
         }
     } else {
-        SPDLOG_WARN("Topology file {} not found, using default configuration", topology);
+        SPDLOG_WARN("Topology file {} not found, using default topology", topology);
+        // Create a default topology: one switch with the expander
+        controller->construct_topo("(1);");
     }
     
     SPDLOG_INFO("========================================");
@@ -673,13 +688,21 @@ void ThreadPerConnectionServer::stop() {
         close(server_fd);
     }
 
-    // Print final statistics
+    // Print final server operation statistics
     SPDLOG_INFO("Server Statistics:");
     SPDLOG_INFO("  Total Reads: {}", total_reads.load());
     SPDLOG_INFO("  Total Writes: {}", total_writes.load());
+    SPDLOG_INFO("  Atomic FAA: {}", total_atomic_faa.load());
+    SPDLOG_INFO("  Atomic CAS: {} (success: {})", total_atomic_cas.load(), total_atomic_cas_success.load());
+    SPDLOG_INFO("  Fences: {}", total_fences.load());
     SPDLOG_INFO("  Coherency Invalidations: {}", coherency_invalidations.load());
     SPDLOG_INFO("  Coherency Downgrades: {}", coherency_downgrades.load());
     SPDLOG_INFO("  Back Invalidations: {}", back_invalidations.load());
+
+    // Print CXL controller topology statistics (switches/expanders/counters)
+    if (controller) {
+        std::cout << std::format("{}", *controller) << std::endl;
+    }
 }
 
 void ThreadPerConnectionServer::handle_read_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo& info) {
@@ -961,6 +984,16 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             }
             
             total_reads++;
+
+            // Propagate stats through CXL topology (switches/expanders)
+            controller->counter.inc_local();
+            for (auto &sw : controller->switches) {
+                sw->insert(req.timestamp, (uint64_t)thread_id, req.addr, req.addr, 0);
+            }
+            for (auto &ep : controller->expanders) {
+                ep->insert(req.timestamp, (uint64_t)thread_id, req.addr, req.addr, ep->id);
+            }
+
             log_periodic_stats("READ", total_reads.load());
         } else {  // WRITE
             // SPDLOG_DEBUG("Thread {}: CXL_TYPE3_WRITE processing - checking coherency for cacheline 0x{:x}", 
@@ -1008,7 +1041,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             // Force sync the data as well
             void* data_ptr = shm_manager->get_data_area();
             if (data_ptr) {
-                msync((uint8_t*)data_ptr + (cacheline_addr & ~CACHELINE_MASK), CACHELINE_SIZE, MS_SYNC);
+                msync((uint8_t*)data_ptr + (cacheline_addr & ~SHM_CACHELINE_MASK), SHM_CACHELINE_SIZE, MS_SYNC);
             }
             std::atomic_thread_fence(std::memory_order_release);
 
@@ -1040,6 +1073,16 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             }
             
             total_writes++;
+
+            // Propagate stats through CXL topology (switches/expanders)
+            controller->counter.inc_local();
+            for (auto &sw : controller->switches) {
+                sw->insert(req.timestamp, (uint64_t)thread_id, req.addr, req.addr, 0);
+            }
+            for (auto &ep : controller->expanders) {
+                ep->insert(req.timestamp, (uint64_t)thread_id, req.addr, req.addr, ep->id);
+            }
+
             log_periodic_stats("WRITE", total_writes.load());
         }
 
@@ -1626,6 +1669,16 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 __atomic_thread_fence(__ATOMIC_RELEASE);
                 slot->resp_status = CXL_SHM_RESP_OK;
                 total_reads++;
+
+                // Propagate stats through CXL topology
+                controller->counter.inc_local();
+                for (auto &sw : controller->switches) {
+                    sw->insert(slot->timestamp, 0, addr, addr, 0);
+                }
+                for (auto &ep : controller->expanders) {
+                    ep->insert(slot->timestamp, 0, addr, addr, ep->id);
+                }
+
                 log_periodic_stats("PGAS_READ", total_reads.load());
                 processed++;
                 break;
@@ -1647,6 +1700,16 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 __atomic_thread_fence(__ATOMIC_RELEASE);
                 slot->resp_status = CXL_SHM_RESP_OK;
                 total_writes++;
+
+                // Propagate stats through CXL topology
+                controller->counter.inc_local();
+                for (auto &sw : controller->switches) {
+                    sw->insert(slot->timestamp, 0, addr, addr, 0);
+                }
+                for (auto &ep : controller->expanders) {
+                    ep->insert(slot->timestamp, 0, addr, addr, ep->id);
+                }
+
                 log_periodic_stats("PGAS_WRITE", total_writes.load());
                 processed++;
                 break;

@@ -23,8 +23,8 @@
 #include <spdlog/spdlog.h>
 
 // Cacheline size
-#define CACHELINE_SIZE 64
-#define CACHELINE_MASK (~(CACHELINE_SIZE - 1))
+#define SHM_CACHELINE_SIZE (64)
+#define SHM_CACHELINE_MASK (~(SHM_CACHELINE_SIZE - 1))
 
 // Coherency states (must match main_server.cc)
 enum CoherencyState {
@@ -127,15 +127,15 @@ public:
     
     // Utility functions
     uint64_t addr_to_cacheline(uint64_t addr) const {
-        return addr & CACHELINE_MASK;
+        return addr & SHM_CACHELINE_MASK;
     }
     
     uint64_t cacheline_to_index(uint64_t cacheline_addr) const {
         if (header && header->base_addr == 0) {
             // Accept any address, use modulo to map to available cachelines
-            return (cacheline_addr / CACHELINE_SIZE) % header->num_cachelines;
+            return (cacheline_addr / SHM_CACHELINE_SIZE) % header->num_cachelines;
         }
-        return header ? (cacheline_addr - header->base_addr) / CACHELINE_SIZE : 0;
+        return header ? (cacheline_addr - header->base_addr) / SHM_CACHELINE_SIZE : 0;
     }
     
     // Statistics

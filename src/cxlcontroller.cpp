@@ -35,7 +35,7 @@ void CXLController::construct_topo(std::string_view newick_tree) {
             } else {
                 throw std::invalid_argument("Unbalanced number of parentheses");
             }
-        } else if (token == ",") {
+        } else if (token == "," || token == ";") {
         } else if (token == "R" && t + 4 < tokens.size() &&
                    tokens[t+1] == ":" && tokens[t+3] == ":") {
             // R:node_id:exp_id - creates RemoteCXLExpander
