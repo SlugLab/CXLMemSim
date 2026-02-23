@@ -901,12 +901,12 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     }
     
     // Check if address is valid in shared memory
-    // if (!shm_manager->is_valid_address(req.addr)) {
-    //     SPDLOG_ERROR("Thread {}: Invalid address 0x{:x} not in CXL memory range", 
-    //                 thread_id, req.addr);
-    //     resp.status = 1;
-    //     return;
-    // }
+    if (!shm_manager->is_valid_address(req.addr)) {
+        SPDLOG_ERROR("Thread {}: Invalid address 0x{:x} not in CXL memory range",
+                    thread_id, req.addr);
+        resp.status = 1;
+        return;
+    }
     
     // Increment active requests
     congestion_info.active_requests++;
@@ -1319,21 +1319,28 @@ void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
             }
             break;
         }
-        
+
+        // Validate op_type before processing
+        if (req.op_type > OP_LSA_WRITE) {
+            SPDLOG_WARN("Thread {}: Invalid op_type {} (0x{:02x}) - possibly non-CXL client (HTTP scanner?), disconnecting",
+                        thread_id, (int)req.op_type, (int)req.op_type);
+            break;
+        }
+
         // Handle special request for shared memory info
         if (req.op_type == OP_GET_SHM_INFO) {
             SharedMemoryInfoResponse shm_resp = {0};
             auto shm_info = shm_manager->get_shm_info();
-            
+
             shm_resp.status = 0;
             shm_resp.base_addr = shm_info.base_addr;
             shm_resp.size = shm_info.size;
             shm_resp.num_cachelines = shm_info.num_cachelines;
             strncpy(shm_resp.shm_name, shm_info.shm_name.c_str(), sizeof(shm_resp.shm_name) - 1);
-            
-            SPDLOG_INFO("Thread {}: Sending shared memory info - name: {}, size: {} bytes", 
+
+            SPDLOG_INFO("Thread {}: Sending shared memory info - name: {}, size: {} bytes",
                        thread_id, shm_info.shm_name, shm_info.size);
-            
+
             ssize_t sent = send(client_fd, &shm_resp, sizeof(shm_resp), 0);
             if (sent != sizeof(shm_resp)) {
                 SPDLOG_ERROR("Thread {}: Failed to send shared memory info", thread_id);
@@ -1341,9 +1348,17 @@ void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
             }
             continue;
         }
-        
+
         // Regular memory operation
         ServerResponse resp = {0};
+
+        // Clamp size to data buffer limit to prevent out-of-bounds reads
+        if (req.size > sizeof(req.data)) {
+            SPDLOG_WARN("Thread {}: Clamping request size from {} to {} (data buffer limit)",
+                        thread_id, (uint64_t)req.size, sizeof(req.data));
+            req.size = sizeof(req.data);
+        }
+
         handle_request(client_fd, thread_id, req, resp);
         
         ssize_t sent = send(client_fd, &resp, sizeof(resp), 0);

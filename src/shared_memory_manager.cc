@@ -284,6 +284,11 @@ uint8_t* SharedMemoryManager::get_cacheline_data(uint64_t cacheline_addr) {
 }
 
 bool SharedMemoryManager::read_cacheline(uint64_t addr, uint8_t* buffer, size_t size) {
+    if (size == 0 || size > SHM_CACHELINE_SIZE) {
+        SPDLOG_ERROR("read_cacheline: invalid size {} (max {})", size, SHM_CACHELINE_SIZE);
+        return false;
+    }
+
     // Always allow access when base_addr is 0 (modulo mapping mode)
     if (header && header->base_addr == 0) {
         // Handle reads that might span multiple cachelines
@@ -334,6 +339,11 @@ bool SharedMemoryManager::read_cacheline(uint64_t addr, uint8_t* buffer, size_t 
 }
 
 bool SharedMemoryManager::write_cacheline(uint64_t addr, const uint8_t* data, size_t size) {
+    if (size == 0 || size > SHM_CACHELINE_SIZE) {
+        SPDLOG_ERROR("write_cacheline: invalid size {} (max {})", size, SHM_CACHELINE_SIZE);
+        return false;
+    }
+
     // Always allow access when base_addr is 0 (modulo mapping mode)
     if (header && header->base_addr == 0) {
         // Handle writes that might span multiple cachelines
