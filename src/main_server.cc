@@ -882,13 +882,19 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     uint64_t cacheline_addr = req.addr & ~(63ULL);  // 64-byte aligned
     bool had_coherency_miss = false;
 
+    // Clamp size: some devices (e.g. cxl-type1 probes) may send size=0
+    if (req.size == 0 || req.size > SHM_CACHELINE_SIZE) {
+        SPDLOG_DEBUG("Thread {}: clamping req.size from {} to {}", thread_id, req.size, SHM_CACHELINE_SIZE);
+        req.size = SHM_CACHELINE_SIZE;
+    }
+
     // Log CXL Type3 operation with detailed information
     const char* op_name = (req.op_type == OP_READ) ? "CXL_TYPE3_READ" : "CXL_TYPE3_WRITE";
-    
+
     // Log incoming request details
-    // SPDLOG_INFO("Thread {}: {} request - addr=0x{:x}, size={}, cacheline=0x{:x}", 
+    // SPDLOG_INFO("Thread {}: {} request - addr=0x{:x}, size={}, cacheline=0x{:x}",
     //             thread_id, op_name, req.addr, req.size, cacheline_addr);
-    
+
     if (req.op_type == OP_WRITE) {
         // Log first 16 bytes of write data
         std::stringstream data_str;
@@ -903,7 +909,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     // Check if address is valid in shared memory
     if (!shm_manager->is_valid_address(req.addr)) {
         SPDLOG_ERROR("Thread {}: Invalid address 0x{:x} not in CXL memory range",
-                    thread_id, req.addr);
+                    thread_id, (uint64_t)req.addr);
         resp.status = 1;
         return;
     }
