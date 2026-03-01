@@ -48,6 +48,35 @@ Configure the shim layer behavior using these environment variables:
 - `CXL_SHIM_COPY_SEND`: Copy send buffers to CXL memory (set to 1)
 - `CXL_SHIM_COPY_RECV`: Use CXL memory for receive buffers (set to 1)
 
+### Choosing a Cache Coherence Variant
+
+Each `.so` is compiled with a specific cache coherence strategy. Pick the one that matches your needs:
+
+| Library | Flush after write | Invalidate before read |
+|---------|-------|------------|
+| `libmpi_cxl_shim_nocc.so` | none | none |
+| `libmpi_cxl_shim.so` (same with `libmpi_cxl_shim_nocc.so`) | none | none |
+| `libmpi_cxl_shim_cc_clwb_clflush.so` | clwb | clflush | 
+| `libmpi_cxl_shim_cc_clwb_clflushopt.so` | clwb | clflushopt |
+| `libmpi_cxl_shim_cc_clflush_clflush.so` | clflush | clflush |
+| `libmpi_cxl_shim_cc_clflush_clflushopt.so` | clflush | clflushopt |
+| `libmpi_cxl_shim_cc_clflushopt_clflush.so` | clflushopt | clflush |
+| `libmpi_cxl_shim_cc_clflushopt_clflushopt.so` | clflushopt | clflushopt | 
+
+Select a variant by setting `LD_PRELOAD` to the desired `.so` file:
+
+For example:
+```bash
+# No cache coherence (MPI_Barrier sync only)
+export LD_PRELOAD=./libmpi_cxl_shim_nocc.so
+
+# Cache coherence with clwb  + clflush
+export LD_PRELOAD=./libmpi_cxl_shim_cc_clwb_clflush.so
+
+# Cache coherence with clflush + clflush 
+export LD_PRELOAD=./libmpi_cxl_shim_cc_clflush_clflush.so
+```
+
 ### Running with GROMACS
 
 1. **With DAX device (real CXL hardware):**

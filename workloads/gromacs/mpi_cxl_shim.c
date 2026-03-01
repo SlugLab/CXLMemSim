@@ -2470,6 +2470,27 @@ static void shim_init(void) {
     fprintf(stderr, "│   - Remotable pointers (offset-based addressing)        │\n");
     fprintf(stderr, "│   - Per-rank message queues in shared memory            │\n");
     fprintf(stderr, "│   - Inline small messages (<4KB) optimization           │\n");
+#ifdef CXL_CACHE_COHERENCE
+    fprintf(stderr, "│   - Cache coherence: flush=%-4s invalidate=%-13s │\n",
+#if defined(CXL_FLUSH_CLWB)
+            "clwb",
+#elif defined(CXL_FLUSH_CLFLUSH)
+            "clflush",
+#elif defined(CXL_FLUSH_CLFLUSHOPT)
+            "clflushopt",
+#else
+            "?",
+#endif
+#if defined(CXL_INV_CLFLUSH)
+            "clflush");
+#elif defined(CXL_INV_CLFLUSHOPT)
+            "clflushopt");
+#else
+            "?");
+#endif
+#else
+    fprintf(stderr, "│   - Cache coherence: disabled (MPI_Barrier sync)        │\n");
+#endif
     fprintf(stderr, "├──────────────────────────────────────────────────────────┤\n");
     fprintf(stderr, "│ CONFIGURATION:                                           │\n");
     fprintf(stderr, "│   CXL_DAX_PATH: %-40s │\n",
