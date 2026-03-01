@@ -28,8 +28,8 @@
 
 // CXL message queue constants
 #define CXL_MAX_RANKS 256
-#define CXL_MSG_QUEUE_SIZE 1024
-#define CXL_MSG_MAX_INLINE_SIZE 4096
+#define CXL_MSG_QUEUE_SIZE 64
+#define CXL_MSG_MAX_INLINE_SIZE 256
 #define CXL_HEADER_SIZE (sizeof(cxl_shm_header_t) + CXL_MAX_RANKS * sizeof(cxl_rank_mailbox_t))
 
 // Remotable pointer - offset from shared memory base
@@ -209,6 +209,7 @@ typedef struct {
     cxl_rank_mailbox_t *mailboxes;
     int my_rank;
     int world_size;
+    int max_ranks;  // max ranks that fit in mapped region
     bool cxl_comm_enabled;
 } cxl_mem_t;
 
@@ -227,6 +228,7 @@ static cxl_mem_t g_cxl = {
     .mailboxes = NULL,
     .my_rank = -1,
     .world_size = 0,
+    .max_ranks = CXL_MAX_RANKS,
     .cxl_comm_enabled = false
 };
 
@@ -512,6 +514,29 @@ use_shm:
     g_cxl.header = (cxl_shm_header_t *)g_cxl.base;
     g_cxl.mailboxes = (cxl_rank_mailbox_t *)((char *)g_cxl.base + sizeof(cxl_shm_header_t));
 
+    // Validate that the header + mailboxes fit within the mapped region
+    size_t required_size = sizeof(cxl_shm_header_t) + CXL_MAX_RANKS * sizeof(cxl_rank_mailbox_t);
+    int max_usable_ranks = CXL_MAX_RANKS;
+    if (required_size > cxl_size) {
+        // Calculate how many ranks can actually fit
+        max_usable_ranks = (cxl_size - sizeof(cxl_shm_header_t)) / sizeof(cxl_rank_mailbox_t);
+        if (max_usable_ranks < 1) {
+            LOG_ERROR("DAX region too small (%zu bytes) for even 1 rank mailbox (need %zu bytes)\n",
+                      cxl_size, sizeof(cxl_shm_header_t) + sizeof(cxl_rank_mailbox_t));
+            munmap(g_cxl.base, cxl_size);
+            close(g_cxl.fd);
+            g_cxl.initialized = false;
+            pthread_mutex_unlock(&g_cxl.lock);
+            return;
+        }
+        LOG_WARN("DAX region (%zu MB) too small for %d ranks (need %zu MB). "
+                 "Limiting to %d ranks.\n",
+                 cxl_size / (1024*1024), CXL_MAX_RANKS, required_size / (1024*1024),
+                 max_usable_ranks);
+        required_size = sizeof(cxl_shm_header_t) + max_usable_ranks * sizeof(cxl_rank_mailbox_t);
+    }
+    g_cxl.max_ranks = max_usable_ranks;
+
     // Check if we need to initialize (first process or reset requested)
     bool need_init = (g_cxl.header->magic != CXL_SHM_MAGIC) || getenv("CXL_DAX_RESET");
 
@@ -526,12 +551,12 @@ use_shm:
         g_cxl.header->initialized = 1;
 
         // Set allocation offset after header and mailboxes
-        size_t header_size = sizeof(cxl_shm_header_t) + CXL_MAX_RANKS * sizeof(cxl_rank_mailbox_t);
+        size_t header_size = required_size;
         header_size = (header_size + CXL_ALIGNMENT - 1) & ~(CXL_ALIGNMENT - 1);
         atomic_store(&g_cxl.header->alloc_offset, header_size);
 
-        // Initialize all mailboxes
-        for (int i = 0; i < CXL_MAX_RANKS; i++) {
+        // Initialize only the mailboxes that fit within the mapped region
+        for (int i = 0; i < max_usable_ranks; i++) {
             atomic_store(&g_cxl.mailboxes[i].head, 0);
             atomic_store(&g_cxl.mailboxes[i].tail, 0);
             atomic_store(&g_cxl.mailboxes[i].active, 0);
@@ -549,12 +574,13 @@ use_shm:
         atomic_store(&g_cxl.header->coll_barrier_count, 0);
         atomic_store(&g_cxl.header->coll_barrier_sense, 0);
         atomic_store(&g_cxl.header->coll_phase, 0);
-        g_cxl.header->coll_max_ranks = CXL_MAX_RANKS;
+        g_cxl.header->coll_max_ranks = max_usable_ranks;
         for (int i = 0; i < CXL_MAX_RANKS; i++) {
             g_cxl.header->coll_data_rptr[i] = CXL_RPTR_NULL;
         }
 
-        LOG_INFO("CXL shared memory structures initialized (header_size=%zu bytes)\n", header_size);
+        LOG_INFO("CXL shared memory structures initialized (header_size=%zu bytes, max_ranks=%d)\n",
+                 header_size, max_usable_ranks);
     } else {
         LOG_INFO("Attaching to existing CXL shared memory (version=%u, ranks=%u)\n",
                  g_cxl.header->version, atomic_load(&g_cxl.header->num_ranks));
@@ -571,8 +597,9 @@ use_shm:
 
 // Register this rank in the CXL shared memory
 static void cxl_register_rank(int rank, int world_size) {
-    if (!g_cxl.initialized || !g_cxl.header || rank < 0 || rank >= CXL_MAX_RANKS) {
-        LOG_WARN("Cannot register rank %d: CXL not initialized or rank out of range\n", rank);
+    if (!g_cxl.initialized || !g_cxl.header || rank < 0 || rank >= g_cxl.max_ranks) {
+        LOG_WARN("Cannot register rank %d: CXL not initialized or rank out of range (max=%d)\n",
+                 rank, g_cxl.max_ranks);
         return;
     }
 

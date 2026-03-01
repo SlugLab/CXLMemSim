@@ -74,6 +74,9 @@ exit
 # out of qemu
 ../qemu_integration/launch_qemu_cxl.sh &
 ../qemu_integration/launch_qemu_cxl1.sh &
+
+./cxlmemsim_server --comm-mode=distributed --node-id=0 --dist-shm-name=/cxlmemsim_dist --capacity=256
+./cxlmemsim_server --comm-mode=distributed --node-id=1 --dist-shm-name=/cxlmemsim_dist --coordinator-shm=/cxlmemsim_dist --capacity=256
 ```
 
 for multiple hosts, you'll need vxlan

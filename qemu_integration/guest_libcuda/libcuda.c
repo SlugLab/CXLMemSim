@@ -924,6 +924,168 @@ CUresult cuDeviceGetUuid(void *uuid, CUdevice dev)
     return CUDA_SUCCESS;
 }
 
+/* ============================================================================
+ * P2P DMA Functions - Transfer data between GPU and CXL Type 3 memory
+ * ============================================================================ */
+
+/* P2P peer info structure */
+typedef struct {
+    uint32_t peer_id;
+    uint32_t peer_type;  /* CXL_P2P_PEER_TYPE2 or CXL_P2P_PEER_TYPE3 */
+    uint64_t mem_size;
+    int coherent;
+} CXLPeerInfo;
+
+/* Discover P2P peer devices on the CXL fabric */
+int cxl_p2p_discover_peers(int *num_peers)
+{
+    DLOG("cxl_p2p_discover_peers()\n");
+
+    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+
+    CUresult result = execute_cmd(CXL_GPU_CMD_P2P_DISCOVER);
+    if (result != CUDA_SUCCESS) {
+        return result;
+    }
+
+    if (num_peers) {
+        *num_peers = (int)reg_read64(CXL_GPU_REG_RESULT0);
+    }
+
+    DLOG("  discovered %d peers\n", num_peers ? *num_peers : -1);
+    return CUDA_SUCCESS;
+}
+
+/* Get peer device information */
+int cxl_p2p_get_peer_info(uint32_t peer_id, CXLPeerInfo *info)
+{
+    DLOG("cxl_p2p_get_peer_info(peer=%u)\n", peer_id);
+
+    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+    if (!info) return CUDA_ERROR_INVALID_VALUE;
+
+    reg_write64(CXL_GPU_REG_PARAM0, peer_id);
+    CUresult result = execute_cmd(CXL_GPU_CMD_P2P_GET_PEER_INFO);
+    if (result != CUDA_SUCCESS) {
+        return result;
+    }
+
+    info->peer_id = peer_id;
+    info->peer_type = (uint32_t)reg_read64(CXL_GPU_REG_RESULT0);
+    info->mem_size = reg_read64(CXL_GPU_REG_RESULT1);
+    info->coherent = (int)reg_read64(CXL_GPU_REG_RESULT2);
+
+    DLOG("  peer %u: type=%u, size=%lu MB, coherent=%d\n",
+         peer_id, info->peer_type, info->mem_size / (1024*1024), info->coherent);
+    return CUDA_SUCCESS;
+}
+
+/* Transfer data from GPU memory to Type 3 CXL memory */
+int cxl_p2p_gpu_to_mem(uint32_t t3_peer_id, uint64_t gpu_offset,
+                       uint64_t mem_offset, uint64_t size)
+{
+    DLOG("cxl_p2p_gpu_to_mem(peer=%u, gpu_off=0x%lx, mem_off=0x%lx, size=%lu)\n",
+         t3_peer_id, (unsigned long)gpu_offset, (unsigned long)mem_offset,
+         (unsigned long)size);
+
+    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+    if (size == 0) return CUDA_SUCCESS;
+
+    reg_write64(CXL_GPU_REG_PARAM0, t3_peer_id);
+    reg_write64(CXL_GPU_REG_PARAM1, gpu_offset);
+    reg_write64(CXL_GPU_REG_PARAM2, mem_offset);
+    reg_write64(CXL_GPU_REG_PARAM3, size);
+
+    CUresult result = execute_cmd(CXL_GPU_CMD_P2P_GPU_TO_MEM);
+    if (result != CUDA_SUCCESS) {
+        DLOG("  P2P GPU->MEM transfer failed: %d\n", result);
+    }
+    return result;
+}
+
+/* Transfer data from Type 3 CXL memory to GPU memory */
+int cxl_p2p_mem_to_gpu(uint32_t t3_peer_id, uint64_t mem_offset,
+                       uint64_t gpu_offset, uint64_t size)
+{
+    DLOG("cxl_p2p_mem_to_gpu(peer=%u, mem_off=0x%lx, gpu_off=0x%lx, size=%lu)\n",
+         t3_peer_id, (unsigned long)mem_offset, (unsigned long)gpu_offset,
+         (unsigned long)size);
+
+    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+    if (size == 0) return CUDA_SUCCESS;
+
+    reg_write64(CXL_GPU_REG_PARAM0, t3_peer_id);
+    reg_write64(CXL_GPU_REG_PARAM1, mem_offset);
+    reg_write64(CXL_GPU_REG_PARAM2, gpu_offset);
+    reg_write64(CXL_GPU_REG_PARAM3, size);
+
+    CUresult result = execute_cmd(CXL_GPU_CMD_P2P_MEM_TO_GPU);
+    if (result != CUDA_SUCCESS) {
+        DLOG("  P2P MEM->GPU transfer failed: %d\n", result);
+    }
+    return result;
+}
+
+/* Transfer data between two Type 3 CXL memory devices */
+int cxl_p2p_mem_to_mem(uint32_t src_peer_id, uint32_t dst_peer_id,
+                       uint64_t src_offset, uint64_t dst_offset, uint64_t size)
+{
+    DLOG("cxl_p2p_mem_to_mem(src=%u, dst=%u, src_off=0x%lx, dst_off=0x%lx, size=%lu)\n",
+         src_peer_id, dst_peer_id, (unsigned long)src_offset,
+         (unsigned long)dst_offset, (unsigned long)size);
+
+    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+    if (size == 0) return CUDA_SUCCESS;
+
+    reg_write64(CXL_GPU_REG_PARAM0, src_peer_id);
+    reg_write64(CXL_GPU_REG_PARAM1, dst_peer_id);
+    reg_write64(CXL_GPU_REG_PARAM2, src_offset);
+    reg_write64(CXL_GPU_REG_PARAM3, dst_offset);
+    reg_write64(CXL_GPU_REG_PARAM4, size);
+
+    CUresult result = execute_cmd(CXL_GPU_CMD_P2P_MEM_TO_MEM);
+    if (result != CUDA_SUCCESS) {
+        DLOG("  P2P MEM->MEM transfer failed: %d\n", result);
+    }
+    return result;
+}
+
+/* Wait for all pending P2P transfers to complete */
+int cxl_p2p_sync(void)
+{
+    DLOG("cxl_p2p_sync()\n");
+
+    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+
+    return execute_cmd(CXL_GPU_CMD_P2P_SYNC);
+}
+
+/* Get P2P engine status and statistics */
+int cxl_p2p_get_status(int *num_peers, uint64_t *transfers_completed,
+                       uint64_t *bytes_transferred)
+{
+    DLOG("cxl_p2p_get_status()\n");
+
+    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+
+    CUresult result = execute_cmd(CXL_GPU_CMD_P2P_GET_STATUS);
+    if (result != CUDA_SUCCESS) {
+        return result;
+    }
+
+    if (num_peers) {
+        *num_peers = (int)reg_read64(CXL_GPU_REG_RESULT0);
+    }
+    if (transfers_completed) {
+        *transfers_completed = reg_read64(CXL_GPU_REG_RESULT1);
+    }
+    if (bytes_transferred) {
+        *bytes_transferred = reg_read64(CXL_GPU_REG_RESULT2);
+    }
+
+    return CUDA_SUCCESS;
+}
+
 /* Library initialization/cleanup */
 __attribute__((constructor))
 static void libcuda_init(void)
