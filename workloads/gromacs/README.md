@@ -16,12 +16,22 @@ This shim layer intercepts OpenMPI calls and redirects memory operations to CXL 
 ## Building
 
 ```bash
-cd /home/victoryang00/CXLMemSim/workloads/gromacs
+cd workloads/gromacs
 make
 ```
 
+Or use the build script:
+
+```bash
+./build.sh                       # Build all 7 variants (default)
+./build.sh nocc                  # Only nocc variant
+./build.sh cc clwb clflush       # Specific cc variant
+```
+
 This will build:
-- `libmpi_cxl_shim.so` - The shim library
+- `libmpi_cxl_shim_nocc.so` - The shim library: No cache coherence (MPI_Barrier sync only)
+- `libmpi_cxl_shim.so` - Symlink to `libmpi_cxl_shim_nocc.so`
+- `libmpi_cxl_shim_cc_{flush}_{inv}.so` - The shim library: 6 cache coherence variants (flush for write: clwb/clflush/clflushopt, invalidate for read: clflush/clflushopt)
 - `test_mpi_cxl` - Test program
 
 ## Usage

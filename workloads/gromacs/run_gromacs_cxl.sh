@@ -112,7 +112,13 @@ fi
 
 export CXL_MEM_SIZE="$MEM_SIZE"
 
-[ "$VERBOSE" -eq 1 ] && export CXL_SHIM_VERBOSE=1
+# Default to 0 (disabled) and unset the variable (so C library sees it as disabled)
+# Only set if explicitly enabled by user (CXL_SHIM_VERBOSE=1 or VERBOSE=1)
+if [ "${CXL_SHIM_VERBOSE:-0}" = "1" ] || [ "${VERBOSE:-0}" = "1" ]; then
+    export CXL_SHIM_VERBOSE=1
+else
+    unset CXL_SHIM_VERBOSE
+fi
 [ "$ENABLE_ALLOC" -eq 1 ] && export CXL_SHIM_ALLOC=1
 [ "$ENABLE_WIN" -eq 1 ] && export CXL_SHIM_WIN=1
 [ "$ENABLE_COPY" -eq 1 ] && {

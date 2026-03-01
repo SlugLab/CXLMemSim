@@ -446,6 +446,7 @@ static void init_cxl_memory(void) {
     } else {
 use_shm:
         // Use shared memory fallback - create a single shared segment
+        {
         const char *shm_name = "/cxlmemsim_mpi_shared";
 
         // Try to open existing first
@@ -503,6 +504,7 @@ use_shm:
 
         // For shared memory, also use first cacheline for coordination
         g_cxl.used = CACHELINE_SIZE;
+        }
     }
 
     g_cxl.size = cxl_size;
@@ -722,9 +724,53 @@ static cxl_rptr_t allocate_cxl_rptr(size_t size) {
 }
 
 // ============================================================================
-// CXL Collective Synchronization
+// CXL Cache Flush/Invalidate Operations (when CXL_CACHE_COHERENCE is enabled)
 // ============================================================================
+//
+// When CXL_CACHE_COHERENCE is defined:
+//   - cxl_flush_range: clwb | clflush | clflushopt (via CXL_FLUSH_*)
+//   - cxl_invalidate_range: clflush | clflushopt (via CXL_INV_*)
+// When CXL_CACHE_COHERENCE is NOT defined: no-op (MPI_Barrier handles cross-node sync)
+//
 
+#ifdef CXL_CACHE_COHERENCE
+#if !defined(CXL_FLUSH_CLWB) && !defined(CXL_FLUSH_CLFLUSH) && !defined(CXL_FLUSH_CLFLUSHOPT)
+#define CXL_FLUSH_CLWB
+#endif
+#if !defined(CXL_INV_CLFLUSH) && !defined(CXL_INV_CLFLUSHOPT)
+#define CXL_INV_CLFLUSH
+#endif
+
+static inline void cxl_flush_range(void *addr, size_t size) {
+    if (!addr || size == 0) return;
+    char *p = (char *)((uintptr_t)addr & ~(CACHELINE_SIZE - 1));
+    char *end = (char *)addr + size;
+    for (; p < end; p += CACHELINE_SIZE) {
+#if defined(CXL_FLUSH_CLWB)
+        asm volatile("clwb (%0)" :: "r"(p) : "memory");
+#elif defined(CXL_FLUSH_CLFLUSH)
+        asm volatile("clflush (%0)" :: "r"(p) : "memory");
+#elif defined(CXL_FLUSH_CLFLUSHOPT)
+        asm volatile("clflushopt (%0)" :: "r"(p) : "memory");
+#endif
+    }
+    asm volatile("sfence" ::: "memory");
+}
+
+static inline void cxl_invalidate_range(void *addr, size_t size) {
+    if (!addr || size == 0) return;
+    char *p = (char *)((uintptr_t)addr & ~(CACHELINE_SIZE - 1));
+    char *end = (char *)addr + size;
+    for (; p < end; p += CACHELINE_SIZE) {
+#if defined(CXL_INV_CLFLUSH)
+        asm volatile("clflush (%0)" :: "r"(p) : "memory");
+#elif defined(CXL_INV_CLFLUSHOPT)
+        asm volatile("clflushopt (%0)" :: "r"(p) : "memory");
+#endif
+    }
+    asm volatile("mfence" ::: "memory");
+}
+#else
 // Memory fence to ensure visibility - MPI_Barrier handles cross-node sync
 static inline void cxl_flush_range(const void *addr, size_t size) {
     (void)addr;
@@ -732,6 +778,12 @@ static inline void cxl_flush_range(const void *addr, size_t size) {
     // Use memory fence instead of clflush - MPI_Barrier ensures cross-node visibility
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
 }
+static inline void cxl_invalidate_range(void *addr, size_t size) {
+    (void)addr;
+    (void)size;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+}
+#endif /* CXL_CACHE_COHERENCE */
 
 // Sense-reversing barrier using CXL shared memory (not used - MPI_Barrier preferred)
 // Returns the phase number after the barrier (for collective data coordination)
@@ -891,6 +943,9 @@ static int cxl_send(const void *buf, size_t data_size, int dest, int tag, int so
         cxl_safe_memcpy(msg->inline_data, buf, data_size);
         msg->is_inline = 1;
         msg->data_rptr = CXL_RPTR_NULL;
+#ifdef CXL_CACHE_COHERENCE
+        cxl_flush_range((void *)msg->inline_data, data_size);
+#endif
         LOG_TRACE("CXL send: inlined %zu bytes to rank %d slot %lu\n", data_size, dest, slot);
     } else {
         // Allocate from shared memory and use remotable pointer
@@ -900,6 +955,9 @@ static int cxl_send(const void *buf, size_t data_size, int dest, int tag, int so
             return -1;
         }
         cxl_safe_memcpy(cxl_buf, buf, data_size);
+#ifdef CXL_CACHE_COHERENCE
+        cxl_flush_range(cxl_buf, data_size);
+#endif
         msg->data_rptr = ptr_to_rptr(cxl_buf);
         msg->is_inline = 0;
         LOG_TRACE("CXL send: %zu bytes via rptr=0x%lx to rank %d slot %lu\n",
@@ -969,10 +1027,16 @@ static int cxl_recv(void *buf, size_t max_size, int source, int tag, size_t *act
         // Copy data (use safe copy for CXL memory)
         size_t copy_size = MIN(msg->data_size, max_size);
         if (msg->is_inline) {
+#ifdef CXL_CACHE_COHERENCE
+            cxl_invalidate_range((void *)msg->inline_data, copy_size);
+#endif
             cxl_safe_memcpy(buf, msg->inline_data, copy_size);
         } else {
             void *src_ptr = rptr_to_ptr(msg->data_rptr);
             if (src_ptr) {
+#ifdef CXL_CACHE_COHERENCE
+                cxl_invalidate_range(src_ptr, copy_size);
+#endif
                 cxl_safe_memcpy(buf, src_ptr, copy_size);
             } else {
                 LOG_ERROR("CXL recv: invalid rptr 0x%lx\n", msg->data_rptr);
@@ -1659,6 +1723,9 @@ int MPI_Put(const void *origin_addr, int origin_count, MPI_Datatype origin_datat
                 // Direct memory copy via CXL (use safe copy to avoid AVX-512 issues)
                 cxl_safe_memcpy(target_addr, origin_addr, origin_bytes);
 
+#ifdef CXL_CACHE_COHERENCE
+                cxl_flush_range(target_addr, origin_bytes);
+#endif
                 // Memory fence to ensure visibility
                 __atomic_thread_fence(__ATOMIC_RELEASE);
 
@@ -1705,6 +1772,9 @@ int MPI_Get(void *origin_addr, int origin_count, MPI_Datatype origin_datatype,
                 size_t origin_bytes = (size_t)origin_count * origin_size;
                 void *target_addr = (char *)target_base + target_disp * cxl_win->shm->disp_unit;
 
+#ifdef CXL_CACHE_COHERENCE
+                cxl_invalidate_range(target_addr, origin_bytes);
+#endif
                 // Memory fence before reading
                 __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
@@ -1946,6 +2016,9 @@ int MPI_Bcast(void *buffer, int count, MPI_Datatype datatype, int root, MPI_Comm
                 LOG_WARN("MPI_Bcast[%d]: Root buffer unavailable, fallback\n", call_num);
                 goto bcast_fallback;
             }
+#ifdef CXL_CACHE_COHERENCE
+            cxl_invalidate_range(bcast_buf, total_size);
+#endif
             cxl_safe_memcpy(buffer, bcast_buf, total_size);
         }
 
@@ -2016,6 +2089,9 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype da
                 if (r != g_cxl.my_rank) {
                     void *their_buf = cxl_collective_get_buffer(r);
                     if (their_buf) {
+#ifdef CXL_CACHE_COHERENCE
+                        cxl_invalidate_range(their_buf, total_size);
+#endif
                         // Perform reduction based on datatype
                         if (datatype == MPI_DOUBLE) {
                             double *dst = (double *)recvbuf;
@@ -2111,6 +2187,9 @@ int MPI_Allgather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
                              call_num, r);
                     goto allgather_fallback;
                 }
+#ifdef CXL_CACHE_COHERENCE
+                cxl_invalidate_range(their_buf, send_bytes);
+#endif
                 void *dst = (char *)recvbuf + r * send_bytes;
                 cxl_safe_memcpy(dst, their_buf, send_bytes);
             }
@@ -2175,6 +2254,9 @@ int MPI_Alltoall(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
                 }
                 // Element [r][my_rank] = data rank r sends to me
                 void *src = (char *)their_row + g_cxl.my_rank * send_bytes;
+#ifdef CXL_CACHE_COHERENCE
+                cxl_invalidate_range(src, recv_bytes);
+#endif
                 void *dst = (char *)recvbuf + r * recv_bytes;
                 cxl_safe_memcpy(dst, src, recv_bytes);
             }
@@ -2235,6 +2317,9 @@ int MPI_Gather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
                                      call_num, r);
                             goto gather_fallback;
                         }
+#ifdef CXL_CACHE_COHERENCE
+                        cxl_invalidate_range(their_buf, send_bytes);
+#endif
                         void *dst = (char *)recvbuf + r * send_bytes;
                         cxl_safe_memcpy(dst, their_buf, send_bytes);
                     }
@@ -2298,6 +2383,9 @@ int MPI_Scatter(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
             }
 
             void *my_slot = (char *)scatter_buf + g_cxl.my_rank * send_bytes;
+#ifdef CXL_CACHE_COHERENCE
+            cxl_invalidate_range(my_slot, send_bytes);
+#endif
             cxl_safe_memcpy(recvbuf, my_slot, send_bytes);
 
             // Final barrier before returning
