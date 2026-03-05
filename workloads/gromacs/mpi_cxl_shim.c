@@ -60,6 +60,26 @@ static inline void cxl_safe_memcpy(void *dst, const void *src, size_t n) {
     }
 }
 
+// Safe memset for CXL memory - avoids AVX-512/SIMD instructions that cause SIGILL on CXL
+// Standard libc memset uses SIMD instructions that crash on CXL Type-3 device memory
+static inline void cxl_safe_memset(void *dst, int c, size_t n) {
+    volatile unsigned char *d = (volatile unsigned char *)dst;
+    uint64_t fill8 = (unsigned char)c;
+    fill8 |= fill8 << 8;
+    fill8 |= fill8 << 16;
+    fill8 |= fill8 << 32;
+
+    while (n >= 8) {
+        *(volatile uint64_t *)d = fill8;
+        d += 8;
+        n -= 8;
+    }
+    while (n > 0) {
+        *d++ = (unsigned char)c;
+        n--;
+    }
+}
+
 // Add color output for better visibility
 #define RED     "\x1b[31m"
 #define GREEN   "\x1b[32m"
@@ -117,12 +137,14 @@ typedef struct __attribute__((aligned(CACHELINE_SIZE))) {
     _Atomic uint64_t alloc_offset;   // Next allocation offset (8)
     uint64_t total_size;             // Total shared memory size (8)
     uint8_t initialized;             // Initialization flag (1)
-    uint8_t reserved[7];             // Padding to 8-byte boundary (7)
+    uint8_t reserved[3];             // Padding (3)
+    _Atomic uint32_t init_state;     // Inter-process init: 0=uninit, 1=in-progress, 2=done
+    _Atomic uint32_t coll_generation; // Generation counter to detect stale coll_max_ranks
     // Collective operation synchronization
     _Atomic uint32_t coll_barrier_count;  // Barrier counter (4)
     _Atomic uint32_t coll_barrier_sense;  // Barrier sense flag (4)
     _Atomic uint32_t coll_phase;          // Current collective phase (4)
-    uint32_t coll_max_ranks;              // Max ranks for collectives (4)
+    _Atomic uint32_t coll_max_ranks;      // Max ranks for collectives (4)
     cxl_rptr_t coll_data_rptr[CXL_MAX_RANKS];  // Per-rank data pointers for collectives
     // Total: 40 + 16 + 64*8 = 568 bytes
 } cxl_shm_header_t;
@@ -436,7 +458,8 @@ static void init_cxl_memory(void) {
         // Use first cacheline as allocation counter
         if (getenv("CXL_DAX_RESET")) {
             // Only reset if explicitly requested
-            memset(g_cxl.base, 0, CACHELINE_SIZE);
+            // Use safe memset to avoid SIMD instructions that SIGILL on CXL memory
+            cxl_safe_memset(g_cxl.base, 0, CACHELINE_SIZE);
             LOG_INFO("Reset DAX allocation counter\n");
         }
 
@@ -537,18 +560,36 @@ use_shm:
     }
     g_cxl.max_ranks = max_usable_ranks;
 
-    // Check if we need to initialize (first process or reset requested)
-    bool need_init = (g_cxl.header->magic != CXL_SHM_MAGIC) || getenv("CXL_DAX_RESET");
+    // Inter-process init synchronization using atomic CAS on init_state.
+    // Fresh DAX memory is zero-filled, so init_state starts as 0 (uninit).
+    // This prevents multiple processes from racing into the init block,
+    // which caused SIGILL when remote nodes called memset on CXL memory.
+    bool need_init = getenv("CXL_DAX_RESET") != NULL;
+    if (!need_init && g_cxl.header->magic != CXL_SHM_MAGIC) {
+        // Try to claim initialization via CAS: 0 (uninit) -> 1 (in-progress)
+        uint32_t expected = 0;
+        if (atomic_compare_exchange_strong(&g_cxl.header->init_state, &expected, 1)) {
+            need_init = true;  // We won the race, do the init
+        } else {
+            // Another process is initializing (state=1) or finished (state=2)
+            // Spin until init is complete
+            LOG_INFO("Waiting for another process to complete CXL init...\n");
+            while (atomic_load(&g_cxl.header->init_state) != 2) {
+                __asm__ volatile("pause" ::: "memory");
+            }
+            __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        }
+    }
 
     if (need_init) {
         LOG_INFO("Initializing CXL shared memory structures...\n");
 
         // Initialize header
-        g_cxl.header->magic = CXL_SHM_MAGIC;
         g_cxl.header->version = CXL_SHM_VERSION;
         atomic_store(&g_cxl.header->num_ranks, 0);
         g_cxl.header->total_size = cxl_size;
         g_cxl.header->initialized = 1;
+        atomic_store(&g_cxl.header->coll_generation, 0);
 
         // Set allocation offset after header and mailboxes
         size_t header_size = required_size;
@@ -556,13 +597,14 @@ use_shm:
         atomic_store(&g_cxl.header->alloc_offset, header_size);
 
         // Initialize only the mailboxes that fit within the mapped region
+        // Use cxl_safe_memset instead of memset to avoid SIMD SIGILL on CXL memory
         for (int i = 0; i < max_usable_ranks; i++) {
             atomic_store(&g_cxl.mailboxes[i].head, 0);
             atomic_store(&g_cxl.mailboxes[i].tail, 0);
             atomic_store(&g_cxl.mailboxes[i].active, 0);
             g_cxl.mailboxes[i].rank = i;
             g_cxl.mailboxes[i].pid = 0;
-            memset(g_cxl.mailboxes[i].hostname, 0, sizeof(g_cxl.mailboxes[i].hostname));
+            cxl_safe_memset(g_cxl.mailboxes[i].hostname, 0, sizeof(g_cxl.mailboxes[i].hostname));
 
             // Initialize message slots
             for (int j = 0; j < CXL_MSG_QUEUE_SIZE; j++) {
@@ -574,10 +616,18 @@ use_shm:
         atomic_store(&g_cxl.header->coll_barrier_count, 0);
         atomic_store(&g_cxl.header->coll_barrier_sense, 0);
         atomic_store(&g_cxl.header->coll_phase, 0);
-        g_cxl.header->coll_max_ranks = max_usable_ranks;
+        atomic_store(&g_cxl.header->coll_max_ranks, (uint32_t)max_usable_ranks);
         for (int i = 0; i < CXL_MAX_RANKS; i++) {
             g_cxl.header->coll_data_rptr[i] = CXL_RPTR_NULL;
         }
+
+        // Set magic BEFORE marking init as done, so other processes
+        // that arrive after init_state=2 also see valid magic
+        g_cxl.header->magic = CXL_SHM_MAGIC;
+        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+
+        // Signal other processes that initialization is complete
+        atomic_store(&g_cxl.header->init_state, 2);
 
         LOG_INFO("CXL shared memory structures initialized (header_size=%zu bytes, max_ranks=%d)\n",
                  header_size, max_usable_ranks);
@@ -610,7 +660,7 @@ static void cxl_register_rank(int rank, int world_size) {
     if (rank == 0) {
         LOG_INFO("Rank 0 resetting collective synchronization state for new run\n");
         // First, mark as not ready by setting coll_max_ranks to 0
-        g_cxl.header->coll_max_ranks = 0;
+        atomic_store(&g_cxl.header->coll_max_ranks, 0);
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
         // Reset all collective fields
@@ -624,18 +674,42 @@ static void cxl_register_rank(int rank, int world_size) {
         atomic_store(&g_cxl.header->num_ranks, 0);
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
+        // Bump generation so non-rank-0 processes can distinguish this run's
+        // coll_max_ranks from a stale value left by a previous run
+        atomic_fetch_add(&g_cxl.header->coll_generation, 1);
+        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+
         // Now mark as ready by setting coll_max_ranks to world_size
-        g_cxl.header->coll_max_ranks = world_size;
+        atomic_store(&g_cxl.header->coll_max_ranks, (uint32_t)world_size);
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
     } else {
-        // Non-rank-0 processes wait for rank 0 to complete reset
-        // by waiting for coll_max_ranks to be set to world_size
+        // Non-rank-0 processes wait for rank 0 to complete reset.
+        // Use generation counter to detect stale coll_max_ranks from previous runs.
         int wait_count = 0;
-        while (g_cxl.header->coll_max_ranks != (uint32_t)world_size) {
+        uint32_t cur;
+
+        // If coll_max_ranks already matches world_size, it may be stale from a
+        // previous run. Wait for the generation counter to bump (rank 0's reset).
+        uint32_t start_gen = atomic_load(&g_cxl.header->coll_generation);
+        cur = atomic_load(&g_cxl.header->coll_max_ranks);
+        if (cur == (uint32_t)world_size) {
+            while (atomic_load(&g_cxl.header->coll_generation) == start_gen) {
+                __asm__ volatile("pause" ::: "memory");
+                if (++wait_count > 10000000) {
+                    LOG_WARN("Rank %d waiting for rank 0 generation bump (gen=%u)\n",
+                             rank, start_gen);
+                    wait_count = 0;
+                }
+            }
+        }
+
+        // Now wait for coll_max_ranks == world_size (reset complete)
+        wait_count = 0;
+        while (atomic_load(&g_cxl.header->coll_max_ranks) != (uint32_t)world_size) {
             __asm__ volatile("pause" ::: "memory");
             if (++wait_count > 10000000) {
                 LOG_WARN("Rank %d waiting for rank 0 to reset collective state (coll_max_ranks=%u, expected=%d)\n",
-                         rank, g_cxl.header->coll_max_ranks, world_size);
+                         rank, atomic_load(&g_cxl.header->coll_max_ranks), world_size);
                 wait_count = 0;
             }
         }
