@@ -268,6 +268,55 @@ static _Atomic uint32_t g_next_win_id = 0;
 static cxl_collective_t *g_collective = NULL;
 static pthread_mutex_t g_collective_lock = PTHREAD_MUTEX_INITIALIZER;
 
+// ============================================================================
+// Global Statistics Counters
+// ============================================================================
+static struct {
+    // Point-to-point
+    _Atomic uint64_t send_total;
+    _Atomic uint64_t send_cxl;
+    _Atomic uint64_t send_bytes;
+    _Atomic uint64_t send_cxl_bytes;
+    _Atomic uint64_t recv_total;
+    _Atomic uint64_t recv_cxl;
+    _Atomic uint64_t recv_bytes;
+    _Atomic uint64_t recv_cxl_bytes;
+    _Atomic uint64_t isend_total;
+    _Atomic uint64_t isend_cxl;
+    _Atomic uint64_t irecv_total;
+    _Atomic uint64_t irecv_cxl;
+    _Atomic uint64_t sendrecv_total;
+    // Collectives
+    _Atomic uint64_t barrier_total;
+    _Atomic uint64_t bcast_total;
+    _Atomic uint64_t bcast_cxl;
+    _Atomic uint64_t bcast_bytes;
+    _Atomic uint64_t reduce_total;
+    _Atomic uint64_t allreduce_total;
+    _Atomic uint64_t allreduce_cxl;
+    _Atomic uint64_t allreduce_bytes;
+    _Atomic uint64_t allgather_total;
+    _Atomic uint64_t allgather_cxl;
+    _Atomic uint64_t alltoall_total;
+    _Atomic uint64_t alltoall_cxl;
+    _Atomic uint64_t gather_total;
+    _Atomic uint64_t gather_cxl;
+    _Atomic uint64_t scatter_total;
+    _Atomic uint64_t scatter_cxl;
+    // RMA
+    _Atomic uint64_t put_total;
+    _Atomic uint64_t put_cxl;
+    _Atomic uint64_t put_bytes;
+    _Atomic uint64_t get_total;
+    _Atomic uint64_t get_cxl;
+    _Atomic uint64_t get_bytes;
+    _Atomic uint64_t accumulate_total;
+    _Atomic uint64_t fence_total;
+    // Memory
+    _Atomic uint64_t cxl_alloc_count;
+    _Atomic uint64_t cxl_alloc_bytes;
+} g_stats = {0};
+
 // Function pointers - using typeof for better type safety
 static typeof(MPI_Init) *orig_MPI_Init = NULL;
 static typeof(MPI_Finalize) *orig_MPI_Finalize = NULL;
@@ -763,6 +812,8 @@ static void *allocate_cxl_memory(size_t size) {
 
         void *ptr = (char *)g_cxl.base + old_offset;
         g_cxl.used = new_offset;  // Update local view
+        atomic_fetch_add(&g_stats.cxl_alloc_count, 1);
+        atomic_fetch_add(&g_stats.cxl_alloc_bytes, size);
 
         LOG_TRACE("Allocated %zu bytes at offset %lu (rptr=0x%lx, total used: %lu/%zu)\n",
                   size, old_offset, ptr_to_rptr(ptr), new_offset, g_cxl.size);
@@ -1257,6 +1308,106 @@ int MPI_Finalize(void) {
         g_cxl.my_rank = -1;
     }
 
+    // Print statistics summary
+    {
+        uint64_t s_tot = atomic_load(&g_stats.send_total);
+        uint64_t s_cxl = atomic_load(&g_stats.send_cxl);
+        uint64_t r_tot = atomic_load(&g_stats.recv_total);
+        uint64_t r_cxl = atomic_load(&g_stats.recv_cxl);
+        uint64_t p2p_tot = s_tot + r_tot +
+                           atomic_load(&g_stats.isend_total) +
+                           atomic_load(&g_stats.irecv_total) +
+                           atomic_load(&g_stats.sendrecv_total);
+        uint64_t p2p_cxl = s_cxl + r_cxl +
+                            atomic_load(&g_stats.isend_cxl) +
+                            atomic_load(&g_stats.irecv_cxl);
+        uint64_t coll_tot = atomic_load(&g_stats.barrier_total) +
+                            atomic_load(&g_stats.bcast_total) +
+                            atomic_load(&g_stats.reduce_total) +
+                            atomic_load(&g_stats.allreduce_total) +
+                            atomic_load(&g_stats.allgather_total) +
+                            atomic_load(&g_stats.alltoall_total) +
+                            atomic_load(&g_stats.gather_total) +
+                            atomic_load(&g_stats.scatter_total);
+        uint64_t coll_cxl = atomic_load(&g_stats.bcast_cxl) +
+                            atomic_load(&g_stats.allreduce_cxl) +
+                            atomic_load(&g_stats.allgather_cxl) +
+                            atomic_load(&g_stats.alltoall_cxl) +
+                            atomic_load(&g_stats.gather_cxl) +
+                            atomic_load(&g_stats.scatter_cxl);
+        uint64_t rma_tot = atomic_load(&g_stats.put_total) +
+                           atomic_load(&g_stats.get_total) +
+                           atomic_load(&g_stats.accumulate_total);
+        uint64_t rma_cxl = atomic_load(&g_stats.put_cxl) +
+                           atomic_load(&g_stats.get_cxl);
+
+        fprintf(stderr,
+            "\n" CYAN "╔══════════════════════════════════════════════════════════╗\n"
+            "║          CXL MPI Shim v" SHIM_VERSION " — Statistics Summary          ║\n"
+            "╠══════════════════════════════════════════════════════════╣" RESET "\n");
+        fprintf(stderr,
+            GREEN "  Point-to-Point:  %lu total, %lu via CXL (%.1f%%)\n" RESET,
+            p2p_tot, p2p_cxl, p2p_tot ? 100.0 * p2p_cxl / p2p_tot : 0.0);
+        fprintf(stderr,
+            "    Send:     %6lu (CXL: %lu, %lu bytes)\n"
+            "    Recv:     %6lu (CXL: %lu, %lu bytes)\n"
+            "    Isend:    %6lu (CXL: %lu)\n"
+            "    Irecv:    %6lu (CXL: %lu)\n"
+            "    Sendrecv: %6lu\n",
+            s_tot, s_cxl, atomic_load(&g_stats.send_cxl_bytes),
+            r_tot, r_cxl, atomic_load(&g_stats.recv_cxl_bytes),
+            atomic_load(&g_stats.isend_total), atomic_load(&g_stats.isend_cxl),
+            atomic_load(&g_stats.irecv_total), atomic_load(&g_stats.irecv_cxl),
+            atomic_load(&g_stats.sendrecv_total));
+        fprintf(stderr,
+            GREEN "  Collectives:     %lu total, %lu via CXL (%.1f%%)\n" RESET,
+            coll_tot, coll_cxl, coll_tot ? 100.0 * coll_cxl / coll_tot : 0.0);
+        fprintf(stderr,
+            "    Barrier:    %6lu\n"
+            "    Bcast:      %6lu (CXL: %lu, %lu bytes)\n"
+            "    Reduce:     %6lu\n"
+            "    Allreduce:  %6lu (CXL: %lu, %lu bytes)\n"
+            "    Allgather:  %6lu (CXL: %lu)\n"
+            "    Alltoall:   %6lu (CXL: %lu)\n"
+            "    Gather:     %6lu (CXL: %lu)\n"
+            "    Scatter:    %6lu (CXL: %lu)\n",
+            atomic_load(&g_stats.barrier_total),
+            atomic_load(&g_stats.bcast_total), atomic_load(&g_stats.bcast_cxl),
+                atomic_load(&g_stats.bcast_bytes),
+            atomic_load(&g_stats.reduce_total),
+            atomic_load(&g_stats.allreduce_total), atomic_load(&g_stats.allreduce_cxl),
+                atomic_load(&g_stats.allreduce_bytes),
+            atomic_load(&g_stats.allgather_total), atomic_load(&g_stats.allgather_cxl),
+            atomic_load(&g_stats.alltoall_total), atomic_load(&g_stats.alltoall_cxl),
+            atomic_load(&g_stats.gather_total), atomic_load(&g_stats.gather_cxl),
+            atomic_load(&g_stats.scatter_total), atomic_load(&g_stats.scatter_cxl));
+        fprintf(stderr,
+            GREEN "  RMA (One-Sided): %lu total, %lu via CXL (%.1f%%)\n" RESET,
+            rma_tot, rma_cxl, rma_tot ? 100.0 * rma_cxl / rma_tot : 0.0);
+        fprintf(stderr,
+            "    Put:        %6lu (CXL: %lu, %lu bytes)\n"
+            "    Get:        %6lu (CXL: %lu, %lu bytes)\n"
+            "    Accumulate: %6lu\n"
+            "    Win_fence:  %6lu\n",
+            atomic_load(&g_stats.put_total), atomic_load(&g_stats.put_cxl),
+                atomic_load(&g_stats.put_bytes),
+            atomic_load(&g_stats.get_total), atomic_load(&g_stats.get_cxl),
+                atomic_load(&g_stats.get_bytes),
+            atomic_load(&g_stats.accumulate_total),
+            atomic_load(&g_stats.fence_total));
+        fprintf(stderr,
+            GREEN "  CXL Memory:\n" RESET
+            "    Allocations: %lu (%lu bytes)\n"
+            "    Pool usage:  %zu / %zu bytes (%.1f%%)\n",
+            atomic_load(&g_stats.cxl_alloc_count),
+            atomic_load(&g_stats.cxl_alloc_bytes),
+            g_cxl.used, g_cxl.size,
+            g_cxl.size ? 100.0 * g_cxl.used / g_cxl.size : 0.0);
+        fprintf(stderr,
+            CYAN "╚══════════════════════════════════════════════════════════╝\n" RESET);
+        fflush(stderr);
+    }
+
     LOG_INFO("MPI_Finalize completed (total hooks: %d)\n", g_hook_count);
 
     return ret;
@@ -1274,6 +1425,9 @@ int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
     LOG_DEBUG("MPI_Send[%d]: count=%d, dest=%d, tag=%d, buf=%p, size=%zu\n",
               call_num, count, dest, tag, buf, total_size);
 
+    atomic_fetch_add(&g_stats.send_total, 1);
+    atomic_fetch_add(&g_stats.send_bytes, total_size);
+
     LOAD_ORIGINAL(MPI_Send);
 
     // Try CXL direct communication first if enabled and destination is available
@@ -1281,6 +1435,8 @@ int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
         int cxl_ret = cxl_send(buf, total_size, dest, tag, g_cxl.my_rank);
         if (cxl_ret == 0) {
             int cxl_num = atomic_fetch_add(&cxl_send_count, 1);
+            atomic_fetch_add(&g_stats.send_cxl, 1);
+            atomic_fetch_add(&g_stats.send_cxl_bytes, total_size);
             LOG_DEBUG("MPI_Send[%d]: CXL direct send #%d successful (%zu bytes to rank %d)\n",
                       call_num, cxl_num, total_size, dest);
             return MPI_SUCCESS;
@@ -1318,6 +1474,9 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
     LOG_DEBUG("MPI_Recv[%d]: count=%d, source=%d, tag=%d, buf=%p, max_size=%zu\n",
               call_num, count, source, tag, buf, max_size);
 
+    atomic_fetch_add(&g_stats.recv_total, 1);
+    atomic_fetch_add(&g_stats.recv_bytes, max_size);
+
     LOAD_ORIGINAL(MPI_Recv);
 
     // Try CXL direct communication first if enabled
@@ -1331,6 +1490,8 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
         int cxl_ret = cxl_recv(buf, max_size, source, tag, &actual_size);
         if (cxl_ret == 0) {
             int cxl_num = atomic_fetch_add(&cxl_recv_count, 1);
+            atomic_fetch_add(&g_stats.recv_cxl, 1);
+            atomic_fetch_add(&g_stats.recv_cxl_bytes, actual_size);
             LOG_DEBUG("MPI_Recv[%d]: CXL direct recv #%d successful (%zu bytes from source %d)\n",
                       call_num, cxl_num, actual_size, source);
 
@@ -1385,6 +1546,8 @@ int MPI_Isend(const void *buf, int count, MPI_Datatype datatype, int dest, int t
     LOG_DEBUG("MPI_Isend[%d]: count=%d, dest=%d, tag=%d, buf=%p, size=%zu\n",
               call_num, count, dest, tag, buf, total_size);
 
+    atomic_fetch_add(&g_stats.isend_total, 1);
+
     LOAD_ORIGINAL(MPI_Isend);
 
     // Try CXL direct communication for non-blocking send
@@ -1393,6 +1556,7 @@ int MPI_Isend(const void *buf, int count, MPI_Datatype datatype, int dest, int t
         int cxl_ret = cxl_send(buf, total_size, dest, tag, g_cxl.my_rank);
         if (cxl_ret == 0) {
             int cxl_num = atomic_fetch_add(&cxl_isend_count, 1);
+            atomic_fetch_add(&g_stats.isend_cxl, 1);
             LOG_DEBUG("MPI_Isend[%d]: CXL direct send #%d successful (%zu bytes to rank %d)\n",
                       call_num, cxl_num, total_size, dest);
 
@@ -1434,6 +1598,8 @@ int MPI_Irecv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
     LOG_DEBUG("MPI_Irecv[%d]: count=%d, source=%d, tag=%d, buf=%p, max_size=%zu\n",
               call_num, count, source, tag, buf, max_size);
 
+    atomic_fetch_add(&g_stats.irecv_total, 1);
+
     LOAD_ORIGINAL(MPI_Irecv);
 
     // Try CXL direct receive - check if a message is already available
@@ -1442,6 +1608,7 @@ int MPI_Irecv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
         int cxl_ret = cxl_recv(buf, max_size, source, tag, &actual_size);
         if (cxl_ret == 0) {
             int cxl_num = atomic_fetch_add(&cxl_irecv_count, 1);
+            atomic_fetch_add(&g_stats.irecv_cxl, 1);
             LOG_DEBUG("MPI_Irecv[%d]: CXL direct recv #%d already available (%zu bytes)\n",
                       call_num, cxl_num, actual_size);
 
@@ -1464,6 +1631,7 @@ int MPI_Sendrecv(const void *sendbuf, int sendcount, MPI_Datatype sendtype, int 
     int call_num = atomic_fetch_add(&sendrecv_count, 1);
 
     LOG_DEBUG("MPI_Sendrecv[%d]: dest=%d, source=%d\n", call_num, dest, source);
+    atomic_fetch_add(&g_stats.sendrecv_total, 1);
 
     // For sendrecv, try CXL for both operations
     int send_size, recv_size;
@@ -1776,6 +1944,8 @@ int MPI_Put(const void *origin_addr, int origin_count, MPI_Datatype origin_datat
     LOG_DEBUG("MPI_Put[%d]: target_rank=%d, target_disp=%ld\n",
               call_num, target_rank, (long)target_disp);
 
+    atomic_fetch_add(&g_stats.put_total, 1);
+
     LOAD_ORIGINAL(MPI_Put);
 
     cxl_window_t *cxl_win = find_cxl_window(win);
@@ -1804,6 +1974,8 @@ int MPI_Put(const void *origin_addr, int origin_count, MPI_Datatype origin_datat
                 __atomic_thread_fence(__ATOMIC_RELEASE);
 
                 int cxl_num = atomic_fetch_add(&cxl_put_count, 1);
+                atomic_fetch_add(&g_stats.put_cxl, 1);
+                atomic_fetch_add(&g_stats.put_bytes, origin_bytes);
                 LOG_DEBUG("MPI_Put[%d]: CXL direct put #%d (%zu bytes to rank %d @ offset %ld)\n",
                           call_num, cxl_num, origin_bytes, target_rank, (long)target_disp);
 
@@ -1827,6 +1999,8 @@ int MPI_Get(void *origin_addr, int origin_count, MPI_Datatype origin_datatype,
 
     LOG_DEBUG("MPI_Get[%d]: target_rank=%d, target_disp=%ld\n",
               call_num, target_rank, (long)target_disp);
+
+    atomic_fetch_add(&g_stats.get_total, 1);
 
     LOAD_ORIGINAL(MPI_Get);
 
@@ -1856,6 +2030,8 @@ int MPI_Get(void *origin_addr, int origin_count, MPI_Datatype origin_datatype,
                 cxl_safe_memcpy(origin_addr, target_addr, origin_bytes);
 
                 int cxl_num = atomic_fetch_add(&cxl_get_count, 1);
+                atomic_fetch_add(&g_stats.get_cxl, 1);
+                atomic_fetch_add(&g_stats.get_bytes, origin_bytes);
                 LOG_DEBUG("MPI_Get[%d]: CXL direct get #%d (%zu bytes from rank %d @ offset %ld)\n",
                           call_num, cxl_num, origin_bytes, target_rank, (long)target_disp);
 
@@ -1878,6 +2054,8 @@ int MPI_Accumulate(const void *origin_addr, int origin_count, MPI_Datatype origi
 
     LOG_DEBUG("MPI_Accumulate[%d]: target_rank=%d, target_disp=%ld\n",
               call_num, target_rank, (long)target_disp);
+
+    atomic_fetch_add(&g_stats.accumulate_total, 1);
 
     LOAD_ORIGINAL(MPI_Accumulate);
 
@@ -1932,6 +2110,7 @@ int MPI_Win_fence(int assert, MPI_Win win) {
     int call_num = atomic_fetch_add(&fence_count, 1);
 
     LOG_DEBUG("MPI_Win_fence[%d]: assert=%d\n", call_num, assert);
+    atomic_fetch_add(&g_stats.fence_total, 1);
 
     LOAD_ORIGINAL(MPI_Win_fence);
 
@@ -2040,6 +2219,7 @@ int MPI_Barrier(MPI_Comm comm) {
     int call_num = atomic_fetch_add(&barrier_count, 1);
 
     LOG_DEBUG("MPI_Barrier[%d]\n", call_num);
+    atomic_fetch_add(&g_stats.barrier_total, 1);
 
     LOAD_ORIGINAL(MPI_Barrier);
 
@@ -2058,12 +2238,15 @@ int MPI_Bcast(void *buffer, int count, MPI_Datatype datatype, int root, MPI_Comm
     size_t total_size = (size_t)count * type_size;
 
     LOG_DEBUG("MPI_Bcast[%d]: count=%d, root=%d, size=%zu\n", call_num, count, root, total_size);
+    atomic_fetch_add(&g_stats.bcast_total, 1);
+    atomic_fetch_add(&g_stats.bcast_bytes, total_size);
 
     LOAD_ORIGINAL(MPI_Bcast);
 
     // Try CXL broadcast for COMM_WORLD
     if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD && total_size <= 4096 &&
         g_cxl.world_size <= 64) {
+        atomic_fetch_add(&g_stats.bcast_cxl, 1);
 
         LOAD_ORIGINAL(MPI_Barrier);
 
@@ -2114,6 +2297,7 @@ int MPI_Reduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datat
     int call_num = atomic_fetch_add(&reduce_count, 1);
 
     LOG_DEBUG("MPI_Reduce[%d]: count=%d, root=%d\n", call_num, count, root);
+    atomic_fetch_add(&g_stats.reduce_total, 1);
 
     LOAD_ORIGINAL(MPI_Reduce);
     return orig_MPI_Reduce(sendbuf, recvbuf, count, datatype, op, root, comm);
@@ -2129,6 +2313,8 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype da
     size_t total_size = (size_t)count * type_size;
 
     LOG_DEBUG("MPI_Allreduce[%d]: count=%d, size=%zu\n", call_num, count, total_size);
+    atomic_fetch_add(&g_stats.allreduce_total, 1);
+    atomic_fetch_add(&g_stats.allreduce_bytes, total_size);
 
     LOAD_ORIGINAL(MPI_Allreduce);
 
@@ -2210,6 +2396,7 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype da
             // Final barrier before returning (ensure all ranks finished reading)
             orig_MPI_Barrier(comm);
 
+            atomic_fetch_add(&g_stats.allreduce_cxl, 1);
             LOG_DEBUG("MPI_Allreduce[%d]: CXL optimized SUM (%zu bytes)\n", call_num, total_size);
             return MPI_SUCCESS;
         }
@@ -2229,6 +2416,7 @@ int MPI_Allgather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
     size_t send_bytes = (size_t)sendcount * send_size;
 
     LOG_DEBUG("MPI_Allgather[%d]: sendcount=%d, recvcount=%d\n", call_num, sendcount, recvcount);
+    atomic_fetch_add(&g_stats.allgather_total, 1);
 
     LOAD_ORIGINAL(MPI_Allgather);
 
@@ -2271,6 +2459,7 @@ int MPI_Allgather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
             // Final barrier before returning
             orig_MPI_Barrier(comm);
 
+            atomic_fetch_add(&g_stats.allgather_cxl, 1);
             LOG_DEBUG("MPI_Allgather[%d]: CXL optimized (%zu bytes each)\n", call_num, send_bytes);
             return MPI_SUCCESS;
         }
@@ -2293,6 +2482,7 @@ int MPI_Alltoall(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
     size_t recv_bytes = (size_t)recvcount * recv_size;
 
     LOG_DEBUG("MPI_Alltoall[%d]: sendcount=%d, recvcount=%d\n", call_num, sendcount, recvcount);
+    atomic_fetch_add(&g_stats.alltoall_total, 1);
 
     LOAD_ORIGINAL(MPI_Alltoall);
 
@@ -2339,6 +2529,7 @@ int MPI_Alltoall(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
             orig_MPI_Barrier(comm);
 
             int cxl_num = atomic_fetch_add(&cxl_alltoall_count, 1);
+            atomic_fetch_add(&g_stats.alltoall_cxl, 1);
             LOG_DEBUG("MPI_Alltoall[%d]: CXL direct #%d (%zu bytes per rank)\n",
                       call_num, cxl_num, send_bytes);
             return MPI_SUCCESS;
@@ -2356,6 +2547,7 @@ int MPI_Gather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
     int call_num = atomic_fetch_add(&gather_count, 1);
 
     LOG_DEBUG("MPI_Gather[%d]: sendcount=%d, root=%d\n", call_num, sendcount, root);
+    atomic_fetch_add(&g_stats.gather_total, 1);
 
     LOAD_ORIGINAL(MPI_Gather);
 
@@ -2402,6 +2594,7 @@ int MPI_Gather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
                 // Final barrier before returning
                 orig_MPI_Barrier(comm);
 
+                atomic_fetch_add(&g_stats.gather_cxl, 1);
                 LOG_DEBUG("MPI_Gather[%d]: CXL optimized\n", call_num);
                 return MPI_SUCCESS;
             }
@@ -2419,6 +2612,7 @@ int MPI_Scatter(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
     int call_num = atomic_fetch_add(&scatter_count, 1);
 
     LOG_DEBUG("MPI_Scatter[%d]: sendcount=%d, root=%d\n", call_num, sendcount, root);
+    atomic_fetch_add(&g_stats.scatter_total, 1);
 
     LOAD_ORIGINAL(MPI_Scatter);
 
@@ -2465,6 +2659,7 @@ int MPI_Scatter(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
             // Final barrier before returning
             orig_MPI_Barrier(comm);
 
+            atomic_fetch_add(&g_stats.scatter_cxl, 1);
             LOG_DEBUG("MPI_Scatter[%d]: CXL optimized\n", call_num);
             return MPI_SUCCESS;
         }
