@@ -283,7 +283,7 @@ int main(int argc, char *argv[]) {
         ("node-id", "Node ID for distributed mode (0 = coordinator)", cxxopts::value<uint32_t>()->default_value("0"))
         ("dist-shm-name", "Shared memory name for distributed inter-node communication", cxxopts::value<std::string>()->default_value("/cxlmemsim_dist"))
         ("coordinator-shm", "Coordinator's shared memory name (for joining existing cluster)", cxxopts::value<std::string>()->default_value(""))
-        ("transport-mode", "Transport mode for distributed: shm, tcp, or hybrid", cxxopts::value<std::string>()->default_value("shm"))
+        ("transport-mode", "Transport mode for distributed: shm, tcp, rdma, or hybrid", cxxopts::value<std::string>()->default_value("shm"))
         ("tcp-addr", "TCP bind address for distributed TCP transport", cxxopts::value<std::string>()->default_value("0.0.0.0"))
         ("tcp-port", "TCP port for distributed TCP transport", cxxopts::value<uint16_t>()->default_value("5555"))
         ("tcp-peers", "Comma-separated list of TCP peer addresses (node_id:addr:port,...)", cxxopts::value<std::string>()->default_value(""));
@@ -321,10 +321,12 @@ int main(int argc, char *argv[]) {
     DistTransportMode transport_mode = DistTransportMode::SHM;
     if (transport_mode_str == "tcp") {
         transport_mode = DistTransportMode::TCP;
+    } else if (transport_mode_str == "rdma") {
+        transport_mode = DistTransportMode::RDMA;
     } else if (transport_mode_str == "hybrid") {
         transport_mode = DistTransportMode::HYBRID;
     } else if (transport_mode_str != "shm") {
-        SPDLOG_ERROR("Invalid transport mode: {}. Use 'shm', 'tcp', or 'hybrid'", transport_mode_str);
+        SPDLOG_ERROR("Invalid transport mode: {}. Use 'shm', 'tcp', 'rdma', or 'hybrid'", transport_mode_str);
         return 1;
     }
 
@@ -427,12 +429,16 @@ int main(int argc, char *argv[]) {
         SPDLOG_INFO("  Node ID: {}", node_id);
         SPDLOG_INFO("  Distributed SHM Name: {}", dist_shm_name);
         const char* transport_str = (transport_mode == DistTransportMode::TCP) ? "TCP" :
+                                    (transport_mode == DistTransportMode::RDMA) ? "RDMA" :
                                     (transport_mode == DistTransportMode::HYBRID) ? "Hybrid (SHM+TCP)" : "SHM";
         SPDLOG_INFO("  Transport Mode: {}", transport_str);
         if (transport_mode != DistTransportMode::SHM) {
-            SPDLOG_INFO("  TCP Address: {}:{}", tcp_addr, tcp_transport_port);
+            SPDLOG_INFO("  Bind Address: {}:{}", tcp_addr, tcp_transport_port);
+            if (transport_mode == DistTransportMode::RDMA) {
+                SPDLOG_INFO("  RDMA Port: {}", tcp_transport_port + 1000);
+            }
             if (!tcp_peers.empty()) {
-                SPDLOG_INFO("  TCP Peers: {} configured", tcp_peers.size());
+                SPDLOG_INFO("  Peers: {} configured", tcp_peers.size());
                 for (const auto& peer : tcp_peers) {
                     SPDLOG_INFO("    Node {}: {}:{}", peer.node_id, peer.addr, peer.port);
                 }
@@ -455,7 +461,11 @@ int main(int argc, char *argv[]) {
     if (comm_mode == CommMode::DISTRIBUTED) {
         SPDLOG_INFO("  - Distributed coherency protocol");
         SPDLOG_INFO("  - Inter-node message passing");
-        if (transport_mode != DistTransportMode::SHM) {
+        if (transport_mode == DistTransportMode::RDMA) {
+            SPDLOG_INFO("  - RDMA-based remote READ/WRITE");
+            SPDLOG_INFO("  - RDMA-calibrated LogP model");
+            SPDLOG_INFO("  - Distributed MH-SLD coherency via RDMA");
+        } else if (transport_mode != DistTransportMode::SHM) {
             SPDLOG_INFO("  - TCP-based remote READ/WRITE");
             SPDLOG_INFO("  - TCP-calibrated LogP model");
             SPDLOG_INFO("  - Distributed MH-SLD coherency via TCP");
@@ -488,23 +498,40 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            // Connect to TCP peers if transport mode is TCP or HYBRID
+            // Connect to peers based on transport mode
             if (transport_mode != DistTransportMode::SHM && !tcp_peers.empty()) {
-                SPDLOG_INFO("Connecting to {} TCP peer(s)...", tcp_peers.size());
-                for (const auto& peer : tcp_peers) {
-                    if (dist_server.connect_tcp_node(peer.node_id, peer.addr, peer.port)) {
-                        SPDLOG_INFO("Connected to TCP peer node {} at {}:{}",
-                                   peer.node_id, peer.addr, peer.port);
-                    } else {
-                        SPDLOG_WARN("Failed to connect to TCP peer node {} at {}:{}",
-                                   peer.node_id, peer.addr, peer.port);
+                if (transport_mode == DistTransportMode::RDMA) {
+                    SPDLOG_INFO("Connecting to {} RDMA peer(s)...", tcp_peers.size());
+                    for (const auto& peer : tcp_peers) {
+                        // RDMA port is TCP port + 1000 by convention
+                        if (dist_server.connect_rdma_node(peer.node_id, peer.addr, peer.port + 1000)) {
+                            SPDLOG_INFO("Connected to RDMA peer node {} at {}:{}",
+                                       peer.node_id, peer.addr, peer.port + 1000);
+                        } else {
+                            SPDLOG_WARN("Failed to connect to RDMA peer node {} at {}:{}",
+                                       peer.node_id, peer.addr, peer.port + 1000);
+                        }
                     }
-                }
 
-                // Run LogP calibration on all connected peers
-                SPDLOG_INFO("Running TCP LogP calibration...");
-                dist_server.calibrate_tcp_logp();
-                SPDLOG_INFO("TCP LogP calibration complete");
+                    SPDLOG_INFO("Running RDMA LogP calibration...");
+                    dist_server.calibrate_rdma_logp();
+                    SPDLOG_INFO("RDMA LogP calibration complete");
+                } else {
+                    SPDLOG_INFO("Connecting to {} TCP peer(s)...", tcp_peers.size());
+                    for (const auto& peer : tcp_peers) {
+                        if (dist_server.connect_tcp_node(peer.node_id, peer.addr, peer.port)) {
+                            SPDLOG_INFO("Connected to TCP peer node {} at {}:{}",
+                                       peer.node_id, peer.addr, peer.port);
+                        } else {
+                            SPDLOG_WARN("Failed to connect to TCP peer node {} at {}:{}",
+                                       peer.node_id, peer.addr, peer.port);
+                        }
+                    }
+
+                    SPDLOG_INFO("Running TCP LogP calibration...");
+                    dist_server.calibrate_tcp_logp();
+                    SPDLOG_INFO("TCP LogP calibration complete");
+                }
             }
 
             if (!dist_server.start()) {

@@ -44,11 +44,17 @@ set_target_properties(cxlmemsim_latency PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+find_library(RDMACM_LIB rdmacm)
+find_library(IBVERBS_LIB ibverbs)
+message(STATUS "RDMA support enabled: rdmacm=${RDMACM_LIB} ibverbs=${IBVERBS_LIB}")
+add_compile_definitions(HAS_RDMA)
+set(RDMA_LIBS ${RDMACM_LIB} ${IBVERBS_LIB})
+
 # Server library (shared between server executable and tests)
-set(SERVER_LIB_SOURCES src/shared_memory_manager.cc src/shm_communication.cpp src/distributed_server.cpp src/tcp_communication.cpp src/hdm_decoder.cpp src/coherency_engine.cpp)
+set(SERVER_LIB_SOURCES src/shared_memory_manager.cc src/shm_communication.cpp src/distributed_server.cpp src/tcp_communication.cpp src/rdma_communication.cpp src/hdm_decoder.cpp src/coherency_engine.cpp)
 add_library(cxlmemsim_server_lib STATIC ${SERVER_LIB_SOURCES})
 target_include_directories(cxlmemsim_server_lib PUBLIC include src ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
-target_link_libraries(cxlmemsim_server_lib cxlmemsim cxxopts::cxxopts spdlog::spdlog_header_only rt)
+target_link_libraries(cxlmemsim_server_lib cxlmemsim cxxopts::cxxopts spdlog::spdlog_header_only rt ${RDMA_LIBS})
 
 # Build server (uses server library + main)
 add_executable(cxlmemsim_server src/main_server.cc)
@@ -64,5 +70,5 @@ target_link_libraries(test_distributed_shm cxlmemsim_server_lib cxlmemsim cxxopt
 install(TARGETS cxlmemsim_server
         RUNTIME DESTINATION bin)
 
-install(FILES include/tcp_communication.h
+install(FILES include/tcp_communication.h include/rdma_communication.h
         DESTINATION include/cxlmemsim)

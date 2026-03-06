@@ -98,7 +98,8 @@ class TCPTransport {
 public:
     enum Mode {
         MODE_TCP,
-        MODE_SHM
+        MODE_SHM,
+        MODE_RDMA
     };
 
     static Mode get_transport_mode() {
@@ -106,6 +107,7 @@ public:
         if (mode) {
             if (std::string(mode) == "tcp") return MODE_TCP;
             if (std::string(mode) == "shm") return MODE_SHM;
+            if (std::string(mode) == "rdma") return MODE_RDMA;
         }
         return MODE_TCP;
     }
