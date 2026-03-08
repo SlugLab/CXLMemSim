@@ -351,6 +351,13 @@ static typeof(MPI_Alltoall) *orig_MPI_Alltoall = NULL;
 static typeof(MPI_Gather) *orig_MPI_Gather = NULL;
 static typeof(MPI_Scatter) *orig_MPI_Scatter = NULL;
 
+// Communicator management function pointers
+static typeof(MPI_Comm_dup) *orig_MPI_Comm_dup = NULL;
+static typeof(MPI_Comm_split) *orig_MPI_Comm_split = NULL;
+static typeof(MPI_Comm_create) *orig_MPI_Comm_create = NULL;
+static typeof(MPI_Comm_free) *orig_MPI_Comm_free = NULL;
+static typeof(MPI_Comm_size) *orig_MPI_Comm_size = NULL;
+
 // Debug output function
 static void shim_log(const char *level, const char *color, const char *format, ...) {
     if (!getenv("CXL_SHIM_QUIET")) {
@@ -2228,6 +2235,42 @@ int MPI_Win_flush(int rank, MPI_Win win) {
 // ============================================================================
 // MPI Collective Operations with CXL Shared Memory
 // ============================================================================
+
+// Communicator management hooks
+
+int MPI_Comm_dup(MPI_Comm comm, MPI_Comm *newcomm) {
+    LOG_TRACE("MPI_Comm_dup\n");
+    LOAD_ORIGINAL(MPI_Comm_dup);
+    return orig_MPI_Comm_dup(comm, newcomm);
+}
+
+int MPI_Comm_split(MPI_Comm comm, int color, int key, MPI_Comm *newcomm) {
+    LOG_TRACE("MPI_Comm_split(color=%d, key=%d)\n", color, key);
+    LOAD_ORIGINAL(MPI_Comm_split);
+    return orig_MPI_Comm_split(comm, color, key, newcomm);
+}
+
+int MPI_Comm_create(MPI_Comm comm, MPI_Group group, MPI_Comm *newcomm) {
+    LOG_TRACE("MPI_Comm_create\n");
+    LOAD_ORIGINAL(MPI_Comm_create);
+    return orig_MPI_Comm_create(comm, group, newcomm);
+}
+
+int MPI_Comm_free(MPI_Comm *comm) {
+    LOG_TRACE("MPI_Comm_free\n");
+    LOAD_ORIGINAL(MPI_Comm_free);
+    return orig_MPI_Comm_free(comm);
+}
+
+int MPI_Comm_size(MPI_Comm comm, int *size) {
+    LOAD_ORIGINAL(MPI_Comm_size);
+    return orig_MPI_Comm_size(comm, size);
+}
+
+int MPI_Comm_rank(MPI_Comm comm, int *rank) {
+    LOAD_ORIGINAL(MPI_Comm_rank);
+    return orig_MPI_Comm_rank(comm, rank);
+}
 
 int MPI_Barrier(MPI_Comm comm) {
     static _Atomic int barrier_count = 0;
