@@ -739,16 +739,31 @@ static void cxl_register_rank(int rank, int world_size) {
 
         // If coll_max_ranks already matches world_size, it may be stale from a
         // previous run. Wait for the generation counter to bump (rank 0's reset).
+        // However, if num_ranks > 0, rank 0 has already completed reset AND
+        // registered itself for this run - we arrived late, not stale.
         uint32_t start_gen = atomic_load(&g_cxl.header->coll_generation);
         cur = atomic_load(&g_cxl.header->coll_max_ranks);
         if (cur == (uint32_t)world_size) {
-            while (atomic_load(&g_cxl.header->coll_generation) == start_gen) {
-                __asm__ volatile("pause" ::: "memory");
-                if (++wait_count > 10000000) {
-                    LOG_WARN("Rank %d waiting for rank 0 generation bump (gen=%u)\n",
-                             rank, start_gen);
-                    wait_count = 0;
+            uint32_t nr = atomic_load(&g_cxl.header->num_ranks);
+            if (nr == 0) {
+                // num_ranks is 0 but coll_max_ranks == world_size: truly stale
+                // from a previous run. Wait for rank 0's generation bump.
+                while (atomic_load(&g_cxl.header->coll_generation) == start_gen) {
+                    __asm__ volatile("pause" ::: "memory");
+                    if (++wait_count > 10000000) {
+                        // Re-check num_ranks in case rank 0 completed while we spun
+                        if (atomic_load(&g_cxl.header->num_ranks) > 0) {
+                            LOG_INFO("Rank %d: rank 0 already registered, proceeding\n", rank);
+                            break;
+                        }
+                        LOG_WARN("Rank %d waiting for rank 0 generation bump (gen=%u)\n",
+                                 rank, start_gen);
+                        wait_count = 0;
+                    }
                 }
+            } else {
+                LOG_INFO("Rank %d: rank 0 already registered (%u ranks active), skipping stale check\n",
+                         rank, nr);
             }
         }
 
