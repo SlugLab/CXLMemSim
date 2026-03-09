@@ -363,14 +363,14 @@ static void shim_log(const char *level, const char *color, const char *format, .
     if (!getenv("CXL_SHIM_QUIET")) {
         char hostname[256];
         gethostname(hostname, sizeof(hostname));
-
+        
         fprintf(stderr, "%s[CXL_SHIM:%s:%d:%s] ", color, hostname, getpid(), level);
-
+        
         va_list args;
         va_start(args, format);
         vfprintf(stderr, format, args);
         va_end(args);
-
+        
         fprintf(stderr, "%s", RESET);
         fflush(stderr);
     }
@@ -414,13 +414,13 @@ static inline bool is_cxl_ptr(const void *ptr) {
 static void signal_handler(int sig) {
     void *array[20];
     size_t size;
-
+    
     LOG_ERROR("Caught signal %d\n", sig);
-
+    
     size = backtrace(array, 20);
     fprintf(stderr, "Backtrace:\n");
     backtrace_symbols_fd(array, size, STDERR_FILENO);
-
+    
     exit(1);
 }
 
@@ -673,9 +673,9 @@ use_shm:
         atomic_store(&g_cxl.header->coll_barrier_sense, 0);
         atomic_store(&g_cxl.header->coll_phase, 0);
         atomic_store(&g_cxl.header->coll_max_ranks, (uint32_t)max_usable_ranks);
-        for (int i = 0; i < CXL_MAX_RANKS; i++) {
-            g_cxl.header->coll_data_rptr[i] = CXL_RPTR_NULL;
-        }
+        // Use cxl_safe_memset to avoid SIMD SIGILL on CXL device memory
+        cxl_safe_memset(g_cxl.header->coll_data_rptr, 0xFF,
+                        CXL_MAX_RANKS * sizeof(cxl_rptr_t));
 
         // Set magic BEFORE marking init as done, so other processes
         // that arrive after init_state=2 also see valid magic
@@ -724,9 +724,9 @@ static void cxl_register_rank(int rank, int world_size) {
         atomic_store(&g_cxl.header->coll_barrier_count, 0);
         atomic_store(&g_cxl.header->coll_barrier_sense, 0);
         atomic_store(&g_cxl.header->coll_phase, 0);
-        for (int i = 0; i < CXL_MAX_RANKS; i++) {
-            g_cxl.header->coll_data_rptr[i] = CXL_RPTR_NULL;
-        }
+        // Use cxl_safe_memset to avoid SIMD SIGILL on CXL device memory
+        cxl_safe_memset(g_cxl.header->coll_data_rptr, 0xFF,
+                        CXL_MAX_RANKS * sizeof(cxl_rptr_t));
         // Reset num_ranks counter for new run
         atomic_store(&g_cxl.header->num_ranks, 0);
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
@@ -1030,16 +1030,17 @@ static void *cxl_collective_get_buffer(int rank) {
 // Clear collective buffer registrations
 static void cxl_collective_clear_buffers(int num_ranks) {
     if (!g_cxl.header) return;
-    for (int i = 0; i < num_ranks && i < CXL_MAX_RANKS; i++) {
-        g_cxl.header->coll_data_rptr[i] = CXL_RPTR_NULL;
-    }
+    int count = num_ranks < CXL_MAX_RANKS ? num_ranks : CXL_MAX_RANKS;
+    // Use cxl_safe_memset to avoid SIMD SIGILL on CXL device memory
+    cxl_safe_memset(g_cxl.header->coll_data_rptr, 0xFF,
+                    count * sizeof(cxl_rptr_t));
     __atomic_thread_fence(__ATOMIC_RELEASE);
 }
 
 // Mapping management
 static void register_mapping(void *cxl_addr, void *orig_addr, size_t size) {
     pthread_mutex_lock(&g_mappings_lock);
-
+    
     mem_mapping_t *mapping = malloc(sizeof(mem_mapping_t));
     mapping->cxl_addr = cxl_addr;
     mapping->orig_addr = orig_addr;
@@ -1047,15 +1048,15 @@ static void register_mapping(void *cxl_addr, void *orig_addr, size_t size) {
     mapping->ref_count = 1;
     mapping->next = g_mappings;
     g_mappings = mapping;
-
+    
     LOG_TRACE("Registered mapping: orig=%p -> cxl=%p (size=%zu)\n", orig_addr, cxl_addr, size);
-
+    
     pthread_mutex_unlock(&g_mappings_lock);
 }
 
 static void *find_cxl_mapping(const void *orig_addr) {
     pthread_mutex_lock(&g_mappings_lock);
-
+    
     mem_mapping_t *curr = g_mappings;
     while (curr) {
         if (curr->orig_addr == orig_addr) {
@@ -1065,7 +1066,7 @@ static void *find_cxl_mapping(const void *orig_addr) {
         }
         curr = curr->next;
     }
-
+    
     pthread_mutex_unlock(&g_mappings_lock);
     return NULL;
 }
@@ -2895,7 +2896,7 @@ static void shim_init(void) {
 __attribute__((destructor))
 static void shim_cleanup(void) {
     LOG_INFO("CXL MPI Shim unloading (total hooks: %d)\n", g_hook_count);
-
+    
     if (g_cxl.initialized) {
         LOG_INFO("Final CXL memory usage: %zu/%zu bytes (%.1f%%)\n",
                  g_cxl.used, g_cxl.size, 100.0 * g_cxl.used / g_cxl.size);
