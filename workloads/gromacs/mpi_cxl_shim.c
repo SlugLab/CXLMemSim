@@ -701,7 +701,9 @@ use_shm:
     pthread_mutex_unlock(&g_cxl.lock);
 }
 
-// Register this rank in the CXL shared memory
+// Register this rank in the CXL shared memory.
+// Uses MPI_Barrier (network) for cross-node synchronization instead of
+// spinning on CXL memory, since DAX device writes are not coherent across nodes.
 static void cxl_register_rank(int rank, int world_size) {
     if (!g_cxl.initialized || !g_cxl.header || rank < 0 || rank >= g_cxl.max_ranks) {
         LOG_WARN("Cannot register rank %d: CXL not initialized or rank out of range (max=%d)\n",
@@ -711,110 +713,37 @@ static void cxl_register_rank(int rank, int world_size) {
 
     g_cxl.my_rank = rank;
     g_cxl.world_size = world_size;
-    bool reg_timed_out = false;
 
-    // Rank 0 resets collective synchronization state for new run
+    // Load MPI_Barrier via dlsym so we can synchronize over the network.
+    // At this point orig_MPI_Init has completed so MPI is fully usable.
+    typeof(MPI_Barrier) *barrier_fn = dlsym(RTLD_NEXT, "PMPI_Barrier");
+    if (!barrier_fn) barrier_fn = dlsym(RTLD_NEXT, "MPI_Barrier");
+
+    // Every rank resets its own LOCAL view of the CXL collective state.
+    // CXL DAX memory is NOT coherent across nodes: writes from node0 are
+    // invisible on node1. So instead of having only rank 0 reset and others
+    // spin-wait (which deadlocks), every rank initializes its own mapping.
+    LOG_INFO("Rank %d resetting local CXL collective state\n", rank);
+    atomic_store(&g_cxl.header->coll_barrier_count, 0);
+    atomic_store(&g_cxl.header->coll_barrier_sense, 0);
+    atomic_store(&g_cxl.header->coll_phase, 0);
+    atomic_store(&g_cxl.header->coll_max_ranks, (uint32_t)world_size);
+    // Use cxl_safe_memset to avoid SIMD SIGILL on CXL device memory
+    cxl_safe_memset(g_cxl.header->coll_data_rptr, 0xFF,
+                    CXL_MAX_RANKS * sizeof(cxl_rptr_t));
+    atomic_store(&g_cxl.header->num_ranks, 0);
     if (rank == 0) {
-        LOG_INFO("Rank 0 resetting collective synchronization state for new run\n");
-        // First, mark as not ready by setting coll_max_ranks to 0
-        atomic_store(&g_cxl.header->coll_max_ranks, 0);
-        __atomic_thread_fence(__ATOMIC_SEQ_CST);
-
-        // Reset all collective fields
-        atomic_store(&g_cxl.header->coll_barrier_count, 0);
-        atomic_store(&g_cxl.header->coll_barrier_sense, 0);
-        atomic_store(&g_cxl.header->coll_phase, 0);
-        // Use cxl_safe_memset to avoid SIMD SIGILL on CXL device memory
-        cxl_safe_memset(g_cxl.header->coll_data_rptr, 0xFF,
-                        CXL_MAX_RANKS * sizeof(cxl_rptr_t));
-        // Reset num_ranks counter for new run
-        atomic_store(&g_cxl.header->num_ranks, 0);
-        __atomic_thread_fence(__ATOMIC_SEQ_CST);
-
-        // Bump generation so non-rank-0 processes can distinguish this run's
-        // coll_max_ranks from a stale value left by a previous run
         atomic_fetch_add(&g_cxl.header->coll_generation, 1);
-        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    }
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
-        // Now mark as ready by setting coll_max_ranks to world_size
-        atomic_store(&g_cxl.header->coll_max_ranks, (uint32_t)world_size);
-        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    // MPI_Barrier ensures all ranks have finished their local reset before
+    // any rank proceeds to register. This replaces the broken CXL spin-wait.
+    if (barrier_fn) {
+        LOG_DEBUG("Pre-registration MPI_Barrier (rank %d)\n", rank);
+        barrier_fn(MPI_COMM_WORLD);
     } else {
-        // Non-rank-0 processes wait for rank 0 to complete reset, with a timeout.
-        // CXL device memory may not propagate atomic writes reliably across nodes,
-        // so we use a bounded wait and fall back to MPI-only if it times out.
-        int wait_count = 0;
-        int total_warn_count = 0;
-        const int max_warn_count = 5;  // ~5 seconds total timeout
-        // reg_timed_out is tracked in outer scope
-        uint32_t cur;
-
-        // If coll_max_ranks already matches world_size, it may be stale from a
-        // previous run. Wait for the generation counter to bump (rank 0's reset).
-        // However, if num_ranks > 0, rank 0 has already completed reset AND
-        // registered itself for this run - we arrived late, not stale.
-        uint32_t start_gen = atomic_load(&g_cxl.header->coll_generation);
-        cur = atomic_load(&g_cxl.header->coll_max_ranks);
-        if (cur == (uint32_t)world_size) {
-            uint32_t nr = atomic_load(&g_cxl.header->num_ranks);
-            if (nr == 0) {
-                // num_ranks is 0 but coll_max_ranks == world_size: truly stale
-                // from a previous run. Wait for rank 0's generation bump.
-                while (atomic_load(&g_cxl.header->coll_generation) == start_gen) {
-                    __asm__ volatile("pause" ::: "memory");
-                    if (++wait_count > 10000000) {
-                        // Re-check num_ranks in case rank 0 completed while we spun
-                        if (atomic_load(&g_cxl.header->num_ranks) > 0) {
-                            LOG_INFO("Rank %d: rank 0 already registered, proceeding\n", rank);
-                            break;
-                        }
-                        if (++total_warn_count > max_warn_count) {
-                            LOG_WARN("Rank %d: timed out waiting for rank 0 generation bump, "
-                                     "disabling CXL collectives\n", rank);
-                            reg_timed_out = true;
-                            break;
-                        }
-                        LOG_WARN("Rank %d waiting for rank 0 generation bump (gen=%u)\n",
-                                 rank, start_gen);
-                        wait_count = 0;
-                    }
-                }
-            } else {
-                LOG_INFO("Rank %d: rank 0 already registered (%u ranks active), skipping stale check\n",
-                         rank, nr);
-            }
-        }
-
-        // Now wait for coll_max_ranks == world_size (reset complete)
-        if (!reg_timed_out) {
-            wait_count = 0;
-            total_warn_count = 0;
-            while (atomic_load(&g_cxl.header->coll_max_ranks) != (uint32_t)world_size) {
-                __asm__ volatile("pause" ::: "memory");
-                if (++wait_count > 10000000) {
-                    if (++total_warn_count > max_warn_count) {
-                        LOG_WARN("Rank %d: timed out waiting for coll_max_ranks "
-                                 "(got %u, expected %d), disabling CXL collectives\n",
-                                 rank, atomic_load(&g_cxl.header->coll_max_ranks), world_size);
-                        reg_timed_out = true;
-                        break;
-                    }
-                    LOG_WARN("Rank %d waiting for rank 0 to reset collective state (coll_max_ranks=%u, expected=%d)\n",
-                             rank, atomic_load(&g_cxl.header->coll_max_ranks), world_size);
-                    wait_count = 0;
-                }
-            }
-            if (!reg_timed_out) {
-                __atomic_thread_fence(__ATOMIC_ACQUIRE);
-            }
-        }
-
-        if (reg_timed_out) {
-            // Force coll_max_ranks to world_size so this rank can proceed.
-            // CXL collectives will be disabled for this rank below.
-            atomic_store(&g_cxl.header->coll_max_ranks, (uint32_t)world_size);
-            __atomic_thread_fence(__ATOMIC_SEQ_CST);
-        }
+        LOG_WARN("Rank %d: could not load MPI_Barrier, skipping sync\n", rank);
     }
 
     cxl_rank_mailbox_t *my_mailbox = &g_cxl.mailboxes[rank];
@@ -830,14 +759,8 @@ static void cxl_register_rank(int rank, int world_size) {
     // Increment active rank count
     atomic_fetch_add(&g_cxl.header->num_ranks, 1);
 
-    // Enable CXL communication if CXL_DIRECT env is set or by default for DAX.
-    // Disable if registration timed out (CXL memory not coherent across nodes).
-    if (reg_timed_out) {
-        g_cxl.cxl_comm_enabled = false;
-        LOG_WARN("Rank %d: CXL collectives disabled due to registration timeout\n", rank);
-    } else {
-        g_cxl.cxl_comm_enabled = getenv("CXL_DIRECT") || (strcmp(g_cxl.type, "dax") == 0);
-    }
+    // Enable CXL communication if CXL_DIRECT env is set or by default for DAX
+    g_cxl.cxl_comm_enabled = getenv("CXL_DIRECT") || (strcmp(g_cxl.type, "dax") == 0);
 
     LOG_INFO("Registered rank %d/%d in CXL shared memory (pid=%d, host=%s, cxl_comm=%s)\n",
              rank, world_size, my_mailbox->pid, my_mailbox->hostname,
