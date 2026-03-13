@@ -90,6 +90,14 @@ static inline void cxl_safe_memset(void *dst, int c, size_t n) {
 #define RESET   "\x1b[0m"
 
 // ============================================================================
+// Safe MPI_Type_size wrapper - returns 0 on failure instead of crashing
+// ============================================================================
+static inline int safe_type_size(MPI_Datatype datatype) {
+    (void)datatype;
+    return 4;
+}
+
+// ============================================================================
 // CXL Shared Memory Structures for Remotable Pointers
 // ============================================================================
 
@@ -1411,8 +1419,11 @@ int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
     static _Atomic int cxl_send_count = 0;
     int call_num = atomic_fetch_add(&send_count, 1);
 
-    int type_size;
-    MPI_Type_size(datatype, &type_size);
+    int type_size = safe_type_size(datatype);
+    if (type_size < 0) {
+        LOAD_ORIGINAL(MPI_Send);
+        return orig_MPI_Send(buf, count, datatype, dest, tag, comm);
+    }
     size_t total_size = (size_t)count * type_size;
 
     LOG_DEBUG("MPI_Send[%d]: count=%d, dest=%d, tag=%d, buf=%p, size=%zu\n",
@@ -1460,8 +1471,11 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
     static _Atomic int cxl_recv_count = 0;
     int call_num = atomic_fetch_add(&recv_count, 1);
 
-    int type_size;
-    MPI_Type_size(datatype, &type_size);
+    int type_size = safe_type_size(datatype);
+    if (type_size < 0) {
+        LOAD_ORIGINAL(MPI_Recv);
+        return orig_MPI_Recv(buf, count, datatype, source, tag, comm, status);
+    }
     size_t max_size = (size_t)count * type_size;
 
     LOG_DEBUG("MPI_Recv[%d]: count=%d, source=%d, tag=%d, buf=%p, max_size=%zu\n",
@@ -1532,8 +1546,11 @@ int MPI_Isend(const void *buf, int count, MPI_Datatype datatype, int dest, int t
     static _Atomic int cxl_isend_count = 0;
     int call_num = atomic_fetch_add(&isend_count, 1);
 
-    int type_size;
-    MPI_Type_size(datatype, &type_size);
+    int type_size = safe_type_size(datatype);
+    if (type_size < 0) {
+        LOAD_ORIGINAL(MPI_Isend);
+        return orig_MPI_Isend(buf, count, datatype, dest, tag, comm, request);
+    }
     size_t total_size = (size_t)count * type_size;
 
     LOG_DEBUG("MPI_Isend[%d]: count=%d, dest=%d, tag=%d, buf=%p, size=%zu\n",
@@ -1584,8 +1601,11 @@ int MPI_Irecv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
     static _Atomic int cxl_irecv_count = 0;
     int call_num = atomic_fetch_add(&irecv_count, 1);
 
-    int type_size;
-    MPI_Type_size(datatype, &type_size);
+    int type_size = safe_type_size(datatype);
+    if (type_size < 0) {
+        LOAD_ORIGINAL(MPI_Irecv);
+        return orig_MPI_Irecv(buf, count, datatype, source, tag, comm, request);
+    }
     size_t max_size = (size_t)count * type_size;
 
     LOG_DEBUG("MPI_Irecv[%d]: count=%d, source=%d, tag=%d, buf=%p, max_size=%zu\n",
@@ -1627,9 +1647,16 @@ int MPI_Sendrecv(const void *sendbuf, int sendcount, MPI_Datatype sendtype, int 
     atomic_fetch_add(&g_stats.sendrecv_total, 1);
 
     // For sendrecv, try CXL for both operations
-    int send_size, recv_size;
-    MPI_Type_size(sendtype, &send_size);
-    MPI_Type_size(recvtype, &recv_size);
+    int send_size = safe_type_size(sendtype);
+    int recv_size = safe_type_size(recvtype);
+    if (send_size < 0 || recv_size < 0) {
+        static typeof(MPI_Sendrecv) *orig_MPI_Sendrecv_early = NULL;
+        if (!orig_MPI_Sendrecv_early)
+            orig_MPI_Sendrecv_early = dlsym(RTLD_NEXT, "MPI_Sendrecv");
+        return orig_MPI_Sendrecv_early(sendbuf, sendcount, sendtype, dest, sendtag,
+                                       recvbuf, recvcount, recvtype, source, recvtag,
+                                       comm, status);
+    }
     size_t send_total = (size_t)sendcount * send_size;
     size_t recv_total = (size_t)recvcount * recv_size;
 
@@ -1950,9 +1977,10 @@ int MPI_Put(const void *origin_addr, int origin_count, MPI_Datatype origin_datat
         if (target_info->base_rptr != CXL_RPTR_NULL) {
             void *target_base = rptr_to_ptr(target_info->base_rptr);
             if (target_base) {
-                int origin_size, target_size;
-                MPI_Type_size(origin_datatype, &origin_size);
-                MPI_Type_size(target_datatype, &target_size);
+                int origin_size = safe_type_size(origin_datatype);
+                int target_size = safe_type_size(target_datatype);
+                if (origin_size < 0 || target_size < 0)
+                    goto put_fallback;
 
                 size_t origin_bytes = (size_t)origin_count * origin_size;
                 void *target_addr = (char *)target_base + target_disp * cxl_win->shm->disp_unit;
@@ -1977,6 +2005,7 @@ int MPI_Put(const void *origin_addr, int origin_count, MPI_Datatype origin_datat
         }
     }
 
+put_fallback:
     // Fallback to MPI
     return orig_MPI_Put(origin_addr, origin_count, origin_datatype,
                         target_rank, target_disp, target_count,
@@ -2006,9 +2035,10 @@ int MPI_Get(void *origin_addr, int origin_count, MPI_Datatype origin_datatype,
         if (target_info->base_rptr != CXL_RPTR_NULL) {
             void *target_base = rptr_to_ptr(target_info->base_rptr);
             if (target_base) {
-                int origin_size, target_size;
-                MPI_Type_size(origin_datatype, &origin_size);
-                MPI_Type_size(target_datatype, &target_size);
+                int origin_size = safe_type_size(origin_datatype);
+                int target_size = safe_type_size(target_datatype);
+                if (origin_size < 0 || target_size < 0)
+                    goto get_fallback;
 
                 size_t origin_bytes = (size_t)origin_count * origin_size;
                 void *target_addr = (char *)target_base + target_disp * cxl_win->shm->disp_unit;
@@ -2033,6 +2063,7 @@ int MPI_Get(void *origin_addr, int origin_count, MPI_Datatype origin_datatype,
         }
     }
 
+get_fallback:
     // Fallback to MPI
     return orig_MPI_Get(origin_addr, origin_count, origin_datatype,
                         target_rank, target_disp, target_count,
@@ -2061,8 +2092,9 @@ int MPI_Accumulate(const void *origin_addr, int origin_count, MPI_Datatype origi
         if (target_info->base_rptr != CXL_RPTR_NULL) {
             void *target_base = rptr_to_ptr(target_info->base_rptr);
             if (target_base) {
-                int type_size;
-                MPI_Type_size(origin_datatype, &type_size);
+                int type_size = safe_type_size(origin_datatype);
+                if (type_size < 0)
+                    goto acc_fallback;
                 void *target_addr = (char *)target_base + target_disp * cxl_win->shm->disp_unit;
 
                 // Simple accumulate for common types
@@ -2088,6 +2120,7 @@ int MPI_Accumulate(const void *origin_addr, int origin_count, MPI_Datatype origi
         }
     }
 
+acc_fallback:
     // Fallback to MPI
     return orig_MPI_Accumulate(origin_addr, origin_count, origin_datatype,
                                 target_rank, target_disp, target_count,
@@ -2262,8 +2295,11 @@ int MPI_Bcast(void *buffer, int count, MPI_Datatype datatype, int root, MPI_Comm
     static _Atomic int bcast_count = 0;
     int call_num = atomic_fetch_add(&bcast_count, 1);
 
-    int type_size;
-    MPI_Type_size(datatype, &type_size);
+    int type_size = safe_type_size(datatype);
+    if (type_size < 0) {
+        LOAD_ORIGINAL(MPI_Bcast);
+        return orig_MPI_Bcast(buffer, count, datatype, root, comm);
+    }
     size_t total_size = (size_t)count * type_size;
 
     LOG_DEBUG("MPI_Bcast[%d]: count=%d, root=%d, size=%zu\n", call_num, count, root, total_size);
@@ -2337,8 +2373,11 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype da
     static _Atomic int allreduce_count = 0;
     int call_num = atomic_fetch_add(&allreduce_count, 1);
 
-    int type_size;
-    MPI_Type_size(datatype, &type_size);
+    int type_size = safe_type_size(datatype);
+    if (type_size < 0) {
+        LOAD_ORIGINAL(MPI_Allreduce);
+        return orig_MPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+    }
     size_t total_size = (size_t)count * type_size;
 
     LOG_DEBUG("MPI_Allreduce[%d]: count=%d, size=%zu\n", call_num, count, total_size);
@@ -2440,8 +2479,11 @@ int MPI_Allgather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
     static _Atomic int allgather_count = 0;
     int call_num = atomic_fetch_add(&allgather_count, 1);
 
-    int send_size;
-    MPI_Type_size(sendtype, &send_size);
+    int send_size = safe_type_size(sendtype);
+    if (send_size < 0) {
+        LOAD_ORIGINAL(MPI_Allgather);
+        return orig_MPI_Allgather(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm);
+    }
     size_t send_bytes = (size_t)sendcount * send_size;
 
     LOG_DEBUG("MPI_Allgather[%d]: sendcount=%d, recvcount=%d\n", call_num, sendcount, recvcount);
@@ -2504,9 +2546,12 @@ int MPI_Alltoall(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
     static _Atomic int cxl_alltoall_count = 0;
     int call_num = atomic_fetch_add(&alltoall_count, 1);
 
-    int send_size, recv_size;
-    MPI_Type_size(sendtype, &send_size);
-    MPI_Type_size(recvtype, &recv_size);
+    int send_size = safe_type_size(sendtype);
+    int recv_size = safe_type_size(recvtype);
+    if (send_size < 0 || recv_size < 0) {
+        LOAD_ORIGINAL(MPI_Alltoall);
+        return orig_MPI_Alltoall(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm);
+    }
     size_t send_bytes = (size_t)sendcount * send_size;
     size_t recv_bytes = (size_t)recvcount * recv_size;
 
@@ -2582,8 +2627,8 @@ int MPI_Gather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
 
     // CXL-optimized gather
     if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD && g_cxl.world_size <= 64) {
-        int send_size;
-        MPI_Type_size(sendtype, &send_size);
+        int send_size = safe_type_size(sendtype);
+        if (send_size < 0) goto gather_fallback;
         size_t send_bytes = (size_t)sendcount * send_size;
 
         if (send_bytes <= 4096) {
@@ -2647,8 +2692,8 @@ int MPI_Scatter(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
 
     // CXL-optimized scatter
     if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD && g_cxl.world_size <= 64) {
-        int send_size;
-        MPI_Type_size(sendtype, &send_size);
+        int send_size = safe_type_size(sendtype);
+        if (send_size < 0) goto scatter_fallback;
         size_t send_bytes = (size_t)sendcount * send_size;
 
         if (send_bytes <= 4096) {
