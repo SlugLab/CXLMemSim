@@ -818,10 +818,10 @@ void DistributedMemoryServer::handle_read_request(const dist_message_t& req, dis
     if (local_memory_->read_cacheline(addr, resp.payload.mem.data, size)) {
         resp.payload.mem.status = 0;
 
-        // Calculate latency
-        std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
-        access_elem.push_back(std::make_tuple(addr, size));
-        resp.payload.mem.latency_ns = controller_->calculate_latency(access_elem, controller_->dramlatency);
+        // Use configured DRAM latency directly.
+        // The tree-traversal calculate_latency() requires perf-populated address
+        // entries which don't exist in server mode; it would always return 0.
+        resp.payload.mem.latency_ns = static_cast<uint64_t>(controller_->dramlatency);
 
         local_reads_++;
     } else {
@@ -844,10 +844,8 @@ void DistributedMemoryServer::handle_write_request(const dist_message_t& req, di
     if (local_memory_->write_cacheline(addr, req.payload.mem.data, size)) {
         resp.payload.mem.status = 0;
 
-        // Calculate latency
-        std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
-        access_elem.push_back(std::make_tuple(addr, size));
-        resp.payload.mem.latency_ns = controller_->calculate_latency(access_elem, controller_->dramlatency);
+        // Use configured DRAM latency directly (+ write overhead).
+        resp.payload.mem.latency_ns = static_cast<uint64_t>(controller_->dramlatency) + 50;
 
         local_writes_++;
     } else {
@@ -891,10 +889,8 @@ void DistributedMemoryServer::handle_atomic_request(const dist_message_t& req, d
         resp.payload.mem.status = 0;
     }
 
-    // Calculate latency with atomic overhead
-    std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
-    access_elem.push_back(std::make_tuple(addr, sizeof(uint64_t)));
-    resp.payload.mem.latency_ns = controller_->calculate_latency(access_elem, controller_->dramlatency) + 20;
+    // Atomic: DRAM latency + atomic overhead (serialization)
+    resp.payload.mem.latency_ns = static_cast<uint64_t>(controller_->dramlatency) + 20;
 }
 
 void DistributedMemoryServer::handle_coherency_request(const dist_message_t& req, dist_message_t& resp) {
@@ -1015,9 +1011,7 @@ int DistributedMemoryServer::read(uint64_t addr, void* data, size_t size, uint64
             return -1;
         }
 
-        std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
-        access_elem.push_back(std::make_tuple(addr, size));
-        *latency_ns = controller_->calculate_latency(access_elem, controller_->dramlatency);
+        *latency_ns = static_cast<uint64_t>(controller_->dramlatency);
 
         local_reads_++;
         return 0;
@@ -1046,9 +1040,7 @@ int DistributedMemoryServer::write(uint64_t addr, const void* data, size_t size,
             return -1;
         }
 
-        std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
-        access_elem.push_back(std::make_tuple(addr, size));
-        *latency_ns = controller_->calculate_latency(access_elem, controller_->dramlatency);
+        *latency_ns = static_cast<uint64_t>(controller_->dramlatency) + 50;
 
         local_writes_++;
         return 0;

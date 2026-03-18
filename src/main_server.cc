@@ -543,17 +543,26 @@ int main(int argc, char *argv[]) {
             SPDLOG_INFO("Press Ctrl+C to stop");
 
             // Wait for shutdown signal
+            uint64_t last_total = 0;
+            int stats_interval = 0;
             while (dist_server.is_running()) {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
 
-                // Periodic stats logging
-                auto stats = dist_server.get_stats();
-                if ((stats.local_reads + stats.local_writes + stats.remote_reads + stats.remote_writes) % 100000 == 0 &&
-                    (stats.local_reads + stats.local_writes + stats.remote_reads + stats.remote_writes) > 0) {
-                    SPDLOG_INFO("Distributed Stats: local_r={} local_w={} remote_r={} remote_w={} fwd={} coherency={}",
-                               stats.local_reads, stats.local_writes,
-                               stats.remote_reads, stats.remote_writes,
-                               stats.forwarded_requests, stats.coherency_messages);
+                // Periodic stats logging (every 10 seconds if there's activity)
+                stats_interval++;
+                if (stats_interval >= 10) {
+                    stats_interval = 0;
+                    auto stats = dist_server.get_stats();
+                    uint64_t total = stats.local_reads + stats.local_writes +
+                                     stats.remote_reads + stats.remote_writes;
+                    if (total > last_total) {
+                        SPDLOG_INFO("Distributed Stats: local_r={} local_w={} remote_r={} remote_w={} fwd={} coherency={} conns={}",
+                                   stats.local_reads, stats.local_writes,
+                                   stats.remote_reads, stats.remote_writes,
+                                   stats.forwarded_requests, stats.coherency_messages,
+                                   stats.active_connections);
+                        last_total = total;
+                    }
                 }
             }
 
