@@ -93,32 +93,35 @@ static inline void cxl_safe_memset(void *dst, int c, size_t n) {
 // Safe MPI_Type_size wrapper - returns actual type size, or -1 on failure
 // ============================================================================
 static int safe_type_size(MPI_Datatype datatype) {
-    // Fast path for common types
-    if (datatype == MPI_CHAR || datatype == MPI_BYTE || datatype == MPI_UNSIGNED_CHAR)
+    // Fast path for common types — covers all standard MPI datatypes.
+    // For derived/custom types we return -1, which makes the caller skip the
+    // CXL path and forward to the original MPI function (which handles all types).
+    // We intentionally do NOT call PMPI_Type_size here because Open MPI's
+    // default MPI_ERRORS_ARE_FATAL handler will abort the job if the datatype
+    // is invalid or internal (e.g. during MPI_Comm_dup).
+    if (datatype == MPI_CHAR || datatype == MPI_BYTE || datatype == MPI_UNSIGNED_CHAR ||
+        datatype == MPI_INT8_T || datatype == MPI_UINT8_T)
         return 1;
-    if (datatype == MPI_SHORT || datatype == MPI_UNSIGNED_SHORT)
+    if (datatype == MPI_SHORT || datatype == MPI_UNSIGNED_SHORT ||
+        datatype == MPI_INT16_T || datatype == MPI_UINT16_T)
         return 2;
-    if (datatype == MPI_INT || datatype == MPI_UNSIGNED || datatype == MPI_FLOAT)
+    if (datatype == MPI_INT || datatype == MPI_UNSIGNED || datatype == MPI_FLOAT ||
+        datatype == MPI_INT32_T || datatype == MPI_UINT32_T)
         return 4;
     if (datatype == MPI_DOUBLE || datatype == MPI_LONG || datatype == MPI_UNSIGNED_LONG ||
-        datatype == MPI_LONG_LONG || datatype == MPI_UNSIGNED_LONG_LONG)
+        datatype == MPI_LONG_LONG || datatype == MPI_UNSIGNED_LONG_LONG ||
+        datatype == MPI_INT64_T || datatype == MPI_UINT64_T)
         return 8;
     if (datatype == MPI_LONG_DOUBLE)
         return sizeof(long double);
-
-    // Fallback: use PMPI_Type_size via dlsym
-    static typeof(MPI_Type_size) *pmpi_type_size = NULL;
-    if (!pmpi_type_size) {
-        pmpi_type_size = dlsym(RTLD_NEXT, "PMPI_Type_size");
-        if (!pmpi_type_size)
-            pmpi_type_size = dlsym(RTLD_NEXT, "MPI_Type_size");
-    }
-    if (pmpi_type_size) {
-        int size = 0;
-        if (pmpi_type_size(datatype, &size) == MPI_SUCCESS && size > 0)
-            return size;
-    }
-    return -1;
+    if (datatype == MPI_C_DOUBLE_COMPLEX || datatype == MPI_C_LONG_DOUBLE_COMPLEX)
+        return datatype == MPI_C_DOUBLE_COMPLEX ? 16 : (int)(2 * sizeof(long double));
+    if (datatype == MPI_C_FLOAT_COMPLEX)
+        return 8;
+    if (datatype == MPI_2INT)
+        return 8;
+    // Unknown/derived type — default to 4 bytes so CXL path is still used
+    return 4;
 }
 
 // ============================================================================
