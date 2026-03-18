@@ -90,11 +90,35 @@ static inline void cxl_safe_memset(void *dst, int c, size_t n) {
 #define RESET   "\x1b[0m"
 
 // ============================================================================
-// Safe MPI_Type_size wrapper - returns 0 on failure instead of crashing
+// Safe MPI_Type_size wrapper - returns actual type size, or -1 on failure
 // ============================================================================
-static inline int safe_type_size(MPI_Datatype datatype) {
-    (void)datatype;
-    return 4;
+static int safe_type_size(MPI_Datatype datatype) {
+    // Fast path for common types
+    if (datatype == MPI_CHAR || datatype == MPI_BYTE || datatype == MPI_UNSIGNED_CHAR)
+        return 1;
+    if (datatype == MPI_SHORT || datatype == MPI_UNSIGNED_SHORT)
+        return 2;
+    if (datatype == MPI_INT || datatype == MPI_UNSIGNED || datatype == MPI_FLOAT)
+        return 4;
+    if (datatype == MPI_DOUBLE || datatype == MPI_LONG || datatype == MPI_UNSIGNED_LONG ||
+        datatype == MPI_LONG_LONG || datatype == MPI_UNSIGNED_LONG_LONG)
+        return 8;
+    if (datatype == MPI_LONG_DOUBLE)
+        return sizeof(long double);
+
+    // Fallback: use PMPI_Type_size via dlsym
+    static typeof(MPI_Type_size) *pmpi_type_size = NULL;
+    if (!pmpi_type_size) {
+        pmpi_type_size = dlsym(RTLD_NEXT, "PMPI_Type_size");
+        if (!pmpi_type_size)
+            pmpi_type_size = dlsym(RTLD_NEXT, "MPI_Type_size");
+    }
+    if (pmpi_type_size) {
+        int size = 0;
+        if (pmpi_type_size(datatype, &size) == MPI_SUCCESS && size > 0)
+            return size;
+    }
+    return -1;
 }
 
 // ============================================================================
@@ -241,6 +265,7 @@ typedef struct {
     int world_size;
     int max_ranks;  // max ranks that fit in mapped region
     bool cxl_comm_enabled;
+    bool all_ranks_local;  // true if all ranks share same DAX device
 } cxl_mem_t;
 
 typedef struct mem_mapping {
@@ -259,13 +284,67 @@ static cxl_mem_t g_cxl = {
     .my_rank = -1,
     .world_size = 0,
     .max_ranks = CXL_MAX_RANKS,
-    .cxl_comm_enabled = false
+    .cxl_comm_enabled = false,
+    .all_ranks_local = false
 };
 
 static mem_mapping_t *g_mappings = NULL;
 static pthread_mutex_t g_mappings_lock = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic int g_hook_count = 0;
 static _Atomic bool g_in_mpi_call = false;
+
+// ============================================================================
+// Pending CXL request tracking for non-blocking receives
+// ============================================================================
+// When MPI_Irecv is called and the source is on the same node (CXL-capable),
+// we post both an orig_MPI_Irecv and register a "pending CXL" entry.
+// MPI_Wait/MPI_Test then check both CXL and MPI channels, returning
+// whichever message arrives first.
+#define MAX_CXL_PENDING 256
+
+typedef struct {
+    MPI_Request mpi_req;     // The underlying MPI request
+    void *buf;               // Receive buffer
+    size_t max_size;         // Max receive size
+    int source;              // Expected source rank
+    int tag;                 // Expected tag
+    bool active;             // Whether this entry is in use
+} cxl_pending_recv_t;
+
+static cxl_pending_recv_t g_cxl_pending[MAX_CXL_PENDING];
+static pthread_mutex_t g_cxl_pending_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int cxl_pending_add(MPI_Request req, void *buf, size_t max_size, int source, int tag) {
+    pthread_mutex_lock(&g_cxl_pending_lock);
+    for (int i = 0; i < MAX_CXL_PENDING; i++) {
+        if (!g_cxl_pending[i].active) {
+            g_cxl_pending[i].mpi_req = req;
+            g_cxl_pending[i].buf = buf;
+            g_cxl_pending[i].max_size = max_size;
+            g_cxl_pending[i].source = source;
+            g_cxl_pending[i].tag = tag;
+            g_cxl_pending[i].active = true;
+            pthread_mutex_unlock(&g_cxl_pending_lock);
+            return i;
+        }
+    }
+    pthread_mutex_unlock(&g_cxl_pending_lock);
+    return -1;
+}
+
+static cxl_pending_recv_t *cxl_pending_find(MPI_Request req) {
+    if (req == MPI_REQUEST_NULL) return NULL;
+    for (int i = 0; i < MAX_CXL_PENDING; i++) {
+        if (g_cxl_pending[i].active && g_cxl_pending[i].mpi_req == req) {
+            return &g_cxl_pending[i];
+        }
+    }
+    return NULL;
+}
+
+static void cxl_pending_remove(cxl_pending_recv_t *entry) {
+    entry->active = false;
+}
 
 // Window tracking
 static cxl_window_t *g_windows = NULL;
@@ -358,6 +437,12 @@ static typeof(MPI_Allgather) *orig_MPI_Allgather = NULL;
 static typeof(MPI_Alltoall) *orig_MPI_Alltoall = NULL;
 static typeof(MPI_Gather) *orig_MPI_Gather = NULL;
 static typeof(MPI_Scatter) *orig_MPI_Scatter = NULL;
+
+// Request management function pointers
+static typeof(MPI_Wait) *orig_MPI_Wait = NULL;
+static typeof(MPI_Test) *orig_MPI_Test = NULL;
+static typeof(MPI_Waitall) *orig_MPI_Waitall = NULL;
+static typeof(MPI_Cancel) *orig_MPI_Cancel = NULL;
 
 // Communicator management function pointers
 static typeof(MPI_Comm_dup) *orig_MPI_Comm_dup = NULL;
@@ -743,6 +828,22 @@ static void cxl_register_rank(int rank, int world_size) {
     if (rank == 0) {
         atomic_fetch_add(&g_cxl.header->coll_generation, 1);
     }
+
+    // Reset allocation offset to reclaim all memory from previous runs.
+    // Safe: all ranks set the same value, and no allocations happen until
+    // after the MPI_Barrier below.
+    atomic_store(&g_cxl.header->alloc_offset, (uint64_t)CXL_HEADER_SIZE);
+
+    // Reset ALL mailbox slots to clear stale messages from previous runs.
+    for (int i = 0; i < g_cxl.max_ranks; i++) {
+        atomic_store(&g_cxl.mailboxes[i].active, 0);
+        atomic_store(&g_cxl.mailboxes[i].head, 0);
+        atomic_store(&g_cxl.mailboxes[i].tail, 0);
+        for (int j = 0; j < CXL_MSG_QUEUE_SIZE; j++) {
+            atomic_store(&g_cxl.mailboxes[i].messages[j].state, CXL_MSG_EMPTY);
+        }
+    }
+
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
     // MPI_Barrier ensures all ranks have finished their local reset before
@@ -1022,13 +1123,15 @@ static int cxl_send(const void *buf, size_t data_size, int dest, int tag, int so
 
     cxl_rank_mailbox_t *dest_mailbox = &g_cxl.mailboxes[dest];
 
-    // Get next slot in destination's queue
-    uint64_t head = atomic_load(&dest_mailbox->head);
+    // Atomically claim a slot in destination's queue
+    uint64_t head = atomic_fetch_add(&dest_mailbox->head, 1);
     uint64_t tail = atomic_load(&dest_mailbox->tail);
 
-    // Check if queue is full
+    // Check if queue is full (undo if so)
     if ((head - tail) >= CXL_MSG_QUEUE_SIZE) {
         LOG_WARN("CXL send: destination %d queue full (head=%lu, tail=%lu)\n", dest, head, tail);
+        // Cannot easily undo atomic increment, but the slot will be in EMPTY state
+        // and the receiver will skip it, so this is safe (just wastes a slot)
         return -1;
     }
 
@@ -1082,11 +1185,8 @@ static int cxl_send(const void *buf, size_t data_size, int dest, int tag, int so
     // Memory barrier to ensure data is visible before state change
     __atomic_thread_fence(__ATOMIC_RELEASE);
 
-    // Mark message as ready
+    // Mark message as ready (head was already advanced atomically above)
     atomic_store(&msg->state, CXL_MSG_READY);
-
-    // Advance head pointer
-    atomic_fetch_add(&dest_mailbox->head, 1);
 
     LOG_DEBUG("CXL send: sent %zu bytes from rank %d to rank %d (tag=%d, slot=%lu, inline=%d)\n",
               data_size, source_rank, dest, tag, slot, msg->is_inline);
@@ -1264,10 +1364,28 @@ int MPI_Init(int *argc, char ***argv) {
             orig_MPI_Barrier(MPI_COMM_WORLD);
         }
 
-        LOG_INFO("MPI_Init completed: rank=%d/%d, CXL=%s, CXL_DIRECT=%s\n",
+        // After barrier, all ranks have registered. Check if all ranks
+        // share the same DAX device (i.e. are on the same node).
+        // Cross-node ranks won't be visible in our local DAX mailboxes.
+        if (g_cxl.initialized && g_cxl.cxl_comm_enabled) {
+            g_cxl.all_ranks_local = true;
+            for (int r = 0; r < size; r++) {
+                if (!cxl_rank_available(r)) {
+                    g_cxl.all_ranks_local = false;
+                    break;
+                }
+            }
+            if (!g_cxl.all_ranks_local) {
+                LOG_INFO("Multi-node detected: CXL collectives disabled "
+                         "(not all %d ranks visible on local DAX)\n", size);
+            }
+        }
+
+        LOG_INFO("MPI_Init completed: rank=%d/%d, CXL=%s, CXL_DIRECT=%s, all_local=%s\n",
                  rank, size,
                  g_cxl.initialized ? "initialized" : "not initialized",
-                 g_cxl.cxl_comm_enabled ? "enabled" : "disabled");
+                 g_cxl.cxl_comm_enabled ? "enabled" : "disabled",
+                 g_cxl.all_ranks_local ? "yes" : "no");
     } else {
         LOG_ERROR("MPI_Init failed with code %d\n", ret);
     }
@@ -1306,6 +1424,7 @@ int MPI_Finalize(void) {
 
         g_cxl.initialized = false;
         g_cxl.cxl_comm_enabled = false;
+        g_cxl.all_ranks_local = false;
         g_cxl.my_rank = -1;
     }
 
@@ -1485,58 +1604,76 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
     atomic_fetch_add(&g_stats.recv_bytes, max_size);
 
     LOAD_ORIGINAL(MPI_Recv);
+    LOAD_ORIGINAL(MPI_Irecv);
+    LOAD_ORIGINAL(MPI_Wait);
+    LOAD_ORIGINAL(MPI_Test);
+    LOAD_ORIGINAL(MPI_Cancel);
 
-    // Try CXL direct communication first if enabled
-    // Note: For MPI_ANY_SOURCE (-1) or MPI_ANY_TAG (-1), we still try CXL first
-    if (g_cxl.cxl_comm_enabled && g_cxl.my_rank >= 0) {
-        // For blocking receive, use a timeout-based approach
-        // If CXL has a message, use it; otherwise fall back to MPI
+    // Dual-channel receive: if source is same-node, the sender may have used
+    // CXL (bypassing MPI) or MPI (CXL failed). We post an MPI Irecv as safety
+    // net and poll both CXL and MPI, returning whichever message arrives first.
+    if (g_cxl.cxl_comm_enabled && g_cxl.my_rank >= 0 &&
+        source >= 0 && cxl_rank_available(source)) {
+
+        // Quick CXL check — message may already be waiting
         size_t actual_size = 0;
-
-        // First try non-blocking check for CXL message
-        int cxl_ret = cxl_recv(buf, max_size, source, tag, &actual_size);
-        if (cxl_ret == 0) {
+        if (cxl_recv(buf, max_size, source, tag, &actual_size) == 0) {
             int cxl_num = atomic_fetch_add(&cxl_recv_count, 1);
             atomic_fetch_add(&g_stats.recv_cxl, 1);
             atomic_fetch_add(&g_stats.recv_cxl_bytes, actual_size);
-            LOG_DEBUG("MPI_Recv[%d]: CXL direct recv #%d successful (%zu bytes from source %d)\n",
-                      call_num, cxl_num, actual_size, source);
-
-            // Fill in status if provided
+            LOG_DEBUG("MPI_Recv[%d]: CXL direct recv #%d (fast path, %zu bytes)\n",
+                      call_num, cxl_num, actual_size);
             if (status && status != MPI_STATUS_IGNORE) {
-                // Note: We need to find actual source from the message
-                // For simplicity, set count based on actual_size
-                status->MPI_SOURCE = source >= 0 ? source : 0;  // TODO: get actual source
-                status->MPI_TAG = tag >= 0 ? tag : 0;           // TODO: get actual tag
+                status->MPI_SOURCE = source;
+                status->MPI_TAG = tag >= 0 ? tag : 0;
                 status->MPI_ERROR = MPI_SUCCESS;
             }
             return MPI_SUCCESS;
         }
-        LOG_TRACE("MPI_Recv[%d]: No CXL message available, using MPI\n", call_num);
-    }
 
-    // Fallback to original MPI_Recv
-    void *recv_buf = buf;
-    void *cxl_buf = NULL;
+        // Post non-blocking MPI receive as safety net (sender may have
+        // fallen back to MPI if CXL send failed)
+        MPI_Request mpi_req;
+        orig_MPI_Irecv(buf, count, datatype, source, tag, comm, &mpi_req);
 
-    // Optional: use CXL memory for receive buffer (for memory placement experiments)
-    if (g_cxl.initialized && getenv("CXL_SHIM_COPY_RECV")) {
-        cxl_buf = allocate_cxl_memory(max_size);
-        if (cxl_buf) {
-            recv_buf = cxl_buf;
-            LOG_TRACE("MPI_Recv[%d]: using CXL buffer at %p (rptr=0x%lx, size=%zu)\n",
-                      call_num, cxl_buf, ptr_to_rptr(cxl_buf), max_size);
+        // Poll both channels
+        for (;;) {
+            // Check CXL
+            if (cxl_recv(buf, max_size, source, tag, &actual_size) == 0) {
+                // Got CXL message. Cancel the MPI recv to clean up.
+                orig_MPI_Cancel(&mpi_req);
+                orig_MPI_Wait(&mpi_req, MPI_STATUS_IGNORE);
+                int cxl_num = atomic_fetch_add(&cxl_recv_count, 1);
+                atomic_fetch_add(&g_stats.recv_cxl, 1);
+                atomic_fetch_add(&g_stats.recv_cxl_bytes, actual_size);
+                LOG_DEBUG("MPI_Recv[%d]: CXL direct recv #%d (dual-channel, %zu bytes)\n",
+                          call_num, cxl_num, actual_size);
+                if (status && status != MPI_STATUS_IGNORE) {
+                    status->MPI_SOURCE = source;
+                    status->MPI_TAG = tag >= 0 ? tag : 0;
+                    status->MPI_ERROR = MPI_SUCCESS;
+                }
+                return MPI_SUCCESS;
+            }
+
+            // Check MPI
+            int flag = 0;
+            MPI_Status mpi_status;
+            orig_MPI_Test(&mpi_req, &flag, &mpi_status);
+            if (flag) {
+                if (status && status != MPI_STATUS_IGNORE)
+                    *status = mpi_status;
+                LOG_TRACE("MPI_Recv[%d]: completed via MPI (dual-channel)\n", call_num);
+                return MPI_SUCCESS;
+            }
+
+            // Brief pause to avoid burning CPU
+            __builtin_ia32_pause();
         }
     }
 
-    int ret = orig_MPI_Recv(recv_buf, count, datatype, source, tag, comm, status);
-
-    if (cxl_buf && ret == MPI_SUCCESS) {
-        cxl_safe_memcpy(buf, cxl_buf, max_size);
-        LOG_TRACE("MPI_Recv[%d]: copied %zu bytes from CXL\n", call_num, max_size);
-    }
-
-    return ret;
+    // Cross-node or unknown source: use original MPI_Recv directly
+    return orig_MPI_Recv(buf, count, datatype, source, tag, comm, status);
 }
 
 // Non-blocking send with CXL support
@@ -1615,24 +1752,32 @@ int MPI_Irecv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
 
     LOAD_ORIGINAL(MPI_Irecv);
 
-    // Try CXL direct receive - check if a message is already available
-    if (g_cxl.cxl_comm_enabled && g_cxl.my_rank >= 0) {
+    // If source is same-node CXL-capable, check if message already arrived
+    if (g_cxl.cxl_comm_enabled && g_cxl.my_rank >= 0 &&
+        source >= 0 && cxl_rank_available(source)) {
         size_t actual_size = 0;
-        int cxl_ret = cxl_recv(buf, max_size, source, tag, &actual_size);
-        if (cxl_ret == 0) {
+        if (cxl_recv(buf, max_size, source, tag, &actual_size) == 0) {
             int cxl_num = atomic_fetch_add(&cxl_irecv_count, 1);
             atomic_fetch_add(&g_stats.irecv_cxl, 1);
-            LOG_DEBUG("MPI_Irecv[%d]: CXL direct recv #%d already available (%zu bytes)\n",
+            LOG_DEBUG("MPI_Irecv[%d]: CXL recv #%d already available (%zu bytes)\n",
                       call_num, cxl_num, actual_size);
-
-            // Message already received - return null request
             *request = MPI_REQUEST_NULL;
             return MPI_SUCCESS;
         }
-        LOG_TRACE("MPI_Irecv[%d]: No CXL message available, using MPI\n", call_num);
+
+        // CXL message not yet available. Post orig_MPI_Irecv as safety net
+        // (the sender might fall back to MPI if CXL send fails), and register
+        // a pending CXL entry so MPI_Wait/MPI_Test can check both channels.
+        int ret = orig_MPI_Irecv(buf, count, datatype, source, tag, comm, request);
+        if (ret == MPI_SUCCESS) {
+            cxl_pending_add(*request, buf, max_size, source, tag);
+            LOG_TRACE("MPI_Irecv[%d]: registered pending CXL+MPI (source=%d)\n",
+                      call_num, source);
+        }
+        return ret;
     }
 
-    // Fallback to original MPI_Irecv
+    // Cross-node or unknown source: use original MPI_Irecv only
     return orig_MPI_Irecv(buf, count, datatype, source, tag, comm, request);
 }
 
@@ -1657,43 +1802,9 @@ int MPI_Sendrecv(const void *sendbuf, int sendcount, MPI_Datatype sendtype, int 
                                        recvbuf, recvcount, recvtype, source, recvtag,
                                        comm, status);
     }
-    size_t send_total = (size_t)sendcount * send_size;
-    size_t recv_total = (size_t)recvcount * recv_size;
-
-    bool cxl_send_ok = false;
-    bool cxl_recv_ok = false;
-
-    // Try CXL send
-    if (g_cxl.cxl_comm_enabled && cxl_rank_available(dest)) {
-        if (cxl_send(sendbuf, send_total, dest, sendtag, g_cxl.my_rank) == 0) {
-            cxl_send_ok = true;
-            LOG_TRACE("MPI_Sendrecv[%d]: CXL send successful\n", call_num);
-        }
-    }
-
-    // Try CXL recv
-    if (g_cxl.cxl_comm_enabled && g_cxl.my_rank >= 0) {
-        size_t actual_size = 0;
-        // Use blocking receive with short timeout for sendrecv
-        if (cxl_recv_blocking(recvbuf, recv_total, source, recvtag, &actual_size, 1000) == 0) {
-            cxl_recv_ok = true;
-            LOG_TRACE("MPI_Sendrecv[%d]: CXL recv successful\n", call_num);
-        }
-    }
-
-    // If both succeeded via CXL, we're done
-    if (cxl_send_ok && cxl_recv_ok) {
-        if (status && status != MPI_STATUS_IGNORE) {
-            status->MPI_SOURCE = source;
-            status->MPI_TAG = recvtag;
-            status->MPI_ERROR = MPI_SUCCESS;
-        }
-        return MPI_SUCCESS;
-    }
-
-    // Otherwise, use original MPI_Sendrecv
-    // Note: This may result in duplicate messages if CXL partially succeeded
-    // For safety, we fall back to MPI for the full operation
+    // Sendrecv uses the original MPI implementation to avoid channel mismatch.
+    // The send and recv sides may go to different peers on different nodes,
+    // making partial CXL+MPI unsafe (duplicate or lost messages).
     static typeof(MPI_Sendrecv) *orig_MPI_Sendrecv = NULL;
     if (!orig_MPI_Sendrecv) {
         orig_MPI_Sendrecv = dlsym(RTLD_NEXT, "MPI_Sendrecv");
@@ -2308,9 +2419,9 @@ int MPI_Bcast(void *buffer, int count, MPI_Datatype datatype, int root, MPI_Comm
 
     LOAD_ORIGINAL(MPI_Bcast);
 
-    // Try CXL broadcast for COMM_WORLD
-    if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD && total_size <= 4096 &&
-        g_cxl.world_size <= 64) {
+    // Try CXL broadcast for COMM_WORLD (only when all ranks share same DAX)
+    if (g_cxl.cxl_comm_enabled && g_cxl.all_ranks_local &&
+        comm == MPI_COMM_WORLD && total_size <= 4096 && g_cxl.world_size <= 64) {
         atomic_fetch_add(&g_stats.bcast_cxl, 1);
 
         LOAD_ORIGINAL(MPI_Barrier);
@@ -2388,8 +2499,8 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype da
 
     // For small allreduce on COMM_WORLD with SUM, try CXL optimization
     // Note: Skip if sendbuf is MPI_IN_PLACE to avoid complexity
-    if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD &&
-        sendbuf != MPI_IN_PLACE &&
+    if (g_cxl.cxl_comm_enabled && g_cxl.all_ranks_local &&
+        comm == MPI_COMM_WORLD && sendbuf != MPI_IN_PLACE &&
         op == MPI_SUM && total_size <= 4096 && g_cxl.world_size <= 64 &&
         (datatype == MPI_DOUBLE || datatype == MPI_FLOAT || datatype == MPI_INT ||
          datatype == MPI_LONG || datatype == MPI_LONG_LONG)) {
@@ -2491,10 +2602,10 @@ int MPI_Allgather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
 
     LOAD_ORIGINAL(MPI_Allgather);
 
-    // CXL-optimized allgather for COMM_WORLD
+    // CXL-optimized allgather for COMM_WORLD (only when all ranks share same DAX)
     // Skip MPI_IN_PLACE to avoid complexity
-    if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD &&
-        sendbuf != MPI_IN_PLACE &&
+    if (g_cxl.cxl_comm_enabled && g_cxl.all_ranks_local &&
+        comm == MPI_COMM_WORLD && sendbuf != MPI_IN_PLACE &&
         send_bytes <= 4096 && g_cxl.world_size <= 64) {
 
         LOAD_ORIGINAL(MPI_Barrier);
@@ -2560,9 +2671,9 @@ int MPI_Alltoall(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
 
     LOAD_ORIGINAL(MPI_Alltoall);
 
-    // CXL-optimized all-to-all for COMM_WORLD
-    if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD && send_bytes <= 4096 &&
-        g_cxl.world_size <= 64) {
+    // CXL-optimized all-to-all for COMM_WORLD (only when all ranks share same DAX)
+    if (g_cxl.cxl_comm_enabled && g_cxl.all_ranks_local &&
+        comm == MPI_COMM_WORLD && send_bytes <= 4096 && g_cxl.world_size <= 64) {
         int n = g_cxl.world_size;
         size_t row_size = send_bytes * n;  // Total data this rank sends
 
@@ -2625,8 +2736,9 @@ int MPI_Gather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
 
     LOAD_ORIGINAL(MPI_Gather);
 
-    // CXL-optimized gather
-    if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD && g_cxl.world_size <= 64) {
+    // CXL-optimized gather (only when all ranks share same DAX)
+    if (g_cxl.cxl_comm_enabled && g_cxl.all_ranks_local &&
+        comm == MPI_COMM_WORLD && g_cxl.world_size <= 64) {
         int send_size = safe_type_size(sendtype);
         if (send_size < 0) goto gather_fallback;
         size_t send_bytes = (size_t)sendcount * send_size;
@@ -2690,8 +2802,9 @@ int MPI_Scatter(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
 
     LOAD_ORIGINAL(MPI_Scatter);
 
-    // CXL-optimized scatter
-    if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD && g_cxl.world_size <= 64) {
+    // CXL-optimized scatter (only when all ranks share same DAX)
+    if (g_cxl.cxl_comm_enabled && g_cxl.all_ranks_local &&
+        comm == MPI_COMM_WORLD && g_cxl.world_size <= 64) {
         int send_size = safe_type_size(sendtype);
         if (send_size < 0) goto scatter_fallback;
         size_t send_bytes = (size_t)sendcount * send_size;
@@ -2741,6 +2854,136 @@ int MPI_Scatter(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
 
 scatter_fallback:
     return orig_MPI_Scatter(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm);
+}
+
+// ============================================================================
+// MPI_Wait / MPI_Test / MPI_Waitall - dual-channel CXL+MPI completion
+// ============================================================================
+
+int MPI_Wait(MPI_Request *request, MPI_Status *status) {
+    LOAD_ORIGINAL(MPI_Wait);
+    LOAD_ORIGINAL(MPI_Test);
+    LOAD_ORIGINAL(MPI_Cancel);
+
+    if (!request || *request == MPI_REQUEST_NULL) {
+        // Null request: nothing to wait for
+        if (status && status != MPI_STATUS_IGNORE) {
+            status->MPI_SOURCE = MPI_ANY_SOURCE;
+            status->MPI_TAG = MPI_ANY_TAG;
+            status->MPI_ERROR = MPI_SUCCESS;
+        }
+        return MPI_SUCCESS;
+    }
+
+    cxl_pending_recv_t *pending = cxl_pending_find(*request);
+    if (!pending) {
+        // Not a CXL-tracked request, use original MPI_Wait
+        return orig_MPI_Wait(request, status);
+    }
+
+    // Dual-channel wait: poll both CXL and MPI
+    for (;;) {
+        // Check CXL
+        size_t actual_size = 0;
+        if (cxl_recv(pending->buf, pending->max_size,
+                     pending->source, pending->tag, &actual_size) == 0) {
+            // Got CXL message — cancel the MPI safety-net recv
+            orig_MPI_Cancel(request);
+            orig_MPI_Wait(request, MPI_STATUS_IGNORE);
+            *request = MPI_REQUEST_NULL;
+            if (status && status != MPI_STATUS_IGNORE) {
+                status->MPI_SOURCE = pending->source;
+                status->MPI_TAG = pending->tag >= 0 ? pending->tag : 0;
+                status->MPI_ERROR = MPI_SUCCESS;
+            }
+            cxl_pending_remove(pending);
+            return MPI_SUCCESS;
+        }
+
+        // Check MPI (non-blocking)
+        int flag = 0;
+        MPI_Status mpi_st;
+        orig_MPI_Test(request, &flag, &mpi_st);
+        if (flag) {
+            if (status && status != MPI_STATUS_IGNORE)
+                *status = mpi_st;
+            cxl_pending_remove(pending);
+            return MPI_SUCCESS;
+        }
+
+        __builtin_ia32_pause();
+    }
+}
+
+int MPI_Test(MPI_Request *request, int *flag, MPI_Status *status) {
+    LOAD_ORIGINAL(MPI_Test);
+    LOAD_ORIGINAL(MPI_Wait);
+
+    if (!request || *request == MPI_REQUEST_NULL) {
+        *flag = 1;
+        if (status && status != MPI_STATUS_IGNORE) {
+            status->MPI_SOURCE = MPI_ANY_SOURCE;
+            status->MPI_TAG = MPI_ANY_TAG;
+            status->MPI_ERROR = MPI_SUCCESS;
+        }
+        return MPI_SUCCESS;
+    }
+
+    cxl_pending_recv_t *pending = cxl_pending_find(*request);
+    if (!pending) {
+        return orig_MPI_Test(request, flag, status);
+    }
+
+    // Check CXL first
+    size_t actual_size = 0;
+    if (cxl_recv(pending->buf, pending->max_size,
+                 pending->source, pending->tag, &actual_size) == 0) {
+        LOAD_ORIGINAL(MPI_Cancel);
+        orig_MPI_Cancel(request);
+        orig_MPI_Wait(request, MPI_STATUS_IGNORE);
+        *request = MPI_REQUEST_NULL;
+        *flag = 1;
+        if (status && status != MPI_STATUS_IGNORE) {
+            status->MPI_SOURCE = pending->source;
+            status->MPI_TAG = pending->tag >= 0 ? pending->tag : 0;
+            status->MPI_ERROR = MPI_SUCCESS;
+        }
+        cxl_pending_remove(pending);
+        return MPI_SUCCESS;
+    }
+
+    // Check MPI
+    int ret = orig_MPI_Test(request, flag, status);
+    if (*flag) {
+        cxl_pending_remove(pending);
+    }
+    return ret;
+}
+
+int MPI_Waitall(int count, MPI_Request array_of_requests[],
+                MPI_Status array_of_statuses[]) {
+    // Check if any requests are CXL-pending
+    bool has_pending = false;
+    for (int i = 0; i < count; i++) {
+        if (cxl_pending_find(array_of_requests[i])) {
+            has_pending = true;
+            break;
+        }
+    }
+
+    if (!has_pending) {
+        LOAD_ORIGINAL(MPI_Waitall);
+        return orig_MPI_Waitall(count, array_of_requests, array_of_statuses);
+    }
+
+    // Wait for each request individually (handles CXL pending correctly)
+    for (int i = 0; i < count; i++) {
+        MPI_Status *st = (array_of_statuses != MPI_STATUSES_IGNORE)
+                         ? &array_of_statuses[i] : MPI_STATUS_IGNORE;
+        int ret = MPI_Wait(&array_of_requests[i], st);
+        if (ret != MPI_SUCCESS) return ret;
+    }
+    return MPI_SUCCESS;
 }
 
 // Override problematic OpenMPI internal function to prevent SIGILL
