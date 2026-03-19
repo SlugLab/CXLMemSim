@@ -722,15 +722,27 @@ use_shm:
         uint32_t expected = 0;
         if (atomic_compare_exchange_strong(&g_cxl.header->init_state, &expected, 1)) {
             need_init = true;  // We won the race, do the init
-        } else {
-            // Another process is initializing (state=1) or finished (state=2)
-            // Spin until init is complete
+        } else if (expected == 1) {
+            // Another process is mid-init (state=1). Wait with a timeout
+            // in case the initializer crashed and left init_state stuck at 1.
             LOG_INFO("Waiting for another process to complete CXL init...\n");
-            while (atomic_load(&g_cxl.header->init_state) != 2) {
-                __asm__ volatile("pause" ::: "memory");
+            int wait_us = 0;
+            while (atomic_load(&g_cxl.header->init_state) != 2 && wait_us < 2000000) {
+                usleep(1000);  // 1ms
+                wait_us += 1000;
             }
-            __atomic_thread_fence(__ATOMIC_ACQUIRE);
+            if (atomic_load(&g_cxl.header->init_state) != 2) {
+                // Timed out — previous initializer likely crashed.
+                // Force re-init by CAS: 1 (stale in-progress) -> 1 (we take over)
+                LOG_WARN("CXL init timed out (stale init_state=1), forcing re-init\n");
+                expected = 1;
+                atomic_compare_exchange_strong(&g_cxl.header->init_state, &expected, 1);
+                need_init = true;
+            } else {
+                __atomic_thread_fence(__ATOMIC_ACQUIRE);
+            }
         }
+        // else expected == 2: already done, fall through
     }
 
     if (need_init) {
