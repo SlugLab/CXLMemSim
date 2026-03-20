@@ -1342,11 +1342,16 @@ int MPI_Init(int *argc, char ***argv) {
     LOAD_ORIGINAL(MPI_Init);
     LOAD_ORIGINAL(MPI_Comm_rank);
 
-    // Initialize CXL memory before MPI
-    init_cxl_memory();
-
+    // Call orig_MPI_Init FIRST, before mapping CXL memory.
+    // UCX (Open MPI's transport) scans mapped memory regions during MPI_Init
+    // and may use SIMD memset/memcpy on discovered regions, causing SIGILL
+    // on CXL device memory. By deferring the DAX mmap until after MPI is
+    // initialized, UCX never sees the CXL region during its setup.
     LOG_DEBUG("Calling original MPI_Init at %p\n", orig_MPI_Init);
     int ret = orig_MPI_Init(argc, argv);
+
+    // Now safe to map CXL memory (UCX init is complete)
+    init_cxl_memory();
 
     if (ret == MPI_SUCCESS) {
         int rank = -1, size = -1;
