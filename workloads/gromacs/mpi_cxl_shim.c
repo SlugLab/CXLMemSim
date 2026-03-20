@@ -760,21 +760,10 @@ use_shm:
         header_size = (header_size + CXL_ALIGNMENT - 1) & ~(CXL_ALIGNMENT - 1);
         atomic_store(&g_cxl.header->alloc_offset, header_size);
 
-        // Initialize only the mailboxes that fit within the mapped region
-        // Use cxl_safe_memset instead of memset to avoid SIMD SIGILL on CXL memory
-        for (int i = 0; i < max_usable_ranks; i++) {
-            atomic_store(&g_cxl.mailboxes[i].head, 0);
-            atomic_store(&g_cxl.mailboxes[i].tail, 0);
-            atomic_store(&g_cxl.mailboxes[i].active, 0);
-            g_cxl.mailboxes[i].rank = i;
-            g_cxl.mailboxes[i].pid = 0;
-            cxl_safe_memset(g_cxl.mailboxes[i].hostname, 0, sizeof(g_cxl.mailboxes[i].hostname));
-
-            // Initialize message slots
-            for (int j = 0; j < CXL_MSG_QUEUE_SIZE; j++) {
-                atomic_store(&g_cxl.mailboxes[i].messages[j].state, CXL_MSG_EMPTY);
-            }
-        }
+        // Initialize all mailboxes using cxl_safe_memset to avoid SIMD SIGILL.
+        // Zero-fills all fields: head=0, tail=0, active=0, messages[].state=0(EMPTY).
+        cxl_safe_memset(g_cxl.mailboxes, 0,
+                        max_usable_ranks * sizeof(cxl_rank_mailbox_t));
 
         // Initialize collective operation fields
         atomic_store(&g_cxl.header->coll_barrier_count, 0);
@@ -850,14 +839,11 @@ static void cxl_register_rank(int rank, int world_size) {
     atomic_store(&g_cxl.header->alloc_offset, (uint64_t)CXL_HEADER_SIZE);
 
     // Reset ALL mailbox slots to clear stale messages from previous runs.
-    for (int i = 0; i < g_cxl.max_ranks; i++) {
-        atomic_store(&g_cxl.mailboxes[i].active, 0);
-        atomic_store(&g_cxl.mailboxes[i].head, 0);
-        atomic_store(&g_cxl.mailboxes[i].tail, 0);
-        for (int j = 0; j < CXL_MSG_QUEUE_SIZE; j++) {
-            atomic_store(&g_cxl.mailboxes[i].messages[j].state, CXL_MSG_EMPTY);
-        }
-    }
+    // Use cxl_safe_memset (volatile 8-byte writes) instead of atomic_store
+    // loops — the compiler at -O3 can optimize atomic_store loops into SIMD
+    // memset which causes SIGILL on CXL device memory.
+    cxl_safe_memset(g_cxl.mailboxes, 0,
+                    g_cxl.max_ranks * sizeof(cxl_rank_mailbox_t));
 
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
@@ -872,10 +858,16 @@ static void cxl_register_rank(int rank, int world_size) {
 
     cxl_rank_mailbox_t *my_mailbox = &g_cxl.mailboxes[rank];
 
-    // Set up mailbox for this rank
-    my_mailbox->rank = rank;
-    my_mailbox->pid = getpid();
-    gethostname(my_mailbox->hostname, sizeof(my_mailbox->hostname) - 1);
+    // Set up mailbox for this rank (use volatile writes for scalar fields,
+    // and cxl_safe_memcpy for strings — libc functions like gethostname/strncpy
+    // use SIMD internally and SIGILL on CXL device memory)
+    *(volatile uint32_t *)&my_mailbox->rank = rank;
+    *(volatile uint32_t *)&my_mailbox->pid = getpid();
+    {
+        char tmp_hostname[64] = {0};
+        gethostname(tmp_hostname, sizeof(tmp_hostname) - 1);
+        cxl_safe_memcpy(my_mailbox->hostname, tmp_hostname, sizeof(my_mailbox->hostname));
+    }
     atomic_store(&my_mailbox->head, 0);
     atomic_store(&my_mailbox->tail, 0);
     atomic_store(&my_mailbox->active, 1);
@@ -2432,8 +2424,8 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype da
             // Use MPI_Barrier for reliable synchronization across nodes
             orig_MPI_Barrier(comm);
 
-            // Initialize result with my own data
-            memcpy(recvbuf, sendbuf, total_size);
+            // Initialize result with my own data (sendbuf may be in CXL memory)
+            cxl_safe_memcpy(recvbuf, sendbuf, total_size);
 
             // Read and reduce data from all other ranks
             for (int r = 0; r < g_cxl.world_size; r++) {
