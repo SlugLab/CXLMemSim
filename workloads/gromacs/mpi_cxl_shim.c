@@ -454,13 +454,24 @@ static typeof(MPI_Comm_create) *orig_MPI_Comm_create = NULL;
 static typeof(MPI_Comm_free) *orig_MPI_Comm_free = NULL;
 static typeof(MPI_Comm_size) *orig_MPI_Comm_size = NULL;
 
+// Cached hostname — gethostname() uses libc memset/memcpy internally which
+// may use AVX-512 SIMD instructions. When called after CXL DAX memory is mapped,
+// this can SIGILL on CXL device memory pages. Cache it once at library load time
+// (before DAX is mapped) to avoid repeated calls.
+static char g_cached_hostname[256] = {0};
+static int g_cached_pid = 0;
+
 // Debug output function
 static void shim_log(const char *level, const char *color, const char *format, ...) {
     if (!getenv("CXL_SHIM_QUIET")) {
-        char hostname[256];
-        gethostname(hostname, sizeof(hostname));
-        
-        fprintf(stderr, "%s[CXL_SHIM:%s:%d:%s] ", color, hostname, getpid(), level);
+        if (g_cached_hostname[0] == '\0') {
+            gethostname(g_cached_hostname, sizeof(g_cached_hostname));
+            g_cached_pid = getpid();
+        }
+        int pid = getpid();
+        if (pid != g_cached_pid) g_cached_pid = pid;  // fork detection
+
+        fprintf(stderr, "%s[CXL_SHIM:%s:%d:%s] ", color, g_cached_hostname, g_cached_pid, level);
         
         va_list args;
         va_start(args, format);
@@ -858,16 +869,11 @@ static void cxl_register_rank(int rank, int world_size) {
 
     cxl_rank_mailbox_t *my_mailbox = &g_cxl.mailboxes[rank];
 
-    // Set up mailbox for this rank (use volatile writes for scalar fields,
-    // and cxl_safe_memcpy for strings — libc functions like gethostname/strncpy
-    // use SIMD internally and SIGILL on CXL device memory)
+    // Set up mailbox for this rank (use volatile/safe writes for CXL memory,
+    // and cached hostname to avoid calling gethostname after DAX is mapped)
     *(volatile uint32_t *)&my_mailbox->rank = rank;
     *(volatile uint32_t *)&my_mailbox->pid = getpid();
-    {
-        char tmp_hostname[64] = {0};
-        gethostname(tmp_hostname, sizeof(tmp_hostname) - 1);
-        cxl_safe_memcpy(my_mailbox->hostname, tmp_hostname, sizeof(my_mailbox->hostname));
-    }
+    cxl_safe_memcpy(my_mailbox->hostname, g_cached_hostname, sizeof(my_mailbox->hostname));
     atomic_store(&my_mailbox->head, 0);
     atomic_store(&my_mailbox->tail, 0);
     atomic_store(&my_mailbox->active, 1);
@@ -2841,15 +2847,18 @@ static void shim_init(void) {
     signal(SIGSEGV, signal_handler);
     signal(SIGABRT, signal_handler);
 
-    char hostname[256];
-    gethostname(hostname, sizeof(hostname));
+    // Cache hostname EARLY — before any CXL DAX mapping.
+    // After DAX is mapped at a fixed address, libc functions like gethostname()
+    // may use AVX-512 SIMD instructions that SIGILL on CXL device memory pages.
+    gethostname(g_cached_hostname, sizeof(g_cached_hostname));
+    g_cached_pid = getpid();
 
     fprintf(stderr, "\n");
     fprintf(stderr, "┌──────────────────────────────────────────────────────────┐\n");
     fprintf(stderr, "│    CXL MPI SHIM LIBRARY v%s - Remotable Pointer Edition  │\n", SHIM_VERSION);
     fprintf(stderr, "├──────────────────────────────────────────────────────────┤\n");
-    fprintf(stderr, "│ Host: %-52s │\n", hostname);
-    fprintf(stderr, "│ PID:  %-52d │\n", getpid());
+    fprintf(stderr, "│ Host: %-52s │\n", g_cached_hostname);
+    fprintf(stderr, "│ PID:  %-52d │\n", g_cached_pid);
     fprintf(stderr, "│ Time: %-52ld │\n", time(NULL));
     fprintf(stderr, "├──────────────────────────────────────────────────────────┤\n");
     fprintf(stderr, "│ FEATURES:                                                │\n");
