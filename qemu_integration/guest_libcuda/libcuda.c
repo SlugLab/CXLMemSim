@@ -280,6 +280,17 @@ static int find_and_map_device(void)
             DLOG("Device mapped successfully, magic=0x%x version=0x%x\n",
                  magic, reg_read32(CXL_GPU_REG_VERSION));
 
+            /* Check device ready */
+            uint32_t status = reg_read32(CXL_GPU_REG_STATUS);
+            if (!(status & CXL_GPU_STATUS_READY)) {
+                DLOG("Device not ready, status=0x%x\n", status);
+                munmap(map, g_bar_size);
+                close(g_pci_fd);
+                g_pci_fd = -1;
+                g_regs = NULL;
+                continue;  /* try next device */
+            }
+
             closedir(dir);
             return 0;
         }
@@ -1126,6 +1137,166 @@ int cxl_p2p_get_status(int *num_peers, uint64_t *transfers_completed,
     return CUDA_SUCCESS;
 }
 
+/* ========================================================================
+ * BAR4 Coherent Memory Support
+ * ======================================================================== */
+
+static int         g_bar4_fd   = -1;
+static volatile uint8_t *g_bar4_ptr  = NULL;
+static size_t      g_bar4_size = 0;
+static uint64_t    g_coh_offset = 0;   /* bump allocator offset */
+
+static volatile uint8_t *ensure_bar4(void)
+{
+    if (g_bar4_ptr) return g_bar4_ptr;
+
+    /* Find BAR4 for the device we already mapped */
+    char path[256];
+    /* Scan sysfs for the device whose BAR2 we have open */
+    DIR *dir = opendir("/sys/bus/pci/devices");
+    if (!dir) return NULL;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_name[0] == '.') continue;
+        snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/resource", ent->d_name);
+        FILE *fp = fopen(path, "r");
+        if (!fp) continue;
+        uint64_t start, end, flags;
+        /* Skip BAR0..BAR3 (4 lines) */
+        for (int i = 0; i < 4; i++) {
+            if (fscanf(fp, "0x%lx 0x%lx 0x%lx\n", &start, &end, &flags) != 3) break;
+        }
+        /* Read BAR4 */
+        if (fscanf(fp, "0x%lx 0x%lx 0x%lx", &start, &end, &flags) == 3 && end > start) {
+            g_bar4_size = end - start + 1;
+        }
+        fclose(fp);
+        if (g_bar4_size == 0) continue;
+
+        /* Check vendor/device match */
+        snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/vendor", ent->d_name);
+        int fd = open(path, O_RDONLY);
+        if (fd < 0) continue;
+        char buf[32]; int n = read(fd, buf, sizeof(buf)-1); close(fd);
+        if (n <= 0) continue; buf[n] = '\0';
+        if ((uint16_t)strtol(buf, NULL, 16) != CXL_TYPE2_VENDOR_ID) { g_bar4_size = 0; continue; }
+
+        snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/device", ent->d_name);
+        fd = open(path, O_RDONLY);
+        if (fd < 0) continue;
+        n = read(fd, buf, sizeof(buf)-1); close(fd);
+        if (n <= 0) continue; buf[n] = '\0';
+        if ((uint16_t)strtol(buf, NULL, 16) != CXL_TYPE2_DEVICE_ID) { g_bar4_size = 0; continue; }
+
+        /* Check this is the same device we're using (status must be READY) */
+        snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/resource2", ent->d_name);
+        int bar2_fd = open(path, O_RDWR | O_SYNC);
+        if (bar2_fd < 0) { g_bar4_size = 0; continue; }
+        void *bar2_map = mmap(NULL, 4096, PROT_READ, MAP_SHARED, bar2_fd, 0);
+        if (bar2_map == MAP_FAILED) { close(bar2_fd); g_bar4_size = 0; continue; }
+        uint32_t magic = *(volatile uint32_t *)bar2_map;
+        uint32_t status = *(volatile uint32_t *)((uint8_t *)bar2_map + 8);
+        munmap(bar2_map, 4096);
+        close(bar2_fd);
+        if (magic != CXL_GPU_MAGIC || !(status & CXL_GPU_STATUS_READY)) { g_bar4_size = 0; continue; }
+
+        /* Map BAR4 */
+        snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/resource4", ent->d_name);
+        g_bar4_fd = open(path, O_RDWR);
+        if (g_bar4_fd < 0) { g_bar4_size = 0; continue; }
+        void *b4 = mmap(NULL, g_bar4_size, PROT_READ | PROT_WRITE, MAP_SHARED, g_bar4_fd, 0);
+        if (b4 == MAP_FAILED) { close(g_bar4_fd); g_bar4_fd = -1; g_bar4_size = 0; continue; }
+        g_bar4_ptr = (volatile uint8_t *)b4;
+        DLOG("Mapped BAR4 for %s (%zu MB)\n", ent->d_name, g_bar4_size >> 20);
+        closedir(dir);
+        return g_bar4_ptr;
+    }
+    closedir(dir);
+    return NULL;
+}
+
+int cxlCoherentAlloc(uint64_t size, void **host_ptr)
+{
+    DLOG("cxlCoherentAlloc(size=%lu)\n", (unsigned long)size);
+    if (!host_ptr || size == 0) return 1;
+    volatile uint8_t *bar4 = ensure_bar4();
+    if (!bar4) return 3;
+
+    size = (size + 4095) & ~4095UL;
+    if (g_coh_offset + size > g_bar4_size) return 2;
+
+    *host_ptr = (void *)(bar4 + g_coh_offset);
+    g_coh_offset += size;
+    return 0;
+}
+
+int cxlCoherentFree(void *host_ptr)
+{
+    (void)host_ptr;
+    return 0;
+}
+
+void *cxlDeviceToHost(uint64_t dev_offset)
+{
+    volatile uint8_t *bar4 = ensure_bar4();
+    if (!bar4) return NULL;
+    return (void *)(bar4 + dev_offset);
+}
+
+int cxlCoherentFence(void)
+{
+    __sync_synchronize();
+    return 0;
+}
+
+int cxlSetBias(void *host_ptr, uint64_t size, int bias_mode)
+{
+    (void)host_ptr; (void)size; (void)bias_mode;
+    return 0;
+}
+
+int cxlGetBias(void *host_ptr, int *bias_mode)
+{
+    (void)host_ptr;
+    if (bias_mode) *bias_mode = 0;
+    return 0;
+}
+
+int cxlBiasFlip(void *host_ptr, uint64_t size, int new_bias)
+{
+    (void)host_ptr; (void)size; (void)new_bias;
+    return 0;
+}
+
+typedef struct {
+    uint64_t snoop_hits; uint64_t snoop_misses;
+    uint64_t coherency_requests; uint64_t back_invalidations;
+    uint64_t writebacks; uint64_t evictions; uint64_t bias_flips;
+    uint64_t device_bias_hits; uint64_t host_bias_hits;
+    uint64_t upgrades; uint64_t downgrades; uint64_t directory_entries;
+} CXLCoherencyStats;
+
+int cxlGetCoherencyStats(CXLCoherencyStats *stats)
+{
+    if (!stats) return 1;
+    memset(stats, 0, sizeof(*stats));
+    return 0;
+}
+
+int cxlResetCoherencyStats(void)
+{
+    return 0;
+}
+
+CUresult cuCxlGetCoherentBase(CUdeviceptr *base, size_t *size, CUdevice dev)
+{
+    (void)dev;
+    volatile uint8_t *bar4 = ensure_bar4();
+    if (base) *base = bar4 ? (CUdeviceptr)(uintptr_t)bar4 : 0;
+    if (size) *size = g_bar4_size;
+    return 0;
+}
+
 /* Library initialization/cleanup */
 __attribute__((constructor))
 static void libcuda_init(void)
@@ -1137,6 +1308,14 @@ __attribute__((destructor))
 static void libcuda_cleanup(void)
 {
     DLOG("libcuda.so unloading\n");
+    if (g_bar4_ptr) {
+        munmap((void *)g_bar4_ptr, g_bar4_size);
+        g_bar4_ptr = NULL;
+    }
+    if (g_bar4_fd >= 0) {
+        close(g_bar4_fd);
+        g_bar4_fd = -1;
+    }
     if (g_regs) {
         munmap((void *)g_regs, g_bar_size);
         g_regs = NULL;
