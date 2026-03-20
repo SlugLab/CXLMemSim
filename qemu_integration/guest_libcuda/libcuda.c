@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <errno.h>
+#include <sys/file.h>
 
 #include "cxl_gpu_cmd.h"
 
@@ -128,7 +129,24 @@ static inline void data_read(size_t offset, void *dst, size_t len)
     }
 }
 
-/* Execute command and wait for completion */
+/* Cross-process lock for command serialization.
+ * Multiple processes sharing the same BAR2 MMIO registers must serialize
+ * their full command sequences (write params → write cmd → poll status → read result).
+ * Callers that write params before execute_cmd must call cmd_lock()/cmd_unlock(). */
+static void cmd_lock(void)
+{
+    if (g_pci_fd >= 0)
+        flock(g_pci_fd, LOCK_EX);
+}
+
+static void cmd_unlock(void)
+{
+    if (g_pci_fd >= 0)
+        flock(g_pci_fd, LOCK_UN);
+}
+
+/* Execute command and wait for completion.
+ * Caller MUST hold cmd_lock() if params were written before this call. */
 static CUresult execute_cmd(uint32_t cmd)
 {
     reg_write32(CXL_GPU_REG_CMD, cmd);
@@ -148,6 +166,7 @@ static CUresult execute_cmd(uint32_t cmd)
 
     return CUDA_ERROR_UNKNOWN;
 }
+
 
 /* Find and map CXL Type 2 device */
 static int find_and_map_device(void)
@@ -316,11 +335,13 @@ CUresult cuDeviceGetCount(int *count)
     if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
     if (!count) return CUDA_ERROR_INVALID_VALUE;
 
+    cmd_lock();
     CUresult err = execute_cmd(CXL_GPU_CMD_GET_DEVICE_COUNT);
     if (err == CUDA_SUCCESS) {
         *count = reg_read64(CXL_GPU_REG_RESULT0);
         DLOG("  count=%d\n", *count);
     }
+    cmd_unlock();
     return err;
 }
 
@@ -331,11 +352,13 @@ CUresult cuDeviceGet(CUdevice *device, int ordinal)
     if (!device) return CUDA_ERROR_INVALID_VALUE;
     if (ordinal != 0) return CUDA_ERROR_INVALID_DEVICE;
 
+    cmd_lock();
     reg_write64(CXL_GPU_REG_PARAM0, ordinal);
     CUresult err = execute_cmd(CXL_GPU_CMD_GET_DEVICE);
     if (err == CUDA_SUCCESS) {
         *device = reg_read64(CXL_GPU_REG_RESULT0);
     }
+    cmd_unlock();
     return err;
 }
 
@@ -415,12 +438,14 @@ CUresult cuCtxCreate_v2(CUcontext *ctx, unsigned int flags, CUdevice dev)
     if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
     if (!ctx) return CUDA_ERROR_INVALID_VALUE;
 
+    cmd_lock();
     CUresult err = execute_cmd(CXL_GPU_CMD_CTX_CREATE);
     if (err == CUDA_SUCCESS) {
         *ctx = (CUcontext)(uintptr_t)reg_read64(CXL_GPU_REG_RESULT0);
         g_context = *ctx;
         DLOG("  ctx=%p\n", *ctx);
     }
+    cmd_unlock();
     return err;
 }
 
@@ -429,10 +454,12 @@ CUresult cuCtxDestroy_v2(CUcontext ctx)
     DLOG("cuCtxDestroy(ctx=%p)\n", ctx);
     if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
 
+    cmd_lock();
     CUresult err = execute_cmd(CXL_GPU_CMD_CTX_DESTROY);
     if (err == CUDA_SUCCESS) {
         g_context = NULL;
     }
+    cmd_unlock();
     return err;
 }
 
@@ -440,7 +467,10 @@ CUresult cuCtxSynchronize(void)
 {
     DLOG("cuCtxSynchronize\n");
     if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    return execute_cmd(CXL_GPU_CMD_CTX_SYNC);
+    cmd_lock();
+    CUresult err = execute_cmd(CXL_GPU_CMD_CTX_SYNC);
+    cmd_unlock();
+    return err;
 }
 
 CUresult cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize)
@@ -449,12 +479,14 @@ CUresult cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize)
     if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
     if (!dptr) return CUDA_ERROR_INVALID_VALUE;
 
+    cmd_lock();
     reg_write64(CXL_GPU_REG_PARAM0, bytesize);
     CUresult err = execute_cmd(CXL_GPU_CMD_MEM_ALLOC);
     if (err == CUDA_SUCCESS) {
         *dptr = reg_read64(CXL_GPU_REG_RESULT0);
         DLOG("  dptr=0x%lx\n", (unsigned long)*dptr);
     }
+    cmd_unlock();
     return err;
 }
 
@@ -463,8 +495,11 @@ CUresult cuMemFree_v2(CUdeviceptr dptr)
     DLOG("cuMemFree(dptr=0x%lx)\n", (unsigned long)dptr);
     if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
 
+    cmd_lock();
     reg_write64(CXL_GPU_REG_PARAM0, dptr);
-    return execute_cmd(CXL_GPU_CMD_MEM_FREE);
+    CUresult err = execute_cmd(CXL_GPU_CMD_MEM_FREE);
+    cmd_unlock();
+    return err;
 }
 
 CUresult cuMemcpyHtoD_v2(CUdeviceptr dstDevice, const void *srcHost, size_t byteCount)
@@ -481,11 +516,13 @@ CUresult cuMemcpyHtoD_v2(CUdeviceptr dstDevice, const void *srcHost, size_t byte
             chunk = CXL_GPU_DATA_SIZE;
         }
 
+        cmd_lock();
         data_write(0, (const uint8_t *)srcHost + offset, chunk);
         reg_write64(CXL_GPU_REG_PARAM0, dstDevice + offset);
         reg_write64(CXL_GPU_REG_PARAM1, chunk);
 
         CUresult err = execute_cmd(CXL_GPU_CMD_MEM_COPY_HTOD);
+        cmd_unlock();
         if (err != CUDA_SUCCESS) {
             return err;
         }
@@ -509,15 +546,18 @@ CUresult cuMemcpyDtoH_v2(void *dstHost, CUdeviceptr srcDevice, size_t byteCount)
             chunk = CXL_GPU_DATA_SIZE;
         }
 
+        cmd_lock();
         reg_write64(CXL_GPU_REG_PARAM0, srcDevice + offset);
         reg_write64(CXL_GPU_REG_PARAM1, chunk);
 
         CUresult err = execute_cmd(CXL_GPU_CMD_MEM_COPY_DTOH);
         if (err != CUDA_SUCCESS) {
+            cmd_unlock();
             return err;
         }
 
         data_read(0, (uint8_t *)dstHost + offset, chunk);
+        cmd_unlock();
         offset += chunk;
     }
 

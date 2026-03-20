@@ -1,6 +1,9 @@
 CC = mpicc
 MPICC = mpicc
-CFLAGS = -Wall -O3 -fPIC -shared -pthread -g
+# -fno-tree-loop-distribute-patterns: prevents GCC from converting our
+# volatile byte loops (cxl_safe_memset/memcpy) into libc memset/memcpy
+# calls that use AVX-512/SIMD and SIGILL on CXL device memory.
+CFLAGS = -Wall -O3 -fPIC -shared -pthread -g -fno-tree-loop-distribute-patterns
 LDFLAGS = -ldl -lrt -pthread
 
 SHIM_SRC = mpi_cxl_shim.c
