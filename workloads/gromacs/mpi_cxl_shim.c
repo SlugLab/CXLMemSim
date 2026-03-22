@@ -16,6 +16,8 @@
 #include <execinfo.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <setjmp.h>
+#include <ucontext.h>
 
 #define CACHELINE_SIZE 64
 #define DEFAULT_CXL_SIZE (4UL * 1024 * 1024 * 1024)  // 4GB default
@@ -78,6 +80,71 @@ static inline void cxl_safe_memset(void *dst, int c, size_t n) {
         *d++ = (unsigned char)c;
         n--;
     }
+}
+
+// ============================================================================
+// SIGILL handler: catches illegal SIMD instructions on CXL DAX memory.
+// When libc memset/memcpy uses AVX-512 on CXL pages, the CPU raises SIGILL.
+// We catch it, skip the faulting instruction, and let the caller retry with
+// cxl_safe_memset/cxl_safe_memcpy instead.
+// ============================================================================
+static __thread sigjmp_buf g_sigill_jmpbuf;
+static __thread volatile int g_sigill_armed = 0;
+
+static void sigill_handler(int sig, siginfo_t *info, void *ucontext_raw)
+{
+    (void)sig;
+    (void)info;
+    (void)ucontext_raw;
+
+    if (g_sigill_armed) {
+        g_sigill_armed = 0;
+        siglongjmp(g_sigill_jmpbuf, 1);
+    }
+
+    /* Not armed — fall back to default (abort) */
+    struct sigaction sa;
+    sa.sa_handler = SIG_DFL;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGILL, &sa, NULL);
+    raise(SIGILL);
+}
+
+static void install_sigill_handler(void)
+{
+    struct sigaction sa;
+    sa.sa_sigaction = sigill_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+    sigaction(SIGILL, &sa, NULL);
+}
+
+/* Safe wrappers: try libc fast path, fall back to byte-by-byte on SIGILL */
+static void *cxl_memset_safe(void *dst, int c, size_t n)
+{
+    if (sigsetjmp(g_sigill_jmpbuf, 1) == 0) {
+        g_sigill_armed = 1;
+        void *r = memset(dst, c, n);
+        g_sigill_armed = 0;
+        return r;
+    }
+    /* SIGILL caught — use safe byte-by-byte version */
+    cxl_safe_memset(dst, c, n);
+    return dst;
+}
+
+static void *cxl_memcpy_safe(void *dst, const void *src, size_t n)
+{
+    if (sigsetjmp(g_sigill_jmpbuf, 1) == 0) {
+        g_sigill_armed = 1;
+        void *r = memcpy(dst, src, n);
+        g_sigill_armed = 0;
+        return r;
+    }
+    /* SIGILL caught — use safe byte-by-byte version */
+    cxl_safe_memcpy(dst, src, n);
+    return dst;
 }
 
 // Add color output for better visibility
@@ -2846,6 +2913,9 @@ static void shim_init(void) {
     // Set up signal handlers for debugging
     signal(SIGSEGV, signal_handler);
     signal(SIGABRT, signal_handler);
+
+    // Install SIGILL handler to catch AVX-512 faults on CXL DAX memory
+    install_sigill_handler();
 
     // Cache hostname EARLY — before any CXL DAX mapping.
     // After DAX is mapped at a fixed address, libc functions like gethostname()
