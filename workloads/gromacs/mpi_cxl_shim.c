@@ -585,6 +585,66 @@ static inline bool is_cxl_ptr(const void *ptr) {
             (uintptr_t)ptr < (uintptr_t)g_cxl.base + g_cxl.size);
 }
 
+// ============================================================================
+// Global memset/memcpy/memmove interceptors
+// ============================================================================
+// Open MPI (and other libraries) may call libc memset/memcpy on CXL memory.
+// Glibc's AVX-512 optimized versions trigger SIGILL on CXL Type-3 device pages.
+// We intercept these globally and route CXL-targeted calls to safe (non-SIMD)
+// implementations. The overhead for non-CXL calls is a single pointer range check.
+
+static typeof(memset)  *__real_memset  = NULL;
+static typeof(memcpy)  *__real_memcpy  = NULL;
+static typeof(memmove) *__real_memmove = NULL;
+static __thread int __in_dlsym = 0;  // Guard against dlsym calling memset/memcpy
+
+static void __resolve_mem_originals(void) {
+    if (__real_memset) return;
+    __in_dlsym = 1;
+    __real_memset  = dlsym(RTLD_NEXT, "memset");
+    __real_memcpy  = dlsym(RTLD_NEXT, "memcpy");
+    __real_memmove = dlsym(RTLD_NEXT, "memmove");
+    __in_dlsym = 0;
+}
+
+void *memset(void *s, int c, size_t n) {
+    if (__in_dlsym || is_cxl_ptr(s)) {
+        cxl_safe_memset(s, c, n);
+        return s;
+    }
+    if (__builtin_expect(!__real_memset, 0))
+        __resolve_mem_originals();
+    return __real_memset(s, c, n);
+}
+
+void *memcpy(void *dst, const void *src, size_t n) {
+    if (__in_dlsym || is_cxl_ptr(dst) || is_cxl_ptr(src)) {
+        cxl_safe_memcpy(dst, src, n);
+        return dst;
+    }
+    if (__builtin_expect(!__real_memcpy, 0))
+        __resolve_mem_originals();
+    return __real_memcpy(dst, src, n);
+}
+
+void *memmove(void *dst, const void *src, size_t n) {
+    if (__in_dlsym || is_cxl_ptr(dst) || is_cxl_ptr(src)) {
+        // Safe byte-by-byte with overlap handling
+        if (dst < src || (char *)dst >= (char *)src + n) {
+            cxl_safe_memcpy(dst, src, n);
+        } else {
+            // Overlapping, copy backwards
+            volatile unsigned char *d = (volatile unsigned char *)dst + n;
+            const volatile unsigned char *s = (const volatile unsigned char *)src + n;
+            while (n--) *--d = *--s;
+        }
+        return dst;
+    }
+    if (__builtin_expect(!__real_memmove, 0))
+        __resolve_mem_originals();
+    return __real_memmove(dst, src, n);
+}
+
 // Signal handler for debugging
 static void signal_handler(int sig) {
     void *array[20];
@@ -1204,17 +1264,28 @@ static int cxl_send(const void *buf, size_t data_size, int dest, int tag, int so
 
     cxl_rank_mailbox_t *dest_mailbox = &g_cxl.mailboxes[dest];
 
-    // Atomically claim a slot in destination's queue
-    uint64_t head = atomic_fetch_add(&dest_mailbox->head, 1);
+    // Check if queue is full BEFORE claiming a slot.
+    // Previously the head was advanced unconditionally, causing unbounded growth
+    // when the receiver can't drain (e.g. cross-VM cache incoherence).
+#ifdef CXL_CACHE_COHERENCE
+    // Invalidate tail to see if receiver has drained the queue.
+    cxl_invalidate_range(&dest_mailbox->tail, sizeof(uint64_t));
+#endif
     uint64_t tail = atomic_load(&dest_mailbox->tail);
+    uint64_t head = atomic_load(&dest_mailbox->head);
 
-    // Check if queue is full (undo if so)
     if ((head - tail) >= CXL_MSG_QUEUE_SIZE) {
-        LOG_WARN("CXL send: destination %d queue full (head=%lu, tail=%lu)\n", dest, head, tail);
-        // Cannot easily undo atomic increment, but the slot will be in EMPTY state
-        // and the receiver will skip it, so this is safe (just wastes a slot)
+        static _Atomic int queue_full_warns = 0;
+        int warns = atomic_fetch_add(&queue_full_warns, 1);
+        if (warns < 5)
+            LOG_WARN("CXL send: destination %d queue full (head=%lu, tail=%lu)\n", dest, head, tail);
+        else if (warns == 5)
+            LOG_WARN("CXL send: suppressing further queue-full warnings\n");
         return -1;
     }
+
+    // Atomically claim a slot in destination's queue
+    head = atomic_fetch_add(&dest_mailbox->head, 1);
 
     uint64_t slot = head % CXL_MSG_QUEUE_SIZE;
     cxl_msg_t *msg = &dest_mailbox->messages[slot];
@@ -1269,6 +1340,12 @@ static int cxl_send(const void *buf, size_t data_size, int dest, int tag, int so
     // Mark message as ready (head was already advanced atomically above)
     atomic_store(&msg->state, CXL_MSG_READY);
 
+#ifdef CXL_CACHE_COHERENCE
+    // Flush the entire message (including state) so the receiver on another VM
+    // can see it via cache invalidation.
+    cxl_flush_range(msg, sizeof(*msg));
+#endif
+
     LOG_DEBUG("CXL send: sent %zu bytes from rank %d to rank %d (tag=%d, slot=%lu, inline=%d)\n",
               data_size, source_rank, dest, tag, slot, msg->is_inline);
 
@@ -1283,6 +1360,12 @@ static int cxl_recv(void *buf, size_t max_size, int source, int tag, size_t *act
 
     cxl_rank_mailbox_t *my_mailbox = &g_cxl.mailboxes[g_cxl.my_rank];
 
+#ifdef CXL_CACHE_COHERENCE
+    // Invalidate head/tail so we see the latest values from the sender VM.
+    cxl_invalidate_range(&my_mailbox->head, sizeof(uint64_t));
+    cxl_invalidate_range(&my_mailbox->tail, sizeof(uint64_t));
+#endif
+
     uint64_t tail = atomic_load(&my_mailbox->tail);
     uint64_t head = atomic_load(&my_mailbox->head);
 
@@ -1295,6 +1378,11 @@ static int cxl_recv(void *buf, size_t max_size, int source, int tag, size_t *act
     for (uint64_t i = tail; i < head; i++) {
         uint64_t slot = i % CXL_MSG_QUEUE_SIZE;
         cxl_msg_t *msg = &my_mailbox->messages[slot];
+
+#ifdef CXL_CACHE_COHERENCE
+        // Invalidate message state to see writes from sender VM.
+        cxl_invalidate_range(&msg->state, CACHELINE_SIZE);
+#endif
 
         // Check state
         if (atomic_load(&msg->state) != CXL_MSG_READY) {
@@ -1364,6 +1452,10 @@ static int cxl_recv(void *buf, size_t max_size, int source, int tag, size_t *act
                 }
             }
             atomic_store(&my_mailbox->tail, tail);
+#ifdef CXL_CACHE_COHERENCE
+            // Flush tail so the sender VM can see the queue has been drained.
+            cxl_flush_range(&my_mailbox->tail, sizeof(uint64_t));
+#endif
         }
 
         return 0;
@@ -1644,7 +1736,11 @@ int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
     // the CXL message for fast-path data and drains the MPI message for
     // correctness. This avoids channel mismatch regardless of receiver path
     // (MPI_Recv, MPI_Irecv, MPI_ANY_SOURCE, sub-communicators).
-    if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD && cxl_rank_available(dest)) {
+    // Only use CXL mailbox when all ranks share the same DAX device; cross-VM
+    // cache incoherence on CXL Type-3 prevents the receiver from seeing queue
+    // state updates, causing the mailbox to fill up and never drain.
+    if (g_cxl.cxl_comm_enabled && g_cxl.all_ranks_local &&
+        comm == MPI_COMM_WORLD && cxl_rank_available(dest)) {
         if (cxl_send(buf, total_size, dest, tag, g_cxl.my_rank) == 0) {
             atomic_fetch_add(&cxl_send_count, 1);
             atomic_fetch_add(&g_stats.send_cxl, 1);
@@ -1689,7 +1785,9 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
     // This keeps the CXL mailbox clean and tracks CXL recv stats.
     // The sender always ALSO sends via MPI, so we always drain via
     // orig_MPI_Recv below for guaranteed correctness.
-    if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD && g_cxl.my_rank >= 0) {
+    // Only when all ranks are local (cross-VM mailbox lacks cache coherence).
+    if (g_cxl.cxl_comm_enabled && g_cxl.all_ranks_local &&
+        comm == MPI_COMM_WORLD && g_cxl.my_rank >= 0) {
         size_t actual_size = 0;
         int cxl_source = source;  // communicator rank == world rank for COMM_WORLD
         if (cxl_recv(buf, max_size, cxl_source, tag, &actual_size) == 0) {
@@ -1726,7 +1824,9 @@ int MPI_Isend(const void *buf, int count, MPI_Datatype datatype, int dest, int t
     LOAD_ORIGINAL(MPI_Isend);
 
     // Dual-send: CXL bonus (best-effort) + always orig_MPI_Isend
-    if (g_cxl.cxl_comm_enabled && comm == MPI_COMM_WORLD && cxl_rank_available(dest)) {
+    // Only for same-node peers (cross-VM mailbox lacks cache coherence).
+    if (g_cxl.cxl_comm_enabled && g_cxl.all_ranks_local &&
+        comm == MPI_COMM_WORLD && cxl_rank_available(dest)) {
         if (cxl_send(buf, total_size, dest, tag, g_cxl.my_rank) == 0) {
             atomic_fetch_add(&cxl_isend_count, 1);
             atomic_fetch_add(&g_stats.isend_cxl, 1);
