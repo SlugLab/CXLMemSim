@@ -128,6 +128,26 @@ static int cmp_access_desc(const void *a, const void *b)
 }
 
 /* ------------------------------------------------------------------ */
+/* Safe memset/memcpy for MMIO-mapped (BAR4) coherent memory.          */
+/* glibc's optimised memset may use AVX-512 non-temporal stores that   */
+/* fault on device-mapped pages.                                        */
+/* ------------------------------------------------------------------ */
+static void cxl_memset(volatile void *dst, int val, size_t n)
+{
+    volatile unsigned char *d = (volatile unsigned char *)dst;
+    for (size_t i = 0; i < n; i++)
+        d[i] = (unsigned char)val;
+}
+
+static void cxl_memcpy(volatile void *dst, const volatile void *src, size_t n)
+{
+    volatile unsigned char *d = (volatile unsigned char *)dst;
+    const volatile unsigned char *s = (const volatile unsigned char *)src;
+    for (size_t i = 0; i < n; i++)
+        d[i] = s[i];
+}
+
+/* ------------------------------------------------------------------ */
 /* Time helpers                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -263,7 +283,10 @@ static int alloc_node(int idx, int pool)
     }
 
     GraphNode *node = (GraphNode *)m->ptr;
-    memset(node, 0, sizeof(*node));
+    if (pool == POOL_DEVICE)
+        cxl_memset(node, 0, sizeof(*node));
+    else
+        memset(node, 0, sizeof(*node));
     node->id = (uint64_t)idx;
     return 0;
 }
@@ -503,7 +526,10 @@ static int migrate_node(int idx)
     NodeMeta *m = &g_meta[idx];
     GraphNode *old_node = (GraphNode *)m->ptr;
     GraphNode tmp;
-    memcpy(&tmp, old_node, sizeof(GraphNode));
+    if (m->pool == POOL_DEVICE)
+        cxl_memcpy(&tmp, old_node, sizeof(GraphNode));
+    else
+        memcpy(&tmp, old_node, sizeof(GraphNode));
 
     int new_pool = (m->pool == POOL_DEVICE) ? POOL_HOST : POOL_DEVICE;
 
@@ -523,7 +549,10 @@ static int migrate_node(int idx)
     }
 
     /* Copy data */
-    memcpy(new_ptr, &tmp, sizeof(GraphNode));
+    if (new_pool == POOL_DEVICE)
+        cxl_memcpy(new_ptr, &tmp, sizeof(GraphNode));
+    else
+        memcpy(new_ptr, &tmp, sizeof(GraphNode));
 
     /* Free old if host (device pool is bump-allocated, no individual free) */
     if (m->pool == POOL_HOST) {
@@ -729,7 +758,7 @@ static int run_hash_table_experiment(const char *label, int ht_policy,
         return -1;
     }
     uint64_t *buckets = (uint64_t *)bucket_pool;
-    memset(buckets, 0, bucket_pool_size);
+    cxl_memset(buckets, 0, bucket_pool_size);
 
     /* Chain node storage */
     int max_chain_nodes = HT_NUM_OPS; /* worst case: all inserts */

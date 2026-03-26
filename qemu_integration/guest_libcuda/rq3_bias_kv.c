@@ -89,6 +89,18 @@ typedef struct RingSlot {
 } RingSlot;
 
 /* ------------------------------------------------------------------ */
+/* Safe memset/memcpy for MMIO-mapped (BAR4) coherent memory.         */
+/* glibc's optimised memset may use AVX-512 non-temporal stores that  */
+/* fault on device-mapped pages.                                       */
+/* ------------------------------------------------------------------ */
+static void cxl_memset(volatile void *dst, int val, size_t n)
+{
+    volatile unsigned char *d = (volatile unsigned char *)dst;
+    for (size_t i = 0; i < n; i++)
+        d[i] = (unsigned char)val;
+}
+
+/* ------------------------------------------------------------------ */
 /* Timing helpers                                                     */
 /* ------------------------------------------------------------------ */
 static inline uint64_t ts_to_ns(const struct timespec *ts)
@@ -368,7 +380,7 @@ static uint64_t run_kv_trial(KVEntry *kv, int nkeys, double theta,
                               int ops_per_thread)
 {
     /* Zero entries */
-    memset(kv, 0, sizeof(KVEntry) * (size_t)nkeys);
+    cxl_memset(kv, 0, sizeof(KVEntry) * (size_t)nkeys);
     for (int k = 0; k < nkeys; k++)
         kv[k].key = (uint64_t)k;
     cxlCoherentFence();
@@ -548,7 +560,7 @@ static uint64_t run_ring_trial(volatile RingSlot *ring, int slots,
                                 int records)
 {
     /* Clear all slots */
-    memset((void *)ring, 0, sizeof(RingSlot) * (size_t)slots);
+    cxl_memset((void *)ring, 0, sizeof(RingSlot) * (size_t)slots);
     cxlCoherentFence();
 
     pthread_barrier_t barrier;

@@ -163,6 +163,7 @@ private:
     std::atomic<uint64_t> coherency_invalidations{0};
     std::atomic<uint64_t> coherency_downgrades{0};
     std::atomic<uint64_t> back_invalidations{0};
+    std::atomic<uint64_t> total_latency_ns{0};  // accumulated latency for avg calculation
 
     // LSA (Label Storage Area) - shared across all QEMU guests
     std::vector<uint8_t> lsa_data_;
@@ -186,6 +187,9 @@ private:
             SPDLOG_INFO("  Coherency: invalidations={}, downgrades={}, back_inv={}",
                        coherency_invalidations.load(), coherency_downgrades.load(),
                        back_invalidations.load());
+            if (total_ops > 0) {
+                SPDLOG_INFO("  Avg latency: {} ns", total_latency_ns.load() / total_ops);
+            }
         }
     }
     
@@ -953,11 +957,11 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     // Increment active requests
     congestion_info.active_requests++;
     
-    // Calculate base latency using CXL controller
-    std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
-    access_elem.push_back(std::make_tuple((uint64_t)req.addr, (uint64_t)req.size));
-    double base_latency = controller->calculate_latency(access_elem, controller->dramlatency);
-    
+    // Base CXL device latency. The tree-traversal calculate_latency() requires
+    // perf-populated address entries which don't exist in server mode, so use
+    // the configured DRAM latency directly.
+    double base_latency = controller->dramlatency;
+
     // Handle coherency and memory operation
     {
         std::unique_lock<std::shared_mutex> lock(memory_mutex);
@@ -1147,7 +1151,8 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     // Fill response
     resp.status = 0;
     resp.latency_ns = total_latency;
-    
+    total_latency_ns += total_latency;
+
     // Enhanced logging for CXL Type3 operations
     const char* op_result = (req.op_type == OP_READ) ? "CXL_TYPE3_READ_COMPLETE" : "CXL_TYPE3_WRITE_COMPLETE";
     // SPDLOG_INFO("Thread {}: {} addr=0x{:x} size={} latency={}ns (base={}ns congestion={:.2f}x coherency_miss={})",
@@ -1171,10 +1176,8 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
     // Increment active requests for congestion tracking
     congestion_info.active_requests++;
 
-    // Calculate base latency using CXL controller
-    std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
-    access_elem.push_back(std::make_tuple((uint64_t)req.addr, (uint64_t)sizeof(uint64_t)));
-    double base_latency = controller->calculate_latency(access_elem, controller->dramlatency);
+    // Atomic: DRAM latency + serialization overhead
+    double base_latency = controller->dramlatency + 20;
 
     // Atomic operations require exclusive access with proper coherency
     {
@@ -1307,6 +1310,7 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
     // Fill response
     resp.status = 0;
     resp.latency_ns = total_latency;
+    total_latency_ns += total_latency;
 }
 
 void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
@@ -1701,10 +1705,8 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
 
         PGASMemoryEntry* entry = &entries[cacheline_idx];
 
-        // Calculate latency using CXL controller
-        std::vector<std::tuple<uint64_t, uint64_t>> access_elem;
-        access_elem.push_back(std::make_tuple(addr, slot->size));
-        double base_latency = controller->calculate_latency(access_elem, controller->dramlatency);
+        // Base CXL device latency (server mode has no perf-populated address entries)
+        double base_latency = controller->dramlatency;
 
         switch (req) {
             case CXL_SHM_REQ_READ: {
