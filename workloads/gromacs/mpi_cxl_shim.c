@@ -306,6 +306,7 @@ typedef struct cxl_window {
     MPI_Comm comm;                   // Associated communicator
     bool cxl_enabled;                // Whether CXL acceleration is enabled
     uint32_t win_id;                 // Window ID
+    _Atomic int pending_mpi_rma;     // Count of RMA ops that fell back to MPI (not CXL direct)
     struct cxl_window *next;         // Linked list for tracking
 } cxl_window_t;
 
@@ -1836,6 +1837,7 @@ static cxl_window_t *register_cxl_window(MPI_Win win, void *base, size_t size,
     cxl_win->win_id = atomic_fetch_add(&g_next_win_id, 1);
     cxl_win->cxl_enabled = false;
     cxl_win->shm = NULL;
+    atomic_store(&cxl_win->pending_mpi_rma, 0);
 
     // Allocate shared memory for window metadata if CXL is available
     if (g_cxl.initialized && g_cxl.cxl_comm_enabled) {
@@ -1993,11 +1995,29 @@ int MPI_Win_allocate(MPI_Aint size, int disp_unit, MPI_Info info,
                      MPI_Comm comm, void *baseptr, MPI_Win *win) {
     LOG_DEBUG("MPI_Win_allocate: size=%ld, disp_unit=%d\n", (long)size, disp_unit);
 
-    // Try to allocate from CXL memory first
+    int rank, comm_size;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &comm_size);
+
+    // Try to allocate from CXL memory first.
+    // Rank 0 allocates a single block for ALL ranks to avoid cross-VM
+    // allocation races (atomic_fetch_add may not be coherent on CXL Type-3).
     void *cxl_base = NULL;
     if (g_cxl.initialized && g_cxl.cxl_comm_enabled) {
-        cxl_base = allocate_cxl_memory(size);
-        if (cxl_base) {
+        LOAD_ORIGINAL(MPI_Bcast);
+        cxl_rptr_t block_rptr = CXL_RPTR_NULL;
+        MPI_Aint alloc_size = size > 0 ? size : (MPI_Aint)CXL_ALIGNMENT;
+
+        if (rank == 0) {
+            void *block = allocate_cxl_memory((size_t)alloc_size * comm_size);
+            if (block) {
+                block_rptr = ptr_to_rptr(block);
+            }
+        }
+        orig_MPI_Bcast(&block_rptr, sizeof(block_rptr), MPI_BYTE, 0, comm);
+
+        if (block_rptr != CXL_RPTR_NULL) {
+            cxl_base = (char *)rptr_to_ptr(block_rptr) + (size_t)rank * alloc_size;
             LOG_DEBUG("MPI_Win_allocate: using CXL memory at %p (rptr=0x%lx)\n",
                       cxl_base, ptr_to_rptr(cxl_base));
         }
@@ -2016,10 +2036,6 @@ int MPI_Win_allocate(MPI_Aint size, int disp_unit, MPI_Info info,
     }
 
     if (ret == MPI_SUCCESS) {
-        int rank, comm_size;
-        MPI_Comm_rank(comm, &rank);
-        MPI_Comm_size(comm, &comm_size);
-
         cxl_window_t *cxl_win = register_cxl_window(*win, *(void **)baseptr, size,
                                                      rank, comm_size, comm);
         if (cxl_win && cxl_win->shm) {
@@ -2099,7 +2115,9 @@ int MPI_Put(const void *origin_addr, int origin_count, MPI_Datatype origin_datat
     }
 
 put_fallback:
-    // Fallback to MPI
+    // Fallback to MPI - track so flush knows to call orig
+    if (cxl_win)
+        atomic_fetch_add(&cxl_win->pending_mpi_rma, 1);
     return orig_MPI_Put(origin_addr, origin_count, origin_datatype,
                         target_rank, target_disp, target_count,
                         target_datatype, win);
@@ -2157,7 +2175,9 @@ int MPI_Get(void *origin_addr, int origin_count, MPI_Datatype origin_datatype,
     }
 
 get_fallback:
-    // Fallback to MPI
+    // Fallback to MPI - track so flush knows to call orig
+    if (cxl_win)
+        atomic_fetch_add(&cxl_win->pending_mpi_rma, 1);
     return orig_MPI_Get(origin_addr, origin_count, origin_datatype,
                         target_rank, target_disp, target_count,
                         target_datatype, win);
@@ -2214,7 +2234,9 @@ int MPI_Accumulate(const void *origin_addr, int origin_count, MPI_Datatype origi
     }
 
 acc_fallback:
-    // Fallback to MPI
+    // Fallback to MPI - track so flush knows to call orig
+    if (cxl_win)
+        atomic_fetch_add(&cxl_win->pending_mpi_rma, 1);
     return orig_MPI_Accumulate(origin_addr, origin_count, origin_datatype,
                                 target_rank, target_disp, target_count,
                                 target_datatype, op, win);
@@ -2286,6 +2308,7 @@ int MPI_Win_lock(int lock_type, int rank, int assert, MPI_Win win) {
         }
 
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        atomic_store(&cxl_win->pending_mpi_rma, 0);
         LOG_DEBUG("MPI_Win_lock: CXL lock acquired (type=%d, rank=%d)\n", lock_type, rank);
     }
 
@@ -2321,11 +2344,24 @@ int MPI_Win_unlock(int rank, MPI_Win win) {
 int MPI_Win_flush(int rank, MPI_Win win) {
     LOG_DEBUG("MPI_Win_flush: rank=%d\n", rank);
 
-    LOAD_ORIGINAL(MPI_Win_flush);
-
     // Memory fence for CXL
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
+    // If all RMA ops were handled via CXL direct, skip the MPI-level flush.
+    // Calling orig_MPI_Win_flush on windows created via MPI_Win_create with CXL
+    // memory can trigger UCX OSC errors and eventually crash the transport.
+    cxl_window_t *cxl_win = find_cxl_window(win);
+    if (cxl_win && cxl_win->cxl_enabled) {
+        int pending = atomic_load(&cxl_win->pending_mpi_rma);
+        if (pending == 0) {
+            LOG_DEBUG("MPI_Win_flush: CXL-only epoch, skipping MPI flush\n");
+            return MPI_SUCCESS;
+        }
+        // Some ops fell back to MPI - must flush those
+        atomic_store(&cxl_win->pending_mpi_rma, 0);
+    }
+
+    LOAD_ORIGINAL(MPI_Win_flush);
     return orig_MPI_Win_flush(rank, win);
 }
 
