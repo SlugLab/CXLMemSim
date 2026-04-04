@@ -298,16 +298,18 @@ typedef struct __attribute__((aligned(CACHELINE_SIZE))) {
 // Local window tracking structure
 typedef struct cxl_window {
     MPI_Win mpi_win;                 // Original MPI window
-    cxl_win_shm_t *shm;              // Shared memory window metadata
-    void *local_base;                // Local base address
-    size_t local_size;               // Local window size
-    int my_rank;                     // Rank in window communicator
-    int comm_size;                   // Communicator size
-    MPI_Comm comm;                   // Associated communicator
-    bool cxl_enabled;                // Whether CXL acceleration is enabled
-    uint32_t win_id;                 // Window ID
-    _Atomic int pending_mpi_rma;     // Count of RMA ops that fell back to MPI (not CXL direct)
-    struct cxl_window *next;         // Linked list for tracking
+    cxl_win_shm_t *shm;             // Window metadata (heap-allocated, exchanged via MPI)
+    void *local_base;               // MPI-allocated base (RDMA-safe, returned to user)
+    void *cxl_base;                 // CXL mirror for same-VM direct access (NULL if unavail)
+    size_t local_size;              // Local window size
+    int my_rank;                    // Rank in window communicator
+    int comm_size;                  // Communicator size
+    MPI_Comm comm;                  // Associated communicator
+    bool cxl_enabled;               // Whether CXL acceleration is enabled for any local pair
+    bool *rank_is_local;            // rank_is_local[r] = true if rank r shares same phys DAX
+    uint32_t win_id;                // Window ID
+    _Atomic int pending_mpi_rma;    // Count of RMA ops that fell back to MPI (not CXL direct)
+    struct cxl_window *next;        // Linked list for tracking
 } cxl_window_t;
 
 // Collective buffer structure in shared memory
@@ -1922,14 +1924,25 @@ static cxl_window_t *find_cxl_window(MPI_Win win) {
     return NULL;
 }
 
-// Register a new CXL window
-static cxl_window_t *register_cxl_window(MPI_Win win, void *base, size_t size,
-                                          int rank, int comm_size, MPI_Comm comm) {
+// Lightweight exchange struct for MPI_Allgather (no _Atomic fields)
+typedef struct {
+    cxl_rptr_t base_rptr;
+    uint64_t size;
+    int owner_rank;
+    int _pad;
+} cxl_rank_xchg_t;
+
+// Register a new CXL window with multi-VM aware metadata exchange.
+// mpi_base: RDMA-safe pointer returned by orig_MPI_Win_allocate (returned to user)
+// cxl_base: CXL mirror allocation for same-VM direct access (may be NULL)
+static cxl_window_t *register_cxl_window(MPI_Win win, void *mpi_base, void *cxl_base,
+                                          size_t size, int rank, int comm_size, MPI_Comm comm) {
     cxl_window_t *cxl_win = malloc(sizeof(cxl_window_t));
     if (!cxl_win) return NULL;
 
     cxl_win->mpi_win = win;
-    cxl_win->local_base = base;
+    cxl_win->local_base = mpi_base;
+    cxl_win->cxl_base = cxl_base;
     cxl_win->local_size = size;
     cxl_win->my_rank = rank;
     cxl_win->comm_size = comm_size;
@@ -1937,83 +1950,87 @@ static cxl_window_t *register_cxl_window(MPI_Win win, void *base, size_t size,
     cxl_win->win_id = atomic_fetch_add(&g_next_win_id, 1);
     cxl_win->cxl_enabled = false;
     cxl_win->shm = NULL;
+    cxl_win->rank_is_local = NULL;
     atomic_store(&cxl_win->pending_mpi_rma, 0);
 
-    // Allocate shared memory for window metadata if CXL is available
     if (g_cxl.initialized && g_cxl.cxl_comm_enabled) {
-        LOAD_ORIGINAL(MPI_Bcast);
+        LOAD_ORIGINAL(MPI_Allgather);
         LOAD_ORIGINAL(MPI_Barrier);
 
-        // Only rank 0 allocates the shared window metadata structure
-        // Then broadcast the rptr to all ranks so they share the same structure
-        cxl_rptr_t shm_rptr = CXL_RPTR_NULL;
+        // --- Step 1: Build locality map via hostname exchange ---
+        char my_hostname[256] = {0};
+        gethostname(my_hostname, sizeof(my_hostname));
+        char *all_hostnames = malloc(256 * comm_size);
+        if (!all_hostnames) goto skip_cxl;
 
-        if (rank == 0) {
-            cxl_win->shm = (cxl_win_shm_t *)allocate_cxl_memory(sizeof(cxl_win_shm_t));
-            if (cxl_win->shm) {
-                shm_rptr = ptr_to_rptr(cxl_win->shm);
-                // Initialize the shared structure
-                cxl_win->shm->magic = CXL_WIN_MAGIC;
-                cxl_win->shm->win_id = cxl_win->win_id;
-                atomic_store(&cxl_win->shm->ref_count, 0);
-                atomic_store(&cxl_win->shm->global_fence, 0);
-                cxl_win->shm->comm_size = comm_size;
-                cxl_win->shm->disp_unit = 1;
-                atomic_store(&cxl_win->shm->barrier_count, 0);
-                atomic_store(&cxl_win->shm->barrier_sense, 0);
-                // Initialize all rank info entries
-                for (int r = 0; r < comm_size && r < CXL_MAX_RANKS; r++) {
-                    cxl_win->shm->ranks[r].base_rptr = CXL_RPTR_NULL;
-                    cxl_win->shm->ranks[r].size = 0;
-                    cxl_win->shm->ranks[r].owner_rank = r;
-                    atomic_store(&cxl_win->shm->ranks[r].lock_count, 0);
-                    atomic_store(&cxl_win->shm->ranks[r].exclusive_lock, (uint32_t)-1);
-                    atomic_store(&cxl_win->shm->ranks[r].fence_counter, 0);
-                    atomic_store(&cxl_win->shm->ranks[r].sync_state, CXL_WIN_UNLOCKED);
-                }
-                __atomic_thread_fence(__ATOMIC_SEQ_CST);
-            }
+        orig_MPI_Allgather(my_hostname, 256, MPI_BYTE,
+                           all_hostnames, 256, MPI_BYTE, comm);
+
+        cxl_win->rank_is_local = calloc(comm_size, sizeof(bool));
+        if (!cxl_win->rank_is_local) { free(all_hostnames); goto skip_cxl; }
+
+        bool has_local_peer = false;
+        for (int r = 0; r < comm_size; r++) {
+            cxl_win->rank_is_local[r] = (strcmp(my_hostname, &all_hostnames[r * 256]) == 0);
+            if (r != rank && cxl_win->rank_is_local[r]) has_local_peer = true;
+        }
+        free(all_hostnames);
+
+        // --- Step 2: Heap-allocate window metadata (NOT in CXL!) ---
+        cxl_win->shm = calloc(1, sizeof(cxl_win_shm_t));
+        if (!cxl_win->shm) goto skip_cxl;
+
+        cxl_win->shm->magic = CXL_WIN_MAGIC;
+        cxl_win->shm->win_id = cxl_win->win_id;
+        cxl_win->shm->comm_size = comm_size;
+        cxl_win->shm->disp_unit = 1;
+        atomic_store(&cxl_win->shm->ref_count, comm_size);
+        atomic_store(&cxl_win->shm->global_fence, 0);
+        atomic_store(&cxl_win->shm->barrier_count, 0);
+        atomic_store(&cxl_win->shm->barrier_sense, 0);
+
+        // --- Step 3: Exchange CXL base pointers via MPI ---
+        cxl_rank_xchg_t my_xchg = {0};
+        my_xchg.owner_rank = rank;
+        if (cxl_base && is_cxl_ptr(cxl_base)) {
+            my_xchg.base_rptr = ptr_to_rptr(cxl_base);
+            my_xchg.size = size;
+        } else {
+            my_xchg.base_rptr = CXL_RPTR_NULL;
+            my_xchg.size = 0;
         }
 
-        // Broadcast the shm rptr from rank 0 to all ranks
-        orig_MPI_Bcast(&shm_rptr, sizeof(shm_rptr), MPI_BYTE, 0, comm);
+        cxl_rank_xchg_t *all_xchg = malloc(comm_size * sizeof(cxl_rank_xchg_t));
+        if (!all_xchg) { free(cxl_win->shm); cxl_win->shm = NULL; goto skip_cxl; }
 
-        // All ranks convert rptr to local pointer
-        if (shm_rptr != CXL_RPTR_NULL) {
-            cxl_win->shm = (cxl_win_shm_t *)rptr_to_ptr(shm_rptr);
+        orig_MPI_Allgather(&my_xchg, sizeof(cxl_rank_xchg_t), MPI_BYTE,
+                           all_xchg, sizeof(cxl_rank_xchg_t), MPI_BYTE, comm);
+
+        // Populate per-rank info from exchange results
+        for (int r = 0; r < comm_size && r < CXL_MAX_RANKS; r++) {
+            cxl_win->shm->ranks[r].base_rptr = all_xchg[r].base_rptr;
+            cxl_win->shm->ranks[r].size = all_xchg[r].size;
+            cxl_win->shm->ranks[r].owner_rank = all_xchg[r].owner_rank;
+            atomic_store(&cxl_win->shm->ranks[r].lock_count, 0);
+            atomic_store(&cxl_win->shm->ranks[r].exclusive_lock, (uint32_t)-1);
+            atomic_store(&cxl_win->shm->ranks[r].fence_counter, 0);
+            atomic_store(&cxl_win->shm->ranks[r].sync_state, CXL_WIN_UNLOCKED);
         }
+        free(all_xchg);
 
-        if (cxl_win->shm) {
-            // Now all ranks share the same shm structure
-            // Register this rank's window region
-            cxl_win_rank_info_t *rank_info = &cxl_win->shm->ranks[rank];
+        // CXL acceleration enabled if we have a CXL mirror AND at least one local peer
+        cxl_win->cxl_enabled = (cxl_base != NULL) && has_local_peer;
 
-            // Only use CXL acceleration if base is already in CXL memory
-            // Copying non-CXL buffers would break MPI semantics since
-            // Put/Get/Accumulate would modify the copy, not the original
-            if (is_cxl_ptr(base)) {
-                rank_info->base_rptr = ptr_to_rptr(base);
-                rank_info->size = size;
-                __atomic_thread_fence(__ATOMIC_SEQ_CST);
-                atomic_fetch_add(&cxl_win->shm->ref_count, 1);
-                cxl_win->cxl_enabled = true;
-            } else {
-                // Non-CXL buffer - disable CXL acceleration for this window
-                rank_info->base_rptr = CXL_RPTR_NULL;
-                rank_info->size = 0;
-                cxl_win->cxl_enabled = false;
-                LOG_DEBUG("Window base %p is not in CXL memory, disabling CXL acceleration\n", base);
-            }
+        orig_MPI_Barrier(comm);
 
-            // Barrier to ensure all ranks have registered before proceeding
-            orig_MPI_Barrier(comm);
-
-            LOG_DEBUG("Registered CXL window %u for rank %d: shm_rptr=0x%lx, base_rptr=0x%lx, size=%zu\n",
-                      cxl_win->win_id, rank, (unsigned long)shm_rptr,
-                      (unsigned long)rank_info->base_rptr, size);
-        }
+        LOG_DEBUG("Registered CXL window %u for rank %d: mpi_base=%p, cxl_base=%p, "
+                  "cxl_rptr=0x%lx, local_peers=%s, size=%zu\n",
+                  cxl_win->win_id, rank, mpi_base, cxl_base,
+                  (unsigned long)my_xchg.base_rptr,
+                  has_local_peer ? "yes" : "no", size);
     }
 
+skip_cxl:
     // Add to global list
     pthread_mutex_lock(&g_windows_lock);
     cxl_win->next = g_windows;
@@ -2032,9 +2049,9 @@ static void unregister_cxl_window(MPI_Win win) {
             cxl_window_t *to_free = *curr;
             *curr = (*curr)->next;
 
-            if (to_free->shm) {
-                atomic_fetch_sub(&to_free->shm->ref_count, 1);
-            }
+            // shm is heap-allocated in multi-VM design, free it
+            free(to_free->shm);
+            free(to_free->rank_is_local);
 
             free(to_free);
             pthread_mutex_unlock(&g_windows_lock);
@@ -2043,6 +2060,16 @@ static void unregister_cxl_window(MPI_Win win) {
         curr = &(*curr)->next;
     }
     pthread_mutex_unlock(&g_windows_lock);
+}
+
+// Sync MPI-allocated buffer → CXL mirror so same-VM CXL direct reads see latest data.
+// Called at sync points (fence, flush, lock, unlock) to refresh the CXL mirror
+// after potential remote Puts or local pointer writes to the MPI buffer.
+static inline void cxl_sync_mirror(cxl_window_t *cxl_win) {
+    if (cxl_win && cxl_win->cxl_base && cxl_win->local_base && cxl_win->local_size > 0) {
+        cxl_safe_memcpy(cxl_win->cxl_base, cxl_win->local_base, cxl_win->local_size);
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+    }
 }
 
 // CXL barrier implementation using shared memory
@@ -2079,7 +2106,11 @@ int MPI_Win_create(void *base, MPI_Aint size, int disp_unit, MPI_Info info,
         MPI_Comm_rank(comm, &rank);
         MPI_Comm_size(comm, &comm_size);
 
-        cxl_window_t *cxl_win = register_cxl_window(*win, base, size, rank, comm_size, comm);
+        // For MPI_Win_create, the user provides the base. If it's in CXL, use
+        // it as the CXL mirror; otherwise no CXL mirror available.
+        void *cxl_base = (g_cxl.cxl_comm_enabled && is_cxl_ptr(base)) ? base : NULL;
+        cxl_window_t *cxl_win = register_cxl_window(*win, base, cxl_base,
+                                                     size, rank, comm_size, comm);
         if (cxl_win && cxl_win->shm) {
             cxl_win->shm->disp_unit = disp_unit;
         }
@@ -2099,53 +2130,38 @@ int MPI_Win_allocate(MPI_Aint size, int disp_unit, MPI_Info info,
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &comm_size);
 
-    // Try to allocate from CXL memory first.
-    // Rank 0 allocates a single block for ALL ranks to avoid cross-VM
-    // allocation races (atomic_fetch_add may not be coherent on CXL Type-3).
+    // Always use original MPI_Win_allocate for RDMA-safe window memory.
+    // This ensures cross-VM MPI_Get/Put works correctly over the network
+    // (UCX can register MPI-managed memory for RDMA but not DAX memory).
+    LOAD_ORIGINAL(MPI_Win_allocate);
+    int ret = orig_MPI_Win_allocate(size, disp_unit, info, comm, baseptr, win);
+
+    if (ret != MPI_SUCCESS) return ret;
+
+    // Additionally allocate CXL memory as a mirror for same-VM direct access.
+    // Same-VM ranks share the same physical DAX device, so CXL direct loads
+    // from this mirror bypass MPI overhead entirely.
     void *cxl_base = NULL;
-    if (g_cxl.initialized && g_cxl.cxl_comm_enabled) {
-        LOAD_ORIGINAL(MPI_Bcast);
-        cxl_rptr_t block_rptr = CXL_RPTR_NULL;
-        MPI_Aint alloc_size = size > 0 ? size : (MPI_Aint)CXL_ALIGNMENT;
-
-        if (rank == 0) {
-            void *block = allocate_cxl_memory((size_t)alloc_size * comm_size);
-            if (block) {
-                block_rptr = ptr_to_rptr(block);
-            }
-        }
-        orig_MPI_Bcast(&block_rptr, sizeof(block_rptr), MPI_BYTE, 0, comm);
-
-        if (block_rptr != CXL_RPTR_NULL) {
-            cxl_base = (char *)rptr_to_ptr(block_rptr) + (size_t)rank * alloc_size;
-            LOG_DEBUG("MPI_Win_allocate: using CXL memory at %p (rptr=0x%lx)\n",
+    if (g_cxl.initialized && g_cxl.cxl_comm_enabled && size > 0) {
+        cxl_base = allocate_cxl_memory((size_t)size);
+        if (cxl_base) {
+            // Initialize CXL mirror from MPI buffer
+            cxl_safe_memcpy(cxl_base, *(void **)baseptr, size);
+            LOG_DEBUG("MPI_Win_allocate: CXL mirror at %p (rptr=0x%lx)\n",
                       cxl_base, ptr_to_rptr(cxl_base));
         }
     }
 
-    LOAD_ORIGINAL(MPI_Win_allocate);
-
-    int ret;
-    if (cxl_base) {
-        // Use MPI_Win_create with our CXL memory
-        LOAD_ORIGINAL(MPI_Win_create);
-        ret = orig_MPI_Win_create(cxl_base, size, disp_unit, info, comm, win);
-        *(void **)baseptr = cxl_base;
-    } else {
-        ret = orig_MPI_Win_allocate(size, disp_unit, info, comm, baseptr, win);
+    // Register window with both MPI base and CXL mirror; exchange metadata via MPI
+    cxl_window_t *cxl_win = register_cxl_window(*win, *(void **)baseptr, cxl_base,
+                                                 size, rank, comm_size, comm);
+    if (cxl_win && cxl_win->shm) {
+        cxl_win->shm->disp_unit = disp_unit;
     }
 
-    if (ret == MPI_SUCCESS) {
-        cxl_window_t *cxl_win = register_cxl_window(*win, *(void **)baseptr, size,
-                                                     rank, comm_size, comm);
-        if (cxl_win && cxl_win->shm) {
-            cxl_win->shm->disp_unit = disp_unit;
-        }
-
-        LOG_INFO("MPI_Win_allocate: allocated window %p, base=%p, CXL=%s\n",
-                 (void *)*win, *(void **)baseptr,
-                 (cxl_win && cxl_win->cxl_enabled) ? "enabled" : "disabled");
-    }
+    LOG_INFO("MPI_Win_allocate: window %p, mpi_base=%p, cxl_mirror=%p, CXL=%s\n",
+             (void *)*win, *(void **)baseptr, cxl_base,
+             (cxl_win && cxl_win->cxl_enabled) ? "enabled" : "disabled");
 
     return ret;
 }
@@ -2179,8 +2195,9 @@ int MPI_Put(const void *origin_addr, int origin_count, MPI_Datatype origin_datat
 
     cxl_window_t *cxl_win = find_cxl_window(win);
 
-    // Try CXL direct put
-    if (cxl_win && cxl_win->cxl_enabled && cxl_win->shm) {
+    // Try CXL direct put for same-VM targets
+    if (cxl_win && cxl_win->cxl_enabled && cxl_win->shm &&
+        cxl_win->rank_is_local && cxl_win->rank_is_local[target_rank]) {
         cxl_win_rank_info_t *target_info = &cxl_win->shm->ranks[target_rank];
 
         if (target_info->base_rptr != CXL_RPTR_NULL) {
@@ -2194,13 +2211,12 @@ int MPI_Put(const void *origin_addr, int origin_count, MPI_Datatype origin_datat
                 size_t origin_bytes = (size_t)origin_count * origin_size;
                 void *target_addr = (char *)target_base + target_disp * cxl_win->shm->disp_unit;
 
-                // Direct memory copy via CXL (use safe copy to avoid AVX-512 issues)
+                // CXL direct write to target's CXL mirror (same-VM, shared physical DAX)
                 cxl_safe_memcpy(target_addr, origin_addr, origin_bytes);
 
 #ifdef CXL_CACHE_COHERENCE
                 cxl_flush_range(target_addr, origin_bytes);
 #endif
-                // Memory fence to ensure visibility
                 __atomic_thread_fence(__ATOMIC_RELEASE);
 
                 int cxl_num = atomic_fetch_add(&cxl_put_count, 1);
@@ -2209,13 +2225,17 @@ int MPI_Put(const void *origin_addr, int origin_count, MPI_Datatype origin_datat
                 LOG_DEBUG("MPI_Put[%d]: CXL direct put #%d (%zu bytes to rank %d @ offset %ld)\n",
                           call_num, cxl_num, origin_bytes, target_rank, (long)target_disp);
 
-                return MPI_SUCCESS;
+                // Also issue MPI Put to keep MPI buffer in sync for cross-VM readers
+                atomic_fetch_add(&cxl_win->pending_mpi_rma, 1);
+                return orig_MPI_Put(origin_addr, origin_count, origin_datatype,
+                                    target_rank, target_disp, target_count,
+                                    target_datatype, win);
             }
         }
     }
 
 put_fallback:
-    // Fallback to MPI - track so flush knows to call orig
+    // Cross-VM or CXL unavailable: use MPI (RDMA-safe)
     if (cxl_win)
         atomic_fetch_add(&cxl_win->pending_mpi_rma, 1);
     return orig_MPI_Put(origin_addr, origin_count, origin_datatype,
@@ -2239,8 +2259,9 @@ int MPI_Get(void *origin_addr, int origin_count, MPI_Datatype origin_datatype,
 
     cxl_window_t *cxl_win = find_cxl_window(win);
 
-    // Try CXL direct get
-    if (cxl_win && cxl_win->cxl_enabled && cxl_win->shm) {
+    // Try CXL direct get (only for same-VM targets sharing physical DAX)
+    if (cxl_win && cxl_win->cxl_enabled && cxl_win->shm &&
+        cxl_win->rank_is_local && cxl_win->rank_is_local[target_rank]) {
         cxl_win_rank_info_t *target_info = &cxl_win->shm->ranks[target_rank];
 
         if (target_info->base_rptr != CXL_RPTR_NULL) {
@@ -2260,7 +2281,7 @@ int MPI_Get(void *origin_addr, int origin_count, MPI_Datatype origin_datatype,
                 // Memory fence before reading
                 __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
-                // Direct memory copy via CXL (use safe copy to avoid AVX-512 issues)
+                // Direct memory copy from target's CXL mirror (same physical DAX)
                 cxl_safe_memcpy(origin_addr, target_addr, origin_bytes);
 
                 int cxl_num = atomic_fetch_add(&cxl_get_count, 1);
@@ -2275,7 +2296,7 @@ int MPI_Get(void *origin_addr, int origin_count, MPI_Datatype origin_datatype,
     }
 
 get_fallback:
-    // Fallback to MPI - track so flush knows to call orig
+    // Cross-VM or CXL unavailable: use MPI (RDMA over network)
     if (cxl_win)
         atomic_fetch_add(&cxl_win->pending_mpi_rma, 1);
     return orig_MPI_Get(origin_addr, origin_count, origin_datatype,
@@ -2298,8 +2319,9 @@ int MPI_Accumulate(const void *origin_addr, int origin_count, MPI_Datatype origi
 
     cxl_window_t *cxl_win = find_cxl_window(win);
 
-    // Try CXL direct accumulate for simple operations
-    if (cxl_win && cxl_win->cxl_enabled && cxl_win->shm && op == MPI_SUM) {
+    // Try CXL direct accumulate for same-VM targets with simple operations
+    if (cxl_win && cxl_win->cxl_enabled && cxl_win->shm && op == MPI_SUM &&
+        cxl_win->rank_is_local && cxl_win->rank_is_local[target_rank]) {
         cxl_win_rank_info_t *target_info = &cxl_win->shm->ranks[target_rank];
 
         if (target_info->base_rptr != CXL_RPTR_NULL) {
@@ -2310,7 +2332,7 @@ int MPI_Accumulate(const void *origin_addr, int origin_count, MPI_Datatype origi
                     goto acc_fallback;
                 void *target_addr = (char *)target_base + target_disp * cxl_win->shm->disp_unit;
 
-                // Simple accumulate for common types
+                // CXL direct accumulate on same-VM target's CXL mirror
                 if (origin_datatype == MPI_DOUBLE) {
                     double *src = (double *)origin_addr;
                     double *dst = (double *)target_addr;
@@ -2319,7 +2341,11 @@ int MPI_Accumulate(const void *origin_addr, int origin_count, MPI_Datatype origi
                                            *(long long *)&src[i], __ATOMIC_RELAXED);
                     }
                     LOG_DEBUG("MPI_Accumulate[%d]: CXL direct accumulate (MPI_SUM, double)\n", call_num);
-                    return MPI_SUCCESS;
+                    // Also issue MPI Accumulate for cross-VM consistency
+                    atomic_fetch_add(&cxl_win->pending_mpi_rma, 1);
+                    return orig_MPI_Accumulate(origin_addr, origin_count, origin_datatype,
+                                                target_rank, target_disp, target_count,
+                                                target_datatype, op, win);
                 } else if (origin_datatype == MPI_INT) {
                     int *src = (int *)origin_addr;
                     _Atomic int *dst = (_Atomic int *)target_addr;
@@ -2327,14 +2353,17 @@ int MPI_Accumulate(const void *origin_addr, int origin_count, MPI_Datatype origi
                         atomic_fetch_add(&dst[i], src[i]);
                     }
                     LOG_DEBUG("MPI_Accumulate[%d]: CXL direct accumulate (MPI_SUM, int)\n", call_num);
-                    return MPI_SUCCESS;
+                    atomic_fetch_add(&cxl_win->pending_mpi_rma, 1);
+                    return orig_MPI_Accumulate(origin_addr, origin_count, origin_datatype,
+                                                target_rank, target_disp, target_count,
+                                                target_datatype, op, win);
                 }
             }
         }
     }
 
 acc_fallback:
-    // Fallback to MPI - track so flush knows to call orig
+    // Cross-VM or CXL unavailable: use MPI
     if (cxl_win)
         atomic_fetch_add(&cxl_win->pending_mpi_rma, 1);
     return orig_MPI_Accumulate(origin_addr, origin_count, origin_datatype,
@@ -2361,6 +2390,10 @@ int MPI_Win_fence(int assert, MPI_Win win) {
         // Full memory barrier to ensure all CXL writes are visible
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
+        // Sync MPI buffer → CXL mirror BEFORE fence so our latest local writes
+        // are visible to same-VM peers after the fence completes
+        cxl_sync_mirror(cxl_win);
+
         // Track fence epochs for debugging
         cxl_win_rank_info_t *my_info = &cxl_win->shm->ranks[cxl_win->my_rank];
         uint64_t my_fence = atomic_fetch_add(&my_info->fence_counter, 1) + 1;
@@ -2369,8 +2402,10 @@ int MPI_Win_fence(int assert, MPI_Win win) {
         // Use MPI fence for synchronization - it will barrier internally
         int ret = orig_MPI_Win_fence(assert, win);
 
-        // Another memory barrier after synchronization
+        // After fence: remote Puts may have updated our MPI buffer, refresh mirror
+        cxl_sync_mirror(cxl_win);
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
+        atomic_store(&cxl_win->pending_mpi_rma, 0);
 
         LOG_DEBUG("MPI_Win_fence[%d]: CXL fence completed (epoch=%lu)\n", call_num, my_fence);
         return ret;
@@ -2386,11 +2421,12 @@ int MPI_Win_lock(int lock_type, int rank, int assert, MPI_Win win) {
 
     cxl_window_t *cxl_win = find_cxl_window(win);
 
-    if (cxl_win && cxl_win->cxl_enabled && cxl_win->shm) {
+    // CXL-level locking is only meaningful for same-VM targets (shared memory atomics)
+    if (cxl_win && cxl_win->cxl_enabled && cxl_win->shm &&
+        cxl_win->rank_is_local && cxl_win->rank_is_local[rank]) {
         cxl_win_rank_info_t *target_info = &cxl_win->shm->ranks[rank];
 
         if (lock_type == MPI_LOCK_EXCLUSIVE) {
-            // Spin until we can get exclusive lock
             uint32_t expected = (uint32_t)-1;
             while (!atomic_compare_exchange_weak(&target_info->exclusive_lock,
                                                   &expected, cxl_win->my_rank)) {
@@ -2399,7 +2435,6 @@ int MPI_Win_lock(int lock_type, int rank, int assert, MPI_Win win) {
             }
             atomic_store(&target_info->sync_state, CXL_WIN_LOCK_EXCLUSIVE);
         } else {
-            // Shared lock - wait for no exclusive lock, then increment count
             while (atomic_load(&target_info->exclusive_lock) != (uint32_t)-1) {
                 __builtin_ia32_pause();
             }
@@ -2412,7 +2447,12 @@ int MPI_Win_lock(int lock_type, int rank, int assert, MPI_Win win) {
         LOG_DEBUG("MPI_Win_lock: CXL lock acquired (type=%d, rank=%d)\n", lock_type, rank);
     }
 
-    return orig_MPI_Win_lock(lock_type, rank, assert, win);
+    int ret = orig_MPI_Win_lock(lock_type, rank, assert, win);
+
+    // After acquiring lock, sync MPI → CXL mirror so reads see latest data
+    if (cxl_win) cxl_sync_mirror(cxl_win);
+
+    return ret;
 }
 
 int MPI_Win_unlock(int rank, MPI_Win win) {
@@ -2422,7 +2462,12 @@ int MPI_Win_unlock(int rank, MPI_Win win) {
 
     cxl_window_t *cxl_win = find_cxl_window(win);
 
-    if (cxl_win && cxl_win->cxl_enabled && cxl_win->shm) {
+    // Sync MPI → CXL before unlock so our writes are visible in mirror
+    if (cxl_win) cxl_sync_mirror(cxl_win);
+
+    // CXL-level unlock only for same-VM targets
+    if (cxl_win && cxl_win->cxl_enabled && cxl_win->shm &&
+        cxl_win->rank_is_local && cxl_win->rank_is_local[rank]) {
         cxl_win_rank_info_t *target_info = &cxl_win->shm->ranks[rank];
 
         __atomic_thread_fence(__ATOMIC_RELEASE);
@@ -2444,25 +2489,24 @@ int MPI_Win_unlock(int rank, MPI_Win win) {
 int MPI_Win_flush(int rank, MPI_Win win) {
     LOG_DEBUG("MPI_Win_flush: rank=%d\n", rank);
 
-    // Memory fence for CXL
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
-    // If all RMA ops were handled via CXL direct, skip the MPI-level flush.
-    // Calling orig_MPI_Win_flush on windows created via MPI_Win_create with CXL
-    // memory can trigger UCX OSC errors and eventually crash the transport.
     cxl_window_t *cxl_win = find_cxl_window(win);
-    if (cxl_win && cxl_win->cxl_enabled) {
-        int pending = atomic_load(&cxl_win->pending_mpi_rma);
-        if (pending == 0) {
-            LOG_DEBUG("MPI_Win_flush: CXL-only epoch, skipping MPI flush\n");
-            return MPI_SUCCESS;
-        }
-        // Some ops fell back to MPI - must flush those
+
+    // In the dual-buffer design, the MPI window uses orig_MPI_Win_allocate memory
+    // (RDMA-safe), so orig_MPI_Win_flush is always safe to call.
+    // We always call it because same-VM Puts also issue orig_MPI_Put for consistency.
+    LOAD_ORIGINAL(MPI_Win_flush);
+    int ret = orig_MPI_Win_flush(rank, win);
+
+    // After flush, sync MPI buffer → CXL mirror so same-VM CXL direct reads
+    // see any data that arrived via MPI Puts from remote ranks
+    if (cxl_win) {
+        cxl_sync_mirror(cxl_win);
         atomic_store(&cxl_win->pending_mpi_rma, 0);
     }
 
-    LOAD_ORIGINAL(MPI_Win_flush);
-    return orig_MPI_Win_flush(rank, win);
+    return ret;
 }
 
 // ============================================================================
