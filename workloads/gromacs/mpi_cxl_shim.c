@@ -629,6 +629,25 @@ void *memcpy(void *dst, const void *src, size_t n) {
     return __real_memcpy(dst, src, n);
 }
 
+// Override strlen — glibc's __strlen_avx512 uses 512-bit SIMD loads that
+// SIGILL on CXL Type-3 device memory.  This catches CXL pointers passed to
+// printf/fprintf (via %s) and any other libc path that calls strlen.
+static typeof(strlen) *__real_strlen = NULL;
+size_t strlen(const char *s) {
+    if (is_cxl_ptr(s)) {
+        const volatile unsigned char *p = (const volatile unsigned char *)s;
+        size_t len = 0;
+        while (*p++) len++;
+        return len;
+    }
+    if (__builtin_expect(!__real_strlen, 0)) {
+        __in_dlsym = 1;
+        __real_strlen = dlsym(RTLD_NEXT, "strlen");
+        __in_dlsym = 0;
+    }
+    return __real_strlen(s);
+}
+
 void *memmove(void *dst, const void *src, size_t n) {
     if (__in_dlsym || is_cxl_ptr(dst) || is_cxl_ptr(src)) {
         // Safe byte-by-byte with overlap handling
