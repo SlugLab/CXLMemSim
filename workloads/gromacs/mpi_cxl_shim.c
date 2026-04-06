@@ -1014,8 +1014,11 @@ static void cxl_register_rank(int rank, int world_size) {
     // Enable CXL communication if CXL_DIRECT env is set or by default for DAX
     g_cxl.cxl_comm_enabled = getenv("CXL_DIRECT") || (strcmp(g_cxl.type, "dax") == 0);
 
+    // Use local values instead of CXL memory pointers — passing CXL pointers
+    // to fprintf causes SIGILL because glibc's strlen uses AVX-512 SIMD loads
+    // which fault on CXL Type-3 device memory when cache lines are evicted.
     LOG_INFO("Registered rank %d/%d in CXL shared memory (pid=%d, host=%s, cxl_comm=%s)\n",
-             rank, world_size, my_mailbox->pid, my_mailbox->hostname,
+             rank, world_size, (int)getpid(), g_cached_hostname,
              g_cxl.cxl_comm_enabled ? "enabled" : "disabled");
 }
 
