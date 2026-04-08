@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-GROMACS CXLMemSim Benchmark Graphs
+GROMACS OCEAN Benchmark Graphs
 Two QEMU VMs running GROMACS with LD_PRELOAD=libmpi_cxl_shim.so,
-connected to cxlmemsim_server over TCP. Compared against native CXL.
+connected to OCEAN_server over TCP. Compared against native CXL.
 
 Data sources:
-  - artifact/gromacs/gmx/ : CXLMemSim emulated time + bpftime samples under different policies
+  - artifact/gromacs/gmx/ : OCEAN emulated time + bpftime samples under different policies
   - artifact/gromacs/gmx/vtune*.txt : VTune memory access profiling (local vs remote NUMA)
   - mpi_cxl_shim.c : MPI interception layer (LD_PRELOAD) inside QEMU guest
   - main_server.cc : CXL Type3 server with TCP/SHM/coherency
@@ -42,8 +42,8 @@ C_BASE    = '#64748B'  # slate
 # Data from artifact/gromacs/gmx/ benchmark results
 # ============================================================================
 
-# CXLMemSim emulated time (seconds) under different policies
-# Extracted from artifact/gromacs/gmx/cxlmemsim_*.txt (emulated time field)
+# OCEAN emulated time (seconds) under different policies
+# Extracted from artifact/gromacs/gmx/OCEAN_*.txt (emulated time field)
 policies = {
     'Baseline':      1.070894,
     'Interleave':    1.070894,
@@ -109,10 +109,10 @@ def plot_policy_comparison():
 
     # Native CXL baseline: VTune local NUMA elapsed time (no emulation overhead)
     # Scaled by nsteps ratio (vtune ran 4 steps, emulated ran different config)
-    # Native single-step is ~0.576s CPU time; CXLMemSim emulates with bpftime overhead
+    # Native single-step is ~0.576s CPU time; OCEAN emulates with bpftime overhead
     native_time = vtune_local['elapsed_s']  # 2.304s for 4 steps
 
-    # QEMU VM overhead: virtualization + TCP round-trip to cxlmemsim_server
+    # QEMU VM overhead: virtualization + TCP round-trip to OCEAN_server
     # Two VMs each running GROMACS with LD_PRELOAD=libmpi_cxl_shim.so
     # TCP request/response adds ~100ns per CXL access vs native ~9 cycles
     qemu_overhead = np.array([
@@ -124,9 +124,9 @@ def plot_policy_comparison():
     x = np.arange(len(names))
     w = 0.28
 
-    ax.bar(x - w, emul_times, w, label='CXLMemSim (bpftime tracer)',
+    ax.bar(x - w, emul_times, w, label='OCEAN (with tracer)',
            color=C_NATIVE, edgecolor='white', linewidth=0.5)
-    ax.bar(x,     qemu_times, w, label='QEMU VM + LD_PRELOAD shim + TCP server',
+    ax.bar(x,     qemu_times, w, label='QEMUless + TCP server',
            color=C_QEMU, edgecolor='white', linewidth=0.5)
 
     # Native CXL reference line
@@ -134,7 +134,7 @@ def plot_policy_comparison():
                alpha=0.7, label=f'Native CXL (VTune, {native_time:.3f}s / 4 steps)')
 
     ax.set_ylabel('Emulated Time (s)')
-    ax.set_title('GROMACS PEPSIN: CXLMemSim Tracer vs QEMU VM (LD_PRELOAD=libmpi_cxl_shim.so)')
+    ax.set_title('GROMACS PEPSIN: OCEAN Tracer vs QEMU VM (LD_PRELOAD=libmpi_cxl_shim.so)')
     ax.set_xticks(x)
     ax.set_xticklabels(names, rotation=45, ha='right')
     ax.legend(loc='upper right', fontsize=7.5)
@@ -267,7 +267,7 @@ def plot_latency_breakdown():
     ax.axvline(x=3.5, color='#999', linestyle=':', linewidth=1)
     ax.text(1.75, ax.get_ylim()[1] * 0.95, 'Native CXL', ha='center', fontsize=8,
             fontstyle='italic', color=C_NATIVE)
-    ax.text(5.75, ax.get_ylim()[1] * 0.95, 'QEMU VM + cxlmemsim_server', ha='center',
+    ax.text(5.75, ax.get_ylim()[1] * 0.95, 'QEMU VM + OCEAN_server', ha='center',
             fontsize=8, fontstyle='italic', color=C_QEMU)
 
     ax.set_ylabel('Latency (ns)')
@@ -318,7 +318,7 @@ def plot_pgas_throughput():
     # Throughput in K ops/s for different configurations
     native_mpi    = np.array([850, 620, 1200, 400, 350, 1500])
     shim_shm      = np.array([720, 530,  980, 340, 290, 1300])  # CXL SHM mailbox
-    shim_tcp      = np.array([180, 140,  250,  95,  80,  350])  # TCP to cxlmemsim_server
+    shim_tcp      = np.array([180, 140,  250,  95,  80,  350])  # TCP to OCEAN_server
 
     x = np.arange(len(op_types))
     w = 0.25
@@ -350,7 +350,7 @@ def plot_distributed_scalability():
     native_base = 2.304
     native = native_base / (ranks ** 0.85)  # Sub-linear scaling on real hardware
 
-    # CXLMemSim bpftime tracer (emulated time from LoadBalance policy)
+    # OCEAN bpftime tracer (emulated time from LoadBalance policy)
     tracer_base = 1.003
     tracer = tracer_base / (ranks ** 0.78)
 
@@ -362,7 +362,7 @@ def plot_distributed_scalability():
                             qemu_single[2] * 0.96, qemu_single[3] * 0.90])
 
     ax1.plot(ranks, native,      'o-',  label='Native CXL (VTune)', color=C_NATIVE, linewidth=2, markersize=6)
-    ax1.plot(ranks, tracer,      's-',  label='CXLMemSim (bpftime)', color=C_SHIM, linewidth=2, markersize=6)
+    ax1.plot(ranks, tracer,      's-',  label='OCEAN (bpftime)', color=C_SHIM, linewidth=2, markersize=6)
     ax1.plot(ranks, qemu_two_vm, 'D-',  label='2x QEMU VM + MPI Shim', color=C_QEMU, linewidth=2, markersize=6)
     ax1.plot(ranks, native_base / ranks, 'k--', label='Ideal', linewidth=1, alpha=0.4)
     ax1.set_xlabel('MPI Ranks')
@@ -372,7 +372,7 @@ def plot_distributed_scalability():
     ax1.legend(fontsize=7.5)
     ax1.set_ylim(0, 2.8)
 
-    # (b) cxlmemsim_server coherency stats (per-VM)
+    # (b) OCEAN_server coherency stats (per-VM)
     # Server tracks: reads, writes, coherency invalidations, downgrades, back-invalidations
     categories = ['Total\nReads', 'Total\nWrites', 'Coherency\nInvalidations',
                   'Coherency\nDowngrades', 'Back\nInvalidations']
@@ -384,12 +384,12 @@ def plot_distributed_scalability():
     ax2.bar(x - w/2, vm0_stats / 1000, w, label='VM 0 (Node 0)', color=C_NATIVE)
     ax2.bar(x + w/2, vm1_stats / 1000, w, label='VM 1 (Node 1)', color=C_EMUL)
     ax2.set_ylabel('Count (thousands)')
-    ax2.set_title('(b) cxlmemsim_server Statistics per VM')
+    ax2.set_title('(b) OCEAN_server Statistics per VM')
     ax2.set_xticks(x)
     ax2.set_xticklabels(categories)
     ax2.legend()
 
-    fig.suptitle('Two-Host GROMACS: Native CXL vs QEMU + libmpi_cxl_shim.so + cxlmemsim_server', y=1.02)
+    fig.suptitle('Two-Host GROMACS: Native CXL vs QEMU + libmpi_cxl_shim.so + OCEAN_server', y=1.02)
     fig.tight_layout()
     fig.savefig('gromacs_distributed_scalability.pdf')
     fig.savefig('gromacs_distributed_scalability.png')
@@ -405,7 +405,7 @@ def plot_architecture_overview():
     ax.set_xlim(0, 11)
     ax.set_ylim(0, 6.5)
     ax.axis('off')
-    ax.set_title('Two-Host CXLMemSim: QEMU VMs with LD_PRELOAD=libmpi_cxl_shim.so',
+    ax.set_title('Two-Host OCEAN: QEMU VMs with LD_PRELOAD=libmpi_cxl_shim.so',
                  fontsize=12, fontweight='bold', pad=15)
 
     def draw_box(x, y, w, h, label, color, sublabel=None):
@@ -429,8 +429,8 @@ def plot_architecture_overview():
     draw_box(0.5, 5.2, 2.0, 0.45, 'GROMACS mdrun\n(MPI Rank 0-3)', '#93C5FD')
     draw_box(0.5, 4.7, 2.0, 0.4, 'LD_PRELOAD=\nlibmpi_cxl_shim.so', '#BBF7D0')
 
-    # cxlmemsim_server on Host A
-    draw_box(2.9, 4.0, 2.1, 1.0, 'cxlmemsim\n_server', '#60A5FA',
+    # OCEAN_server on Host A
+    draw_box(2.9, 4.0, 2.1, 1.0, 'OCEAN\n_server', '#60A5FA',
              'TCP :9999')
     draw_box(2.9, 5.1, 2.1, 0.8, 'CXL Controller\n+ Topology', '#BFDBFE',
              'Coherency + Stats')
@@ -446,8 +446,8 @@ def plot_architecture_overview():
     draw_box(6.1, 5.2, 2.0, 0.45, 'GROMACS mdrun\n(MPI Rank 4-7)', '#FCA5A5')
     draw_box(6.1, 4.7, 2.0, 0.4, 'LD_PRELOAD=\nlibmpi_cxl_shim.so', '#BBF7D0')
 
-    # cxlmemsim_server on Host B
-    draw_box(8.5, 4.0, 2.1, 1.0, 'cxlmemsim\n_server', '#F87171',
+    # OCEAN_server on Host B
+    draw_box(8.5, 4.0, 2.1, 1.0, 'OCEAN\n_server', '#F87171',
              'TCP :9998')
     draw_box(8.5, 5.1, 2.1, 0.8, 'CXL Controller\n+ Topology', '#FECACA',
              'Coherency + Stats')
