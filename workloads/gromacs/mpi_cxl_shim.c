@@ -42,6 +42,19 @@ typedef uint64_t cxl_rptr_t;
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
+// ============================================================================
+// CC RMA-based Point-to-Point: per-sender slot in an MPI_Win backed by CXL
+// ============================================================================
+#define CXL_P2P_SLOT_DATA_SIZE 4096
+typedef struct __attribute__((aligned(CACHELINE_SIZE))) {
+    volatile uint32_t ready;       // 0=empty, 1=data written
+    uint32_t          tag;
+    uint32_t          source_rank;
+    uint32_t          _pad;
+    uint64_t          data_size;   // actual payload bytes
+    uint8_t           data[CXL_P2P_SLOT_DATA_SIZE];
+} cxl_p2p_slot_t;
+
 // Safe memory copy for CXL memory - avoids AVX-512/SIMD instructions that may crash on CXL
 // Uses volatile to prevent compiler from optimizing into SIMD memcpy
 static inline void cxl_safe_memcpy(void *dst, const void *src, size_t n) {
@@ -360,6 +373,11 @@ static cxl_mem_t g_cxl = {
     .cxl_comm_enabled = false,
     .all_ranks_local = false
 };
+
+// CC RMA p2p global state (only used when CXL_CACHE_COHERENCE is defined)
+static MPI_Win       g_p2p_win     = MPI_WIN_NULL;
+static void         *g_p2p_base    = NULL;   // local window base (RDMA-safe)
+static size_t        g_p2p_win_size = 0;
 
 static mem_mapping_t *g_mappings = NULL;
 static pthread_mutex_t g_mappings_lock = PTHREAD_MUTEX_INITIALIZER;

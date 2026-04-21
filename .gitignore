@@ -19,3 +19,5 @@ CMakeFiles
 build_server
 README_*
 *.ko
+real_*
+*.so*
