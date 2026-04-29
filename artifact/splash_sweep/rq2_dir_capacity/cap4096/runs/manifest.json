@@ -1,0 +1,12 @@
+[
+  {
+    "run_key": "rq2",
+    "binary": "rq2_dir_sizing",
+    "args": "",
+    "returncode": 255,
+    "elapsed_sec": 0.30144643783569336,
+    "stdout_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/rq2_dir_capacity/cap4096/runs/rq2.stdout.log",
+    "stderr_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/rq2_dir_capacity/cap4096/runs/rq2.stderr.log",
+    "timed_out": false
+  }
+]

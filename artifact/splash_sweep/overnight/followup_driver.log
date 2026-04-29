@@ -1,0 +1,9 @@
+[2026-04-21 19:50:06] === follow-up (rq2 + multi-GPU) start ===
+[2026-04-21 19:50:08] stage rq2_dir_capacity START
+[2026-04-21 19:51:23] stage rq2_dir_capacity DONE
+[2026-04-21 19:51:23] aggregate: regenerating CSVs + report
+[2026-04-21 19:51:27] stage multigpu_scaling START
+[2026-04-21 19:52:34] stage multigpu_scaling DONE
+[2026-04-21 19:52:36] aggregate: regenerating CSVs + report
+[2026-04-21 19:52:38] === follow-up complete ===
+[2026-04-21 19:52:38] final report: /home/victoryang00/CXLMemSim/artifact/splash_sweep/report/splash_summary.md

@@ -1,0 +1,49 @@
+================================================================
+  RQ2: Device Cache Directory Sizing Experiment
+  Measures directory pressure vs working set size
+================================================================
+
+  Using CXL GPU device 0
+  Device initialized.  Running experiments...
+  Trials per config: 10
+  BFS sizes: 100, 500, 1000, 2000, 5000, 10000, 20000, 50000
+  B-tree sizes: 100, 500, 1000, 5000, 10000, 50000
+
+================================================================
+  Experiment 4: Hardware directory size (BAR2 registers)
+================================================================
+
+  Directory size (from stats):  13 entries
+  Register offsets:
+    CXL_GPU_REG_COH_DIR_SIZE  = 0x0318
+    CXL_GPU_REG_COH_DIR_USED  = 0x0320
+
+  Note: hardware directory size is fixed.  To study the effect of
+  directory capacity, we vary the working set size instead.
+  When working set > directory capacity, evictions and snoop misses
+  increase, revealing the capacity cliff.
+
+================================================================
+  Experiment 1: Graph BFS directory pressure sweep
+================================================================
+  Varying N to create different working set sizes.
+  Each node = 64 bytes (1 cache line), ER graph, avg degree 6.
+  10 trials per configuration, reporting median.
+
+         N  hit_rate     evictions   bfs_time_ns     norm_tput  dir_entries
+  --------  --------  ------------  ------------  ------------  ----------
+       100    0.0000             0          2097        1.0000          13
+       500    0.0000             0          8956        1.1707          13
+      1000    0.0000             0         19482        1.0764          13
+      2000    0.0000             0         41781        1.0038          13
+      5000    0.0000             0         94301        1.1119          13
+     10000    0.0000             0        197509        1.0617          13
+     20000    0.0000             0        556535        0.7536          13
+     50000    0.0000             0       3698553        0.2835          13
+
+================================================================
+  Experiment 2: B+ tree lookup directory pressure sweep
+================================================================
+  Branching factor B=64, 1000 random lookups per size.
+  10 trials per configuration, reporting median.
+

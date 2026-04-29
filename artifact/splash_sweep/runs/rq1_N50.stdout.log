@@ -1,0 +1,150 @@
+================================================================
+  RQ1: Pointer Sharing vs Copy-Based Offload
+  Pointer-Rich Workloads on CXL Type-2 Coherent Memory
+================================================================
+  Using CXL GPU device 0
+  BAR4 base: 0x7c3d1c7e2000
+  sizeof(GraphNode) = 64 (expect 64)
+
+================================================================
+  EXPERIMENT 1: BFS -- Pointer Sharing vs Copy-Based Offload
+  N=50  avg_degree=6  trials=3
+================================================================
+
+--- Graph type: erdos_renyi ---
+  graph=erdos_renyi  N=50  device_fraction=0.00
+    Method A (pointer-sharing):  median=1 us  p25=0 us  p75=3 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=171 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4146
+    Method B (copy-based):       median=24613 us  p25=24584 us  p75=25413 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=24 back_inv=0
+                writebacks=12 evictions=53 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4096
+
+  graph=erdos_renyi  N=50  device_fraction=0.25
+    Method A (pointer-sharing):  median=0 us  p25=0 us  p75=1 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=0 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4146
+    Method B (copy-based):       median=24813 us  p25=24614 us  p75=25184 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=25 back_inv=0
+                writebacks=12 evictions=53 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4096
+
+  graph=erdos_renyi  N=50  device_fraction=0.50
+    Method A (pointer-sharing):  median=0 us  p25=0 us  p75=1 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=0 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4146
+    Method B (copy-based):       median=24699 us  p25=24611 us  p75=25437 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=24 back_inv=0
+                writebacks=12 evictions=53 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4096
+
+  graph=erdos_renyi  N=50  device_fraction=0.75
+    Method A (pointer-sharing):  median=0 us  p25=0 us  p75=1 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=0 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4146
+    Method B (copy-based):       median=24665 us  p25=24526 us  p75=25276 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=24 back_inv=0
+                writebacks=12 evictions=53 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4096
+
+  graph=erdos_renyi  N=50  device_fraction=1.00
+    Method A (pointer-sharing):  median=0 us  p25=0 us  p75=1 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=0 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4146
+    Method B (copy-based):       median=24744 us  p25=24671 us  p75=25319 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=24 back_inv=0
+                writebacks=12 evictions=53 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4096
+
+
+--- Graph type: barabasi_albert ---
+  graph=barabasi_albert  N=50  device_fraction=0.00
+    Method A (pointer-sharing):  median=0 us  p25=0 us  p75=2 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=0 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4146
+    Method B (copy-based):       median=24831 us  p25=24701 us  p75=25359 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=72 back_inv=0
+                writebacks=36 evictions=53 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4096
+
+  graph=barabasi_albert  N=50  device_fraction=0.25
+    Method A (pointer-sharing):  median=0 us  p25=0 us  p75=1 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=90 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4146
+    Method B (copy-based):       median=24891 us  p25=24706 us  p75=25345 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=72 back_inv=0
+                writebacks=36 evictions=53 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4096
+
+  graph=barabasi_albert  N=50  device_fraction=0.50
+    Method A (pointer-sharing):  median=0 us  p25=0 us  p75=1 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=0 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4146
+    Method B (copy-based):       median=24851 us  p25=24639 us  p75=25393 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=72 back_inv=0
+                writebacks=36 evictions=53 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4096
+
+  graph=barabasi_albert  N=50  device_fraction=0.75
+    Method A (pointer-sharing):  median=0 us  p25=0 us  p75=1 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=0 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4146
+    Method B (copy-based):       median=24821 us  p25=24799 us  p75=25263 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=72 back_inv=0
+                writebacks=36 evictions=53 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4096
+
+  graph=barabasi_albert  N=50  device_fraction=1.00
+    Method A (pointer-sharing):  median=0 us  p25=0 us  p75=1 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=0 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4146
+    Method B (copy-based):       median=25330 us  p25=25201 us  p75=27527 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=72 back_inv=0
+                writebacks=36 evictions=53 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=4096
+
+
+================================================================
+  EXPERIMENT 2: B+ Tree -- Pointer Sharing vs Copy-Back
+  keys=10000  lookup_ops=5000  trials=3
+================================================================
+
+  B=4  num_leaves=2500
+    Pointer-sharing lookup:  median=383 us  p25=381 us  p75=399 us  (76 ns/op)
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=347 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=347 host_bias_hits=0 dir_entries=164720
+    Copy-based lookup:      median=556550 us  p25=418791 us  p75=674553 us  (111310 ns/op)
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=40947 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=40947 host_bias_hits=0 dir_entries=164720
+
+  B=16  num_leaves=625
+    Pointer-sharing lookup:  median=334 us  p25=330 us  p75=349 us  (66 ns/op)
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=2069 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=2069 host_bias_hits=0 dir_entries=204877
+    Copy-based lookup:      median=602625 us  p25=466462 us  p75=930708 us  (120525 ns/op)
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=57230 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=57230 host_bias_hits=0 dir_entries=204877
+
+  B=64  num_leaves=157
+    Pointer-sharing lookup:  median=170 us  p25=169 us  p75=171 us  (34 ns/op)
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=977 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=977 host_bias_hits=0 dir_entries=214965
+    Copy-based lookup:      median=686003 us  p25=610044 us  p75=905551 us  (137200 ns/op)
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=65521 back_inv=0
+                write

@@ -1,0 +1,8 @@
+[push] binaries → root@127.0.0.1:10022:/root/splash
+  [done] rq1_N50 rc=255 5029.3s
+  [done] rq1_N100 TIMEOUT 14400.1s
+  [done] rq1_N200 rc=255 384.7s
+  [done] rq1_N500 rc=255 0.0s
+  [done] rq1_N1000 rc=255 0.0s
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/runs/manifest.json
+[done] 5 runs

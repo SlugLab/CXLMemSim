@@ -1,0 +1,32 @@
+[
+  {
+    "capacity": 64,
+    "elapsed_sec": 1.4414539337158203,
+    "status": "done",
+    "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/rq2_dir_capacity/cap64"
+  },
+  {
+    "capacity": 256,
+    "elapsed_sec": 1.5021498203277588,
+    "status": "done",
+    "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/rq2_dir_capacity/cap256"
+  },
+  {
+    "capacity": 1024,
+    "elapsed_sec": 1.5242228507995605,
+    "status": "done",
+    "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/rq2_dir_capacity/cap1024"
+  },
+  {
+    "capacity": 4096,
+    "elapsed_sec": 1.402320146560669,
+    "status": "done",
+    "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/rq2_dir_capacity/cap4096"
+  },
+  {
+    "capacity": 16384,
+    "elapsed_sec": 1.4665980339050293,
+    "status": "done",
+    "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/rq2_dir_capacity/cap16384"
+  }
+]

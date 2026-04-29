@@ -1,0 +1,75 @@
+=== RQ4: Allocation Policy vs. Coherence Traffic ===
+
+Configuration:
+  Nodes:         2000
+  Avg degree:    6
+  Node size:     64 bytes (1 cache line)
+  BFS roots:     10 per trial
+  Trials:        10
+  Migration K:   50 nodes/round
+  Using CXL GPU device 0
+
+========================================
+Part 1: Graph BFS Experiments
+========================================
+
+  --- Policy: Random ---
+
+  --- Policy: Static Affinity (BFS proximity) ---
+
+  --- Policy: Topology-Aware (BFS bisection) ---
+
+  --- Policy: Online Migration ---
+
+========================================
+Access Skew Analysis (Random policy, single run)
+========================================
+
+=== Access Skew Analysis ===
+  Total cross-domain accesses: 60150
+  Total node accesses:         19940
+
+  Cross-domain traffic concentration:
+    Top  1% nodes (  20 nodes) ->   3.0% of cross-domain traffic
+    Top  5% nodes ( 100 nodes) ->  12.0% of cross-domain traffic
+    Top 10% nodes ( 200 nodes) ->  21.6% of cross-domain traffic
+    Top 20% nodes ( 400 nodes) ->  37.8% of cross-domain traffic
+    Top 50% nodes (1000 nodes) ->  73.3% of cross-domain traffic
+
+  Access frequency concentration:
+    Top  1% nodes (  20 nodes) ->   1.0% of total accesses
+    Top  5% nodes ( 100 nodes) ->   5.0% of total accesses
+    Top 10% nodes ( 200 nodes) ->  10.0% of total accesses
+    Top 20% nodes ( 400 nodes) ->  20.1% of total accesses
+    Top 50% nodes (1000 nodes) ->  50.2% of total accesses
+
+========================================
+Part 1 Summary: Graph BFS (medians over 10 trials)
+========================================
+Policy                                Time(ms)  Cross-Dom   Coh.Reqs    Evictions Throughput(N/s)
+----------------------------------- ---------- ---------- ---------- ------------ ---------------
+Random                                    1.29      59735         67            0        15460928
+Static Affinity (BFS proximity)           1.25      59540         60            0        15982026
+Topology-Aware (BFS bisection)            1.25      59910         53            0        16009241
+Online Migration                          1.23      59740         62            0        16194798
+
+Policy                                Traffic%         Speedup
+----------------------------------- ---------- ---------------
+Random                                   +0.0%           1.00x
+Static Affinity (BFS proximity)          +0.3%           1.03x
+Topology-Aware (BFS bisection)           -0.3%           1.03x
+Online Migration                         -0.0%           1.05x
+
+========================================
+Part 2: Hash Table Sub-experiment
+========================================
+  Buckets: 1000 (device coherent memory)
+  Ops:     50000 (50% get, 50% put)
+
+HT Policy                        Time(ms)    Cross-Dom     Coh.Reqs
+------------------------------ ---------- ------------ ------------
+Random                               4.11       167684          205
+Round-robin (alternate)              3.72       168731          167
+Affinity (chain near bucket)         3.11        16611          135
+
+=== RQ4 experiment complete ===

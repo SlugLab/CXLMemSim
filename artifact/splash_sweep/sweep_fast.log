@@ -1,0 +1,5 @@
+[push] binaries → root@127.0.0.1:10022:/root/splash
+  [done] rq3 rc=0 1.9s
+  [done] rq4_devfrac rc=0 0.2s
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/runs/manifest.json
+[done] 2 runs

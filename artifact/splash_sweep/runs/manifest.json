@@ -1,0 +1,52 @@
+[
+  {
+    "run_key": "rq1_N50",
+    "binary": "rq1_graph_bfs",
+    "args": "50",
+    "returncode": 255,
+    "elapsed_sec": 5029.345352172852,
+    "stdout_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/runs/rq1_N50.stdout.log",
+    "stderr_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/runs/rq1_N50.stderr.log",
+    "timed_out": false
+  },
+  {
+    "run_key": "rq1_N100",
+    "binary": "rq1_graph_bfs",
+    "args": "100",
+    "returncode": -1,
+    "elapsed_sec": 14400.102065324783,
+    "stdout_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/runs/rq1_N100.stdout.log",
+    "stderr_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/runs/rq1_N100.stderr.log",
+    "timed_out": true
+  },
+  {
+    "run_key": "rq1_N200",
+    "binary": "rq1_graph_bfs",
+    "args": "200",
+    "returncode": 255,
+    "elapsed_sec": 384.7024199962616,
+    "stdout_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/runs/rq1_N200.stdout.log",
+    "stderr_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/runs/rq1_N200.stderr.log",
+    "timed_out": false
+  },
+  {
+    "run_key": "rq1_N500",
+    "binary": "rq1_graph_bfs",
+    "args": "500",
+    "returncode": 255,
+    "elapsed_sec": 0.013625383377075195,
+    "stdout_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/runs/rq1_N500.stdout.log",
+    "stderr_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/runs/rq1_N500.stderr.log",
+    "timed_out": false
+  },
+  {
+    "run_key": "rq1_N1000",
+    "binary": "rq1_graph_bfs",
+    "args": "1000",
+    "returncode": 255,
+    "elapsed_sec": 0.005285501480102539,
+    "stdout_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/runs/rq1_N1000.stdout.log",
+    "stderr_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/runs/rq1_N1000.stderr.log",
+    "timed_out": false
+  }
+]

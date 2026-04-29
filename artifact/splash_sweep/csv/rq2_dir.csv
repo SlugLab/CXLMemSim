@@ -1,0 +1,9 @@
+section,N,hit_rate,evictions,time_ns,norm_tput,dir_entries,log
+bfs,100,0.0,0,2097,1.0,13,rq2.stdout.log
+bfs,500,0.0,0,8956,1.1707,13,rq2.stdout.log
+bfs,1000,0.0,0,19482,1.0764,13,rq2.stdout.log
+bfs,2000,0.0,0,41781,1.0038,13,rq2.stdout.log
+bfs,5000,0.0,0,94301,1.1119,13,rq2.stdout.log
+bfs,10000,0.0,0,197509,1.0617,13,rq2.stdout.log
+bfs,20000,0.0,0,556535,0.7536,13,rq2.stdout.log
+bfs,50000,0.0,0,3698553,0.2835,13,rq2.stdout.log

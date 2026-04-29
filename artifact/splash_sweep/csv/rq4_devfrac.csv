@@ -1,0 +1,6 @@
+device_fraction,median_ops_sec,p25_ops_sec,p75_ops_sec,log
+0.0,84008199,57100439,85513207,rq4_devfrac.stdout.log
+0.25,73256316,67617824,73811632,rq4_devfrac.stdout.log
+0.5,62715584,54852528,63632256,rq4_devfrac.stdout.log
+0.75,67977268,67622396,68087887,rq4_devfrac.stdout.log
+1.0,80101889,79673656,83418141,rq4_devfrac.stdout.log

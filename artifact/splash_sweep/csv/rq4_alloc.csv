@@ -1,0 +1,15 @@
+section,policy,time_ms,cross_dom,coh_reqs,evictions,throughput,log
+bfs,Random,1.29,59735,67,0,15460928,rq4_alloc_N2000.stdout.log
+bfs,Static Affinity (BFS proximity),1.25,59540,60,0,15982026,rq4_alloc_N2000.stdout.log
+bfs,Topology-Aware (BFS bisection),1.25,59910,53,0,16009241,rq4_alloc_N2000.stdout.log
+bfs,Online Migration,1.23,59740,62,0,16194798,rq4_alloc_N2000.stdout.log
+hash,Random,4.11,167684,205,,,rq4_alloc_N2000.stdout.log
+hash,Round-robin (alternate),3.72,168731,167,,,rq4_alloc_N2000.stdout.log
+hash,Affinity (chain near bucket),3.11,16611,135,,,rq4_alloc_N2000.stdout.log
+bfs,Random,0.27,14817,37,0,18319667,rq4_alloc_N500.stdout.log
+bfs,Static Affinity (BFS proximity),0.26,14890,20,0,18759257,rq4_alloc_N500.stdout.log
+bfs,Topology-Aware (BFS bisection),0.28,15050,76,0,18018062,rq4_alloc_N500.stdout.log
+bfs,Online Migration,0.27,14880,25,0,18603661,rq4_alloc_N500.stdout.log
+hash,Random,4.66,167684,267,,,rq4_alloc_N500.stdout.log
+hash,Round-robin (alternate),4.51,168731,259,,,rq4_alloc_N500.stdout.log
+hash,Affinity (chain near bucket),4.36,16611,234,,,rq4_alloc_N500.stdout.log

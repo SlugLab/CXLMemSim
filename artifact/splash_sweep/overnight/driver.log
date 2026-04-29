@@ -1,0 +1,25 @@
+[2026-04-20 23:35:36] === Splash overnight orchestration start ===
+[2026-04-20 23:35:36] logs under: /home/victoryang00/CXLMemSim/artifact/splash_sweep/overnight/
+[2026-04-20 23:35:36] stage rq1_bfs START
+[2026-04-21 01:03:34] === Splash overnight orchestration start ===
+[2026-04-21 01:03:34] logs under: /home/victoryang00/CXLMemSim/artifact/splash_sweep/overnight/
+[2026-04-21 01:03:34] stage rq1_bfs_scaling START
+[2026-04-21 01:05:47] stage rq1_bfs_scaling DONE
+[2026-04-21 01:05:47] aggregate: regenerating CSVs + report
+[2026-04-21 01:05:48] stage rq1_btree_hash START
+[2026-04-21 05:05:49] stage rq1_btree_hash DONE
+[2026-04-21 05:05:49] aggregate: regenerating CSVs + report
+[2026-04-21 05:05:50] stage rq4_alloc START
+[2026-04-21 05:05:51] stage rq4_alloc DONE
+[2026-04-21 05:05:51] aggregate: regenerating CSVs + report
+[2026-04-21 05:05:54] stage rq2_dir_capacity START
+[2026-04-21 05:05:54] ensure_vm: VM not reachable, relaunching
+[2026-04-21 05:11:58] ensure_vm: VM failed to boot within 6 minutes
+[2026-04-21 05:11:58] stage rq2_dir_capacity SKIP (VM boot failed)
+[2026-04-21 05:12:00] stage multigpu_scaling START
+[2026-04-21 05:12:00] ensure_vm: VM not reachable, relaunching
+[2026-04-21 05:18:04] ensure_vm: VM failed to boot within 6 minutes
+[2026-04-21 05:18:04] stage multigpu_scaling SKIP (VM boot failed)
+[2026-04-21 05:18:04] === Splash overnight orchestration complete ===
+[2026-04-21 05:18:04] aggregate: regenerating CSVs + report
+[2026-04-21 05:18:05] final report: /home/victoryang00/CXLMemSim/artifact/splash_sweep/report/splash_summary.md

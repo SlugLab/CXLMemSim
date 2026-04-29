@@ -1,0 +1,1 @@
+qemu-system-x86_64: -drive file=./qemu1.img,if=none,id=disk0,format=raw: Could not open './qemu1.img': No such file or directory

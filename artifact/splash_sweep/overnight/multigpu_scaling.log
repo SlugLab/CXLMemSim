@@ -1,0 +1,25 @@
+[push] binaries → root@127.0.0.1:10022:/root/splash
+  [done] rq3 rc=0 2.1s
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/n1/runs/manifest.json
+[done] 1 runs
+[push] binaries → root@127.0.0.1:10023:/root/splash
+  [done] rq3 rc=0 2.0s
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/n2/runs/manifest.json
+[done] 1 runs
+[push] binaries → root@127.0.0.1:10024:/root/splash
+  [done] rq3 rc=0 1.7s
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/n4/runs/manifest.json
+[done] 1 runs
+[push] binaries → root@127.0.0.1:10025:/root/splash
+  [done] rq3 rc=0 2.1s
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/n8/runs/manifest.json
+[done] 1 runs
+
+=== multi-GPU scaling: n=1 ===
+
+=== multi-GPU scaling: n=2 ===
+
+=== multi-GPU scaling: n=4 ===
+
+=== multi-GPU scaling: n=8 ===
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/scaling_manifest.json

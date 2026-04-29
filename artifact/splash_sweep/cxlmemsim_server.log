@@ -1,0 +1,129 @@
+[2026-04-20 21:37:44.771] [warning] [main_server.cc:415] Topology file topology.txt not found, using default topology
+[2026-04-20 21:37:44.771] [info] [main_server.cc:420] ========================================
+[2026-04-20 21:37:44.771] [info] [main_server.cc:421] CXLMemSim CXL Type3 Memory Server
+[2026-04-20 21:37:44.771] [info] [main_server.cc:422] ========================================
+[2026-04-20 21:37:44.771] [info] [main_server.cc:423] Server Configuration:
+[2026-04-20 21:37:44.771] [info] [main_server.cc:428]   Communication Mode: TCP
+[2026-04-20 21:37:44.771] [info] [main_server.cc:457]   Port: 9999
+[2026-04-20 21:37:44.771] [info] [main_server.cc:458]   Topology: topology.txt
+[2026-04-20 21:37:44.771] [info] [main_server.cc:459]   Capacity: 256 MB
+[2026-04-20 21:37:44.771] [info] [main_server.cc:460]   Default latency: 100 ns
+[2026-04-20 21:37:44.771] [info] [main_server.cc:461]   Interleave size: 256 bytes
+[2026-04-20 21:37:44.771] [info] [main_server.cc:462] CXL Type3 Operations Supported:
+[2026-04-20 21:37:44.771] [info] [main_server.cc:463]   - CXL_TYPE3_READ
+[2026-04-20 21:37:44.771] [info] [main_server.cc:464]   - CXL_TYPE3_WRITE
+[2026-04-20 21:37:44.771] [info] [main_server.cc:478] ========================================
+[2026-04-20 21:37:44.771] [info] [shared_memory_manager.cc:32] SharedMemoryManager: Capacity 256MB, Total size: 268435456 bytes
+[2026-04-20 21:37:44.771] [info] [main_server.cc:219] LSA initialized: 262144 bytes
+[2026-04-20 21:37:44.771] [info] [shared_memory_manager.cc:124] Created new shared memory: /cxlmemsim_pgas
+[2026-04-20 21:37:44.771] [info] [shared_memory_manager.cc:169] Mapped shared memory at address: 0x7658bea00000
+[2026-04-20 21:37:44.771] [info] [shared_memory_manager.cc:203] Initialized header: 4194303 cachelines available
+[2026-04-20 21:37:44.771] [info] [shared_memory_manager.cc:204] Base address: 0x0 (0 = accept any address)
+[2026-04-20 21:37:44.771] [info] [shared_memory_manager.cc:215] Preserving existing data in shared memory
+[2026-04-20 21:37:44.771] [info] [shared_memory_manager.cc:226] Initialized data area: 268435400 bytes
+[2026-04-20 21:37:44.771] [info] [shared_memory_manager.cc:77] SharedMemoryManager initialized successfully
+[2026-04-20 21:37:44.771] [info] [shared_memory_manager.cc:78]   Shared memory: /cxlmemsim_pgas
+[2026-04-20 21:37:44.771] [info] [shared_memory_manager.cc:79]   Size: 256 MB
+[2026-04-20 21:37:44.771] [info] [shared_memory_manager.cc:80]   Base address: 0x0
+[2026-04-20 21:37:44.771] [info] [shared_memory_manager.cc:81]   Cachelines: 4194303
+[2026-04-20 21:37:44.771] [info] [main_server.cc:611] Shared memory initialized:
+[2026-04-20 21:37:44.771] [info] [main_server.cc:612]   Name: /cxlmemsim_pgas
+[2026-04-20 21:37:44.771] [info] [main_server.cc:613]   Size: 268435456 bytes
+[2026-04-20 21:37:44.771] [info] [main_server.cc:614]   Base address: 0x0
+[2026-04-20 21:37:44.771] [info] [main_server.cc:615]   Cachelines: 4194303
+[2026-04-20 21:37:44.771] [info] [main_server.cc:642] >>> TCP mode: Initializing TCP socket <<<
+[2026-04-20 21:37:44.771] [info] [main_server.cc:674] Server listening on TCP port 9999
+[2026-04-20 21:37:44.771] [info] [main_server.cc:691] Running in TCP mode
+[2026-04-20 21:38:24.006] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 0
+[2026-04-20 21:38:24.006] [info] [main_server.cc:1325] Thread 0: Client connected from 127.0.0.1:50620 (fd=5)
+[2026-04-20 21:38:24.007] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 1
+[2026-04-20 21:38:24.007] [info] [main_server.cc:1325] Thread 1: Client connected from 127.0.0.1:50628 (fd=6)
+[2026-04-20 21:42:27.331] [info] [main_server.cc:1418] Thread 1: Connection closed
+[2026-04-20 21:42:27.354] [info] [main_server.cc:1418] Thread 0: Connection closed
+[2026-04-20 21:43:15.293] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 2
+[2026-04-20 21:43:15.293] [info] [main_server.cc:1325] Thread 2: Client connected from 127.0.0.1:41400 (fd=7)
+[2026-04-20 21:47:53.763] [info] [main_server.cc:1418] Thread 2: Connection closed
+[2026-04-20 21:49:56.865] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 3
+[2026-04-20 21:49:56.865] [info] [main_server.cc:1325] Thread 3: Client connected from 127.0.0.1:48180 (fd=5)
+[2026-04-20 22:35:18.305] [info] [main_server.cc:1418] Thread 3: Connection closed
+[2026-04-20 22:39:14.173] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 4
+[2026-04-20 22:39:14.173] [info] [main_server.cc:1325] Thread 4: Client connected from 127.0.0.1:45758 (fd=6)
+[2026-04-20 23:13:33.262] [info] [main_server.cc:1418] Thread 4: Connection closed
+[2026-04-20 23:14:33.369] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 5
+[2026-04-20 23:14:33.369] [info] [main_server.cc:1325] Thread 5: Client connected from 127.0.0.1:58912 (fd=5)
+[2026-04-21 05:05:52.667] [info] [main_server.cc:1418] Thread 5: Connection closed
+[2026-04-21 19:50:10.639] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 6
+[2026-04-21 19:50:10.639] [info] [main_server.cc:1325] Thread 6: Client connected from 127.0.0.1:45806 (fd=6)
+[2026-04-21 19:50:21.274] [info] [main_server.cc:1387] Thread 6: Sending shared memory info - name: /cxlmemsim_pgas, size: 268435456 bytes
+[2026-04-21 19:50:21.275] [warning] [main_server.cc:1371] Thread 6: Invalid op_type 226 (0xe2) - possibly non-CXL client (HTTP scanner?), disconnecting
+[2026-04-21 19:50:21.275] [info] [main_server.cc:1418] Thread 6: Connection closed
+[2026-04-21 19:50:25.708] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 7
+[2026-04-21 19:50:25.708] [info] [main_server.cc:1325] Thread 7: Client connected from 127.0.0.1:53478 (fd=5)
+[2026-04-21 19:50:36.466] [info] [main_server.cc:1387] Thread 7: Sending shared memory info - name: /cxlmemsim_pgas, size: 268435456 bytes
+[2026-04-21 19:50:36.467] [warning] [main_server.cc:1371] Thread 7: Invalid op_type 226 (0xe2) - possibly non-CXL client (HTTP scanner?), disconnecting
+[2026-04-21 19:50:36.467] [info] [main_server.cc:1418] Thread 7: Connection closed
+[2026-04-21 19:50:40.853] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 8
+[2026-04-21 19:50:40.853] [info] [main_server.cc:1325] Thread 8: Client connected from 127.0.0.1:36830 (fd=6)
+[2026-04-21 19:50:51.602] [info] [main_server.cc:1387] Thread 8: Sending shared memory info - name: /cxlmemsim_pgas, size: 268435456 bytes
+[2026-04-21 19:50:51.602] [warning] [main_server.cc:1371] Thread 8: Invalid op_type 226 (0xe2) - possibly non-CXL client (HTTP scanner?), disconnecting
+[2026-04-21 19:50:51.602] [info] [main_server.cc:1418] Thread 8: Connection closed
+[2026-04-21 19:50:56.005] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 9
+[2026-04-21 19:50:56.005] [info] [main_server.cc:1325] Thread 9: Client connected from 127.0.0.1:52220 (fd=5)
+[2026-04-21 19:51:06.612] [info] [main_server.cc:1387] Thread 9: Sending shared memory info - name: /cxlmemsim_pgas, size: 268435456 bytes
+[2026-04-21 19:51:06.612] [warning] [main_server.cc:1371] Thread 9: Invalid op_type 226 (0xe2) - possibly non-CXL client (HTTP scanner?), disconnecting
+[2026-04-21 19:51:06.613] [info] [main_server.cc:1418] Thread 9: Connection closed
+[2026-04-21 19:51:11.064] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 10
+[2026-04-21 19:51:11.064] [info] [main_server.cc:1325] Thread 10: Client connected from 127.0.0.1:42588 (fd=6)
+[2026-04-21 19:51:21.769] [info] [main_server.cc:1387] Thread 10: Sending shared memory info - name: /cxlmemsim_pgas, size: 268435456 bytes
+[2026-04-21 19:51:21.769] [warning] [main_server.cc:1371] Thread 10: Invalid op_type 226 (0xe2) - possibly non-CXL client (HTTP scanner?), disconnecting
+[2026-04-21 19:51:21.769] [info] [main_server.cc:1418] Thread 10: Connection closed
+[2026-04-21 19:51:29.705] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 11
+[2026-04-21 19:51:29.705] [info] [main_server.cc:1325] Thread 11: Client connected from 127.0.0.1:48646 (fd=5)
+[2026-04-21 19:51:42.572] [info] [main_server.cc:1418] Thread 11: Connection closed
+[2026-04-21 19:51:46.709] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 12
+[2026-04-21 19:51:46.709] [info] [main_server.cc:1325] Thread 12: Client connected from 127.0.0.1:60378 (fd=6)
+[2026-04-21 19:51:46.710] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 13
+[2026-04-21 19:51:46.717] [info] [main_server.cc:1325] Thread 13: Client connected from 127.0.0.1:60384 (fd=5)
+[2026-04-21 19:51:59.423] [info] [main_server.cc:1418] Thread 13: Connection closed
+[2026-04-21 19:51:59.451] [info] [main_server.cc:1418] Thread 12: Connection closed
+[2026-04-21 19:52:03.582] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 14
+[2026-04-21 19:52:03.582] [info] [main_server.cc:1325] Thread 14: Client connected from 127.0.0.1:59800 (fd=7)
+[2026-04-21 19:52:03.583] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 15
+[2026-04-21 19:52:03.584] [info] [main_server.cc:1325] Thread 15: Client connected from 127.0.0.1:59808 (fd=5)
+[2026-04-21 19:52:03.592] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 16
+[2026-04-21 19:52:03.592] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 17
+[2026-04-21 19:52:03.592] [info] [main_server.cc:1325] Thread 16: Client connected from 127.0.0.1:59816 (fd=6)
+[2026-04-21 19:52:03.592] [info] [main_server.cc:1325] Thread 17: Client connected from 127.0.0.1:59830 (fd=8)
+[2026-04-21 19:52:15.894] [info] [main_server.cc:1418] Thread 15: Connection closed
+[2026-04-21 19:52:15.894] [info] [main_server.cc:1418] Thread 17: Connection closed
+[2026-04-21 19:52:15.894] [info] [main_server.cc:1418] Thread 16: Connection closed
+[2026-04-21 19:52:15.928] [info] [main_server.cc:1418] Thread 14: Connection closed
+[2026-04-21 19:52:20.038] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 18
+[2026-04-21 19:52:20.038] [info] [main_server.cc:1325] Thread 18: Client connected from 127.0.0.1:46878 (fd=9)
+[2026-04-21 19:52:20.040] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 19
+[2026-04-21 19:52:20.040] [info] [main_server.cc:1325] Thread 19: Client connected from 127.0.0.1:46888 (fd=5)
+[2026-04-21 19:52:20.042] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 20
+[2026-04-21 19:52:20.042] [info] [main_server.cc:1325] Thread 20: Client connected from 127.0.0.1:46904 (fd=6)
+[2026-04-21 19:52:20.043] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 21
+[2026-04-21 19:52:20.043] [info] [main_server.cc:1325] Thread 21: Client connected from 127.0.0.1:46906 (fd=7)
+[2026-04-21 19:52:20.045] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 22
+[2026-04-21 19:52:20.045] [info] [main_server.cc:1325] Thread 22: Client connected from 127.0.0.1:46916 (fd=8)
+[2026-04-21 19:52:20.047] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 23
+[2026-04-21 19:52:20.047] [info] [main_server.cc:1325] Thread 23: Client connected from 127.0.0.1:46920 (fd=10)
+[2026-04-21 19:52:20.048] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 24
+[2026-04-21 19:52:20.049] [info] [main_server.cc:1325] Thread 24: Client connected from 127.0.0.1:46930 (fd=11)
+[2026-04-21 19:52:20.050] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 25
+[2026-04-21 19:52:20.050] [info] [main_server.cc:1325] Thread 25: Client connected from 127.0.0.1:46946 (fd=12)
+[2026-04-21 19:52:32.771] [info] [main_server.cc:1418] Thread 24: Connection closed
+[2026-04-21 19:52:32.771] [info] [main_server.cc:1418] Thread 25: Connection closed
+[2026-04-21 19:52:32.771] [info] [main_server.cc:1418] Thread 22: Connection closed
+[2026-04-21 19:52:32.771] [info] [main_server.cc:1418] Thread 19: Connection closed
+[2026-04-21 19:52:32.771] [info] [main_server.cc:1418] Thread 21: Connection closed
+[2026-04-21 19:52:32.771] [info] [main_server.cc:1418] Thread 23: Connection closed
+[2026-04-21 19:52:32.771] [info] [main_server.cc:1418] Thread 20: Connection closed
+[2026-04-21 19:52:32.800] [info] [main_server.cc:1418] Thread 18: Connection closed
+[2026-04-21 21:20:11.360] [info] [main_server.cc:718] Accepted new client connection, assigned thread ID 26
+[2026-04-21 21:20:11.361] [info] [main_server.cc:1325] Thread 26: Client connected from 127.0.0.1:33560 (fd=13)
+[2026-04-21 21:28:12.677] [info] [main_server.cc:1387] Thread 26: Sending shared memory info - name: /cxlmemsim_pgas, size: 268435456 bytes
+[2026-04-21 21:28:12.678] [warning] [main_server.cc:1371] Thread 26: Invalid op_type 226 (0xe2) - possibly non-CXL client (HTTP scanner?), disconnecting
+[2026-04-21 21:28:12.678] [info] [main_server.cc:1418] Thread 26: Connection closed

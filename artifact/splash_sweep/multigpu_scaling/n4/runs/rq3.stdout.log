@@ -1,0 +1,130 @@
+============================================================
+  RQ3: Device-Biased vs Host-Biased Directory Performance
+============================================================
+  Using CXL GPU device 0
+
+  Configuration:
+    NUM_TRIALS        = 10
+    COUNTER_OPS       = 100000 per thread
+    NUM_KEYS          = 10000  (KV entries)
+    KV_OPS_PER_THREAD = 50000
+    RING_SLOTS        = 1000
+    RING_RECORDS      = 100000
+    NUM_HOT_KEYS      = 100  (hybrid mode)
+
+============================================================
+  EXPERIMENT 1: Shared Counter (extreme contention)
+============================================================
+    1T Device-Bias ops/sec        p25=208418871  median=208542745  p75=209156888
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=1
+    1T Host-Bias ops/sec          p25=206331488  median=211081348  p75=211103628
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=1
+    2T Device-Bias ops/sec        p25=27016348  median=42853108  p75=44075891
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=1
+    2T Host-Bias ops/sec          p25=32802076  median=37155480  p75=51675246
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=1
+
+============================================================
+  EXPERIMENT 2: KV Store with Zipfian Distribution
+============================================================
+
+  --- theta = 0.00 ---
+    Device-Bias ops/sec           p25=19002458  median=20377027  p75=20720072
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+    Host-Bias ops/sec             p25=19186334  median=20230485  p75=20721540
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+    Hybrid ops/sec                p25=19944375  median=20388677  p75=20562567
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+
+  --- theta = 0.25 ---
+    Device-Bias ops/sec           p25=20146164  median=20509400  p75=20801801
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+    Host-Bias ops/sec             p25=19317922  median=20156539  p75=20531511
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+    Hybrid ops/sec                p25=19022719  median=20252988  p75=20855400
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+
+  --- theta = 0.50 ---
+    Device-Bias ops/sec           p25=20214205  median=20868827  p75=21137095
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+    Host-Bias ops/sec             p25=20446377  median=20973176  p75=21314599
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+    Hybrid ops/sec                p25=20618947  median=21216197  p75=21463750
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+
+  --- theta = 0.75 ---
+    Device-Bias ops/sec           p25=20419606  median=21282382  p75=21672590
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+    Host-Bias ops/sec             p25=20880353  median=22180222  p75=22321956
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+    Hybrid ops/sec                p25=20711999  median=21525378  p75=21682929
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+
+  --- theta = 1.00 ---
+    Device-Bias ops/sec           p25=21575852  median=22449400  p75=23510249
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+    Host-Bias ops/sec             p25=21336392  median=22210618  p75=22459907
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+    Hybrid ops/sec                p25=21346065  median=22211827  p75=23253845
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+
+  --- theta = 1.25 ---
+    Device-Bias ops/sec           p25=22249911  median=22587099  p75=23394844
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+    Host-Bias ops/sec             p25=20210913  median=21135688  p75=22519043
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+    Hybrid ops/sec                p25=23066747  median=23444322  p75=23590931
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+
+  --- theta = 1.50 ---
+    Device-Bias ops/sec           p25=22116070  median=22430838  p75=22948259
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+    Host-Bias ops/sec             p25=24077784  median=25879890  p75=26176872
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+    Hybrid ops/sec                p25=23518084  median=24331723  p75=26194604
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=10001
+
+============================================================
+  EXPERIMENT 3: Producer-Consumer Ring Buffer
+============================================================
+
+  --- Device-Bias ---
+    Device-Bias                   p25=0.579  median=0.598  p75=0.610 GB/s
+      latency (ns)                p25=10481325  median=10752466  p75=11041943
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=11001
+
+  --- Host-Bias ---
+    Host-Bias                     p25=0.427  median=0.444  p75=0.446 GB/s
+      latency (ns)                p25=14323218  median=14444901  p75=14953293
+    coherency: snoop_hits=0  snoop_misses=0  bias_flips=0  writebacks=0
+               dev_bias_hits=0  host_bias_hits=0  back_inv=0  dir_entries=11001
+
+============================================================
+  RQ3 experiments complete.
+============================================================

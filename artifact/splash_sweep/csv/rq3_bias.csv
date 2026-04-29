@@ -1,0 +1,146 @@
+source,accel_count,experiment,theta,label,p25,median,p75,unit,snoop_hits,snoop_misses,bias_flips,writebacks,dev_bias_hits,host_bias_hits,back_inv,dir_entries,log
+multigpu_n1,1,1:Shared Counter (extreme contention),,1T Device-Bias ops/sec,151663367.0,153154367.0,153484874.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n1,1,1:Shared Counter (extreme contention),,1T Host-Bias ops/sec,154412252.0,192110040.0,202762846.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n1,1,1:Shared Counter (extreme contention),,2T Device-Bias ops/sec,36190939.0,52559959.0,55880937.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n1,1,1:Shared Counter (extreme contention),,2T Host-Bias ops/sec,35068985.0,49141775.0,52476400.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,0.0,Device-Bias ops/sec,15448016.0,15851520.0,16083955.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,0.0,Host-Bias ops/sec,15708905.0,16098805.0,16572015.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,0.0,Hybrid ops/sec,14797277.0,15777277.0,16051281.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,0.25,Device-Bias ops/sec,14624238.0,15388595.0,15597222.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,0.25,Host-Bias ops/sec,14041926.0,15056485.0,15731759.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,0.25,Hybrid ops/sec,14510132.0,15575838.0,15594099.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,0.5,Device-Bias ops/sec,13754420.0,15873650.0,16495634.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,0.5,Host-Bias ops/sec,15395785.0,16223921.0,16660782.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,0.5,Hybrid ops/sec,14834290.0,15292046.0,15792791.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,0.75,Device-Bias ops/sec,15487979.0,15637634.0,15974402.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,0.75,Host-Bias ops/sec,15380879.0,15852676.0,15973869.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,0.75,Hybrid ops/sec,16121569.0,16559170.0,17258456.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,1.0,Device-Bias ops/sec,14906150.0,15925983.0,16868515.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,1.0,Host-Bias ops/sec,15519349.0,16855549.0,17066922.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,1.0,Hybrid ops/sec,15711007.0,16497103.0,16980376.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,1.25,Device-Bias ops/sec,16364801.0,16617481.0,16869161.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,1.25,Host-Bias ops/sec,16435668.0,16592385.0,16797541.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,1.25,Hybrid ops/sec,16148066.0,16595342.0,16727501.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,1.5,Device-Bias ops/sec,15919500.0,16189251.0,17002317.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,1.5,Host-Bias ops/sec,15726091.0,16354363.0,16401089.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,2:KV Store with Zipfian Distribution,1.5,Hybrid ops/sec,15846873.0,16500735.0,16780705.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n1,1,3:Producer-Consumer Ring Buffer,,Device-Bias,0.413,0.448,0.451,GB/s,,,,,,,,,rq3.stdout.log
+multigpu_n1,1,3:Producer-Consumer Ring Buffer,,latency (ns),14175107.0,14585839.0,15475595.0,,0,0,0,0,0,0,0,11001,rq3.stdout.log
+multigpu_n1,1,3:Producer-Consumer Ring Buffer,,Host-Bias,0.418,0.442,0.446,GB/s,,,,,,,,,rq3.stdout.log
+multigpu_n1,1,3:Producer-Consumer Ring Buffer,,latency (ns),14341883.0,14779616.0,15308251.0,,0,0,0,0,0,0,0,11001,rq3.stdout.log
+multigpu_n2,2,1:Shared Counter (extreme contention),,1T Device-Bias ops/sec,205854502.0,207541217.0,208216211.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n2,2,1:Shared Counter (extreme contention),,1T Host-Bias ops/sec,207463284.0,208247864.0,208591465.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n2,2,1:Shared Counter (extreme contention),,2T Device-Bias ops/sec,41478320.0,49900921.0,60115391.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n2,2,1:Shared Counter (extreme contention),,2T Host-Bias ops/sec,35751633.0,42457842.0,50144315.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,0.0,Device-Bias ops/sec,15307226.0,16699606.0,17588921.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,0.0,Host-Bias ops/sec,15972017.0,16741753.0,16936673.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,0.0,Hybrid ops/sec,15989291.0,16659297.0,16835388.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,0.25,Device-Bias ops/sec,15645282.0,16620312.0,16734023.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,0.25,Host-Bias ops/sec,16406597.0,16835989.0,17091025.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,0.25,Hybrid ops/sec,13885614.0,16142594.0,16700365.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,0.5,Device-Bias ops/sec,16970296.0,17200889.0,17419451.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,0.5,Host-Bias ops/sec,16535638.0,16813074.0,17091361.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,0.5,Hybrid ops/sec,16698270.0,16973375.0,17268741.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,0.75,Device-Bias ops/sec,17178455.0,17561920.0,17897325.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,0.75,Host-Bias ops/sec,17056905.0,17519722.0,17736446.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,0.75,Hybrid ops/sec,17475866.0,17758749.0,17999872.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,1.0,Device-Bias ops/sec,17936795.0,18240329.0,18503047.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,1.0,Host-Bias ops/sec,18220853.0,18486981.0,18661604.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,1.0,Hybrid ops/sec,15469002.0,18488963.0,18979808.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,1.25,Device-Bias ops/sec,18047072.0,18093456.0,19329431.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,1.25,Host-Bias ops/sec,17951906.0,18326628.0,19099682.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,1.25,Hybrid ops/sec,14923546.0,17749199.0,18673191.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,1.5,Device-Bias ops/sec,18337029.0,18805978.0,20157376.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,1.5,Host-Bias ops/sec,17326404.0,18144407.0,18508188.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,2:KV Store with Zipfian Distribution,1.5,Hybrid ops/sec,17822897.0,18233987.0,19173422.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n2,2,3:Producer-Consumer Ring Buffer,,Device-Bias,0.428,0.445,0.448,GB/s,,,,,,,,,rq3.stdout.log
+multigpu_n2,2,3:Producer-Consumer Ring Buffer,,latency (ns),14255668.0,14462381.0,14931000.0,,0,0,0,0,0,0,0,11001,rq3.stdout.log
+multigpu_n2,2,3:Producer-Consumer Ring Buffer,,Host-Bias,0.41,0.437,0.453,GB/s,,,,,,,,,rq3.stdout.log
+multigpu_n2,2,3:Producer-Consumer Ring Buffer,,latency (ns),14119974.0,15046855.0,15597113.0,,0,0,0,0,0,0,0,11001,rq3.stdout.log
+multigpu_n4,4,1:Shared Counter (extreme contention),,1T Device-Bias ops/sec,208418871.0,208542745.0,209156888.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n4,4,1:Shared Counter (extreme contention),,1T Host-Bias ops/sec,206331488.0,211081348.0,211103628.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n4,4,1:Shared Counter (extreme contention),,2T Device-Bias ops/sec,27016348.0,42853108.0,44075891.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n4,4,1:Shared Counter (extreme contention),,2T Host-Bias ops/sec,32802076.0,37155480.0,51675246.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,0.0,Device-Bias ops/sec,19002458.0,20377027.0,20720072.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,0.0,Host-Bias ops/sec,19186334.0,20230485.0,20721540.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,0.0,Hybrid ops/sec,19944375.0,20388677.0,20562567.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,0.25,Device-Bias ops/sec,20146164.0,20509400.0,20801801.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,0.25,Host-Bias ops/sec,19317922.0,20156539.0,20531511.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,0.25,Hybrid ops/sec,19022719.0,20252988.0,20855400.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,0.5,Device-Bias ops/sec,20214205.0,20868827.0,21137095.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,0.5,Host-Bias ops/sec,20446377.0,20973176.0,21314599.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,0.5,Hybrid ops/sec,20618947.0,21216197.0,21463750.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,0.75,Device-Bias ops/sec,20419606.0,21282382.0,21672590.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,0.75,Host-Bias ops/sec,20880353.0,22180222.0,22321956.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,0.75,Hybrid ops/sec,20711999.0,21525378.0,21682929.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,1.0,Device-Bias ops/sec,21575852.0,22449400.0,23510249.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,1.0,Host-Bias ops/sec,21336392.0,22210618.0,22459907.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,1.0,Hybrid ops/sec,21346065.0,22211827.0,23253845.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,1.25,Device-Bias ops/sec,22249911.0,22587099.0,23394844.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,1.25,Host-Bias ops/sec,20210913.0,21135688.0,22519043.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,1.25,Hybrid ops/sec,23066747.0,23444322.0,23590931.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,1.5,Device-Bias ops/sec,22116070.0,22430838.0,22948259.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,1.5,Host-Bias ops/sec,24077784.0,25879890.0,26176872.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,2:KV Store with Zipfian Distribution,1.5,Hybrid ops/sec,23518084.0,24331723.0,26194604.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n4,4,3:Producer-Consumer Ring Buffer,,Device-Bias,0.579,0.598,0.61,GB/s,,,,,,,,,rq3.stdout.log
+multigpu_n4,4,3:Producer-Consumer Ring Buffer,,latency (ns),10481325.0,10752466.0,11041943.0,,0,0,0,0,0,0,0,11001,rq3.stdout.log
+multigpu_n4,4,3:Producer-Consumer Ring Buffer,,Host-Bias,0.427,0.444,0.446,GB/s,,,,,,,,,rq3.stdout.log
+multigpu_n4,4,3:Producer-Consumer Ring Buffer,,latency (ns),14323218.0,14444901.0,14953293.0,,0,0,0,0,0,0,0,11001,rq3.stdout.log
+multigpu_n8,8,1:Shared Counter (extreme contention),,1T Device-Bias ops/sec,206061929.0,207016192.0,208112214.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n8,8,1:Shared Counter (extreme contention),,1T Host-Bias ops/sec,192128495.0,207901936.0,208117411.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n8,8,1:Shared Counter (extreme contention),,2T Device-Bias ops/sec,32199399.0,40674778.0,42377864.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n8,8,1:Shared Counter (extreme contention),,2T Host-Bias ops/sec,33079005.0,43508461.0,44423121.0,,0,0,0,0,0,0,0,1,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,0.0,Device-Bias ops/sec,15477461.0,16460412.0,17062400.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,0.0,Host-Bias ops/sec,16362881.0,16854407.0,16952908.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,0.0,Hybrid ops/sec,16284947.0,16801851.0,16991077.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,0.25,Device-Bias ops/sec,15549308.0,16175073.0,16350823.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,0.25,Host-Bias ops/sec,15392591.0,15819022.0,16246396.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,0.25,Hybrid ops/sec,15929388.0,16608420.0,16794371.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,0.5,Device-Bias ops/sec,16192873.0,16443792.0,17017314.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,0.5,Host-Bias ops/sec,16029263.0,16409677.0,17001413.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,0.5,Hybrid ops/sec,16413895.0,16582276.0,17229479.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,0.75,Device-Bias ops/sec,16762694.0,17112032.0,17216042.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,0.75,Host-Bias ops/sec,16333455.0,17003971.0,17162688.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,0.75,Hybrid ops/sec,16298247.0,16872126.0,17102711.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,1.0,Device-Bias ops/sec,17080624.0,17757832.0,18486099.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,1.0,Host-Bias ops/sec,16980402.0,17840840.0,19076175.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,1.0,Hybrid ops/sec,17796599.0,18240792.0,18277602.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,1.25,Device-Bias ops/sec,15835661.0,16855515.0,18474791.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,1.25,Host-Bias ops/sec,15416152.0,16520411.0,16665064.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,1.25,Hybrid ops/sec,15419522.0,16548814.0,17795383.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,1.5,Device-Bias ops/sec,15112198.0,16931664.0,18088020.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,1.5,Host-Bias ops/sec,14912561.0,17633194.0,18635501.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,2:KV Store with Zipfian Distribution,1.5,Hybrid ops/sec,14751520.0,15093273.0,15503388.0,,0,0,0,0,0,0,0,10001,rq3.stdout.log
+multigpu_n8,8,3:Producer-Consumer Ring Buffer,,Device-Bias,0.448,0.456,0.463,GB/s,,,,,,,,,rq3.stdout.log
+multigpu_n8,8,3:Producer-Consumer Ring Buffer,,latency (ns),13818052.0,14023763.0,14275938.0,,0,0,0,0,0,0,0,11001,rq3.stdout.log
+multigpu_n8,8,3:Producer-Consumer Ring Buffer,,Host-Bias,0.456,0.458,0.463,GB/s,,,,,,,,,rq3.stdout.log
+multigpu_n8,8,3:Producer-Consumer Ring Buffer,,latency (ns),13820991.0,14012395.0,14034154.0,,0,0,0,0,0,0,0,11001,rq3.stdout.log
+main,,1:Shared Counter (extreme contention),,1T Device-Bias ops/sec,202952141.0,205785875.0,209266312.0,,0,0,0,0,0,0,0,4097,rq3.stdout.log
+main,,1:Shared Counter (extreme contention),,1T Host-Bias ops/sec,200852821.0,206802135.0,208937510.0,,0,0,0,0,0,0,0,4097,rq3.stdout.log
+main,,1:Shared Counter (extreme contention),,2T Device-Bias ops/sec,32714537.0,39933056.0,43652129.0,,0,0,0,0,0,0,0,4097,rq3.stdout.log
+main,,1:Shared Counter (extreme contention),,2T Host-Bias ops/sec,28058444.0,35253652.0,46180961.0,,0,0,0,0,0,0,0,4097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,0.0,Device-Bias ops/sec,15697727.0,16432095.0,16868868.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,0.0,Host-Bias ops/sec,16780928.0,17279779.0,17607341.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,0.0,Hybrid ops/sec,15973152.0,16248281.0,17319886.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,0.25,Device-Bias ops/sec,15374522.0,15436770.0,16070760.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,0.25,Host-Bias ops/sec,16165668.0,16526147.0,16878933.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,0.25,Hybrid ops/sec,16118342.0,16795327.0,16870106.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,0.5,Device-Bias ops/sec,15902845.0,16372603.0,17257946.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,0.5,Host-Bias ops/sec,16253267.0,16787424.0,17065795.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,0.5,Hybrid ops/sec,16520577.0,16766398.0,16978476.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,0.75,Device-Bias ops/sec,17768209.0,17982875.0,18280716.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,0.75,Host-Bias ops/sec,21244904.0,21643644.0,21844964.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,0.75,Hybrid ops/sec,20878313.0,21709690.0,21929276.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,1.0,Device-Bias ops/sec,22675428.0,23218135.0,23485193.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,1.0,Host-Bias ops/sec,22281093.0,23069641.0,23251834.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,1.0,Hybrid ops/sec,22538842.0,22783615.0,23114765.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,1.25,Device-Bias ops/sec,21376903.0,22909895.0,22996747.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,1.25,Host-Bias ops/sec,21220118.0,22366205.0,22880111.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,1.25,Hybrid ops/sec,17491073.0,20888103.0,22210115.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,1.5,Device-Bias ops/sec,16521806.0,22197119.0,24865576.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,1.5,Host-Bias ops/sec,17912521.0,18354055.0,21282260.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,2:KV Store with Zipfian Distribution,1.5,Hybrid ops/sec,18034144.0,22878510.0,26828906.0,,0,0,0,0,0,0,0,14097,rq3.stdout.log
+main,,3:Producer-Consumer Ring Buffer,,Device-Bias,0.412,0.447,0.458,GB/s,,,,,,,,,rq3.stdout.log
+main,,3:Producer-Consumer Ring Buffer,,latency (ns),13949835.0,14372927.0,15510801.0,,0,0,0,0,0,0,0,15097,rq3.stdout.log
+main,,3:Producer-Consumer Ring Buffer,,Host-Bias,0.435,0.444,0.448,GB/s,,,,,,,,,rq3.stdout.log
+main,,3:Producer-Consumer Ring Buffer,,latency (ns),14271640.0,14424128.0,14695692.0,,0,0,0,0,0,0,0,15097,rq3.stdout.log

@@ -1,0 +1,31 @@
+[push] binaries → root@127.0.0.1:10022:/root/splash
+  [done] rq2 rc=255 0.3s
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/rq2_dir_capacity/cap64/runs/manifest.json
+[done] 1 runs
+[push] binaries → root@127.0.0.1:10022:/root/splash
+  [done] rq2 rc=255 0.3s
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/rq2_dir_capacity/cap256/runs/manifest.json
+[done] 1 runs
+[push] binaries → root@127.0.0.1:10022:/root/splash
+  [done] rq2 rc=255 0.3s
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/rq2_dir_capacity/cap1024/runs/manifest.json
+[done] 1 runs
+[push] binaries → root@127.0.0.1:10022:/root/splash
+  [done] rq2 rc=255 0.3s
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/rq2_dir_capacity/cap4096/runs/manifest.json
+[done] 1 runs
+[push] binaries → root@127.0.0.1:10022:/root/splash
+  [done] rq2 rc=255 0.3s
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/rq2_dir_capacity/cap16384/runs/manifest.json
+[done] 1 runs
+
+=== RQ2: directory_entries=64 ===
+
+=== RQ2: directory_entries=256 ===
+
+=== RQ2: directory_entries=1024 ===
+
+=== RQ2: directory_entries=4096 ===
+
+=== RQ2: directory_entries=16384 ===
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/rq2_dir_capacity/manifest.json

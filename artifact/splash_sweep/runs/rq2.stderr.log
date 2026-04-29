@@ -1,0 +1,2 @@
+Warning: Permanently added '[127.0.0.1]:10022' (ED25519) to the list of known hosts.
+bash: line 1:   593 Illegal instruction     LD_LIBRARY_PATH=. stdbuf -oL ./rq2_dir_sizing 2>&1

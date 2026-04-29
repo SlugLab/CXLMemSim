@@ -1,0 +1,12 @@
+[
+  {
+    "run_key": "rq3",
+    "binary": "rq3_bias_kv",
+    "args": "",
+    "returncode": 0,
+    "elapsed_sec": 1.9750785827636719,
+    "stdout_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/n2/runs/rq3.stdout.log",
+    "stderr_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/n2/runs/rq3.stderr.log",
+    "timed_out": false
+  }
+]

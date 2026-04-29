@@ -1,0 +1,10 @@
+  [warn] scp rq1_graph_bfs: scp: dest open "/root/splash/rq1_graph_bfs": Failure
+scp: failed to upload file /home/victoryang00/CXLMemSim/qemu_integration/guest_libcuda/rq1_graph_bfs to /root/splash/
+
+[push] binaries → root@127.0.0.1:10022:/root/splash
+  [done] rq1_N100 rc=0 97.4s
+  [done] rq1_N200 rc=0 3.6s
+  [done] rq1_N500 rc=0 14.5s
+  [done] rq1_N1000 rc=0 16.7s
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/runs/manifest.json
+[done] 4 runs

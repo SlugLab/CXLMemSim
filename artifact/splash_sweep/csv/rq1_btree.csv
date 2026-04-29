@@ -1,0 +1,19 @@
+B,num_leaves,method,median_us,p25_us,p75_us,log
+4,2500,Pointer-sharing lookup,1897,1877,1939,rq1_N100.stdout.log
+4,2500,Copy-based lookup,3415773,1021374,4083255,rq1_N100.stdout.log
+16,625,Pointer-sharing lookup,1292,924,1702,rq1_N100.stdout.log
+16,625,Copy-based lookup,3369277,1867571,9367007,rq1_N100.stdout.log
+64,157,Pointer-sharing lookup,259,258,272,rq1_N100.stdout.log
+64,157,Copy-based lookup,311237,297703,3785347,rq1_N100.stdout.log
+4,2500,Pointer-sharing lookup,469,460,478,rq1_N200.stdout.log
+4,2500,Copy-based lookup,3566101,3021453,3902738,rq1_N200.stdout.log
+16,625,Pointer-sharing lookup,403,400,405,rq1_N200.stdout.log
+16,625,Copy-based lookup,3284199,2929007,4310230,rq1_N200.stdout.log
+64,157,Pointer-sharing lookup,189,189,197,rq1_N200.stdout.log
+64,157,Copy-based lookup,2620998,2268594,2774180,rq1_N200.stdout.log
+4,2500,Pointer-sharing lookup,383,381,399,rq1_N50.stdout.log
+4,2500,Copy-based lookup,556550,418791,674553,rq1_N50.stdout.log
+16,625,Pointer-sharing lookup,334,330,349,rq1_N50.stdout.log
+16,625,Copy-based lookup,602625,466462,930708,rq1_N50.stdout.log
+64,157,Pointer-sharing lookup,170,169,171,rq1_N50.stdout.log
+64,157,Copy-based lookup,686003,610044,905551,rq1_N50.stdout.log
