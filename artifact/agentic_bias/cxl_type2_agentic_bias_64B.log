@@ -1,0 +1,27 @@
+Agentic CXL Type-2 bias benchmark
+  backend=cxl-type2 steps=20000 trials=5 bias_granularity=64 bytes
+  index_entries=16384 kv_entries=8192 queue_entries=1024 scratch_entries=1024
+
+[host-bias]
+  median_ns=8909676 p25_ns=8813388 p75_ns=8959253
+  agent_steps_per_sec=2244750.54 checksum=9581375808366952837
+  coherency_requests=0 back_invalidations=0 writebacks=0 bias_flips=0
+  snoop_hits=0 snoop_misses=0 host_bias_hits=0 device_bias_hits=0 directory_entries=26624
+
+[device-bias]
+  median_ns=8980343 p25_ns=8824200 p75_ns=9279278
+  agent_steps_per_sec=2227086.43 checksum=3639725190874658771
+  coherency_requests=0 back_invalidations=0 writebacks=0 bias_flips=0
+  snoop_hits=0 snoop_misses=0 host_bias_hits=0 device_bias_hits=0 directory_entries=26624
+
+[hybrid-agentic]
+  median_ns=8758255 p25_ns=8674980 p75_ns=8916678
+  agent_steps_per_sec=2283559.91 checksum=6988564705557957505
+  coherency_requests=0 back_invalidations=0 writebacks=0 bias_flips=0
+  snoop_hits=0 snoop_misses=0 host_bias_hits=0 device_bias_hits=0 directory_entries=26624
+
+[phase-flip]
+  median_ns=625033986 p25_ns=611314632 p75_ns=654198502
+  agent_steps_per_sec=31998.26 checksum=10021739617463566516
+  coherency_requests=41666560 back_invalidations=0 writebacks=0 bias_flips=6260
+  snoop_hits=0 snoop_misses=0 host_bias_hits=0 device_bias_hits=0 directory_entries=26624

@@ -1,0 +1,31 @@
+CPU/GPU HITM-style benchmark
+  lines=64 iterations=100 warmup=20
+  bias_granularity=4096 bytes
+  coherent_region=0x73a469e6d000 size=4096 bytes
+
+[host-bias]
+  total_ns=13740616
+  avg_roundtrip_ns=137406.2
+  avg_line_handoff_ns=2147.0
+  handoffs_per_sec=465772.42
+  coherency_requests=240 back_invalidations=0 writebacks=120 bias_flips=0
+  snoop_hits=0 snoop_misses=0 host_bias_hits=0 device_bias_hits=0
+  upgrades=0 downgrades=0 directory_entries=64
+
+[device-bias]
+  total_ns=13812952
+  avg_roundtrip_ns=138129.5
+  avg_line_handoff_ns=2158.3
+  handoffs_per_sec=463333.25
+  coherency_requests=240 back_invalidations=0 writebacks=120 bias_flips=0
+  snoop_hits=0 snoop_misses=0 host_bias_hits=0 device_bias_hits=120
+  upgrades=0 downgrades=0 directory_entries=64
+
+[flip-per-iter]
+  total_ns=16979935
+  avg_roundtrip_ns=169799.4
+  avg_line_handoff_ns=2653.1
+  handoffs_per_sec=376915.46
+  coherency_requests=15600 back_invalidations=0 writebacks=240 bias_flips=240
+  snoop_hits=0 snoop_misses=0 host_bias_hits=0 device_bias_hits=120
+  upgrades=0 downgrades=0 directory_entries=64

@@ -67,6 +67,7 @@ typedef uint64_t CUdeviceptr;
 /* CXL Type 2 device info */
 #define CXL_TYPE2_VENDOR_ID 0x8086
 #define CXL_TYPE2_DEVICE_ID 0x0d92
+#define CXL_MAX_KERNEL_ARGS 64
 
 /* Global state */
 static volatile uint32_t *g_regs = NULL;
@@ -79,6 +80,9 @@ static CUcontext g_context = NULL;
 /* Debug logging */
 static int g_debug = 0;
 #define DLOG(...) do { if (g_debug) fprintf(stderr, "[CXL-CUDA] " __VA_ARGS__); } while(0)
+
+static inline uint64_t maybe_bar4_offset(uint64_t value);
+static inline uint64_t bar4_offset_of(void *host_ptr);
 
 /* Register access helpers */
 static inline uint32_t reg_read32(uint32_t offset)
@@ -646,12 +650,27 @@ CUresult cuLaunchKernel(CUfunction f,
     reg_write64(CXL_GPU_REG_PARAM2, ((uint64_t)blockDimX << 32) | gridDimZ);
     reg_write64(CXL_GPU_REG_PARAM3, ((uint64_t)blockDimZ << 32) | blockDimY);
 
-    /* Count args and copy to data buffer */
+    /* Count args and copy argument values to the data buffer.
+     * CUDA's launch API passes pointers to argument storage in the guest.
+     * QEMU cannot dereference guest stack addresses, so marshal fixed-size
+     * little-endian slots that the host side can point CUDA at directly.
+     */
     uint32_t num_args = 0;
     if (kernelParams) {
-        while (kernelParams[num_args]) num_args++;
-        if (num_args * sizeof(void*) <= CXL_GPU_DATA_SIZE) {
-            data_write(0, kernelParams, num_args * sizeof(void*));
+        uint64_t arg_values[CXL_MAX_KERNEL_ARGS];
+
+        while (kernelParams[num_args] && num_args < CXL_MAX_KERNEL_ARGS) {
+            uint64_t value = 0;
+
+            memcpy(&value, kernelParams[num_args], sizeof(value));
+            arg_values[num_args] = maybe_bar4_offset(value);
+            num_args++;
+        }
+
+        if (num_args * sizeof(arg_values[0]) <= CXL_GPU_DATA_SIZE) {
+            data_write(0, arg_values, num_args * sizeof(arg_values[0]));
+        } else {
+            return CUDA_ERROR_INVALID_VALUE;
         }
     }
     reg_write64(CXL_GPU_REG_PARAM4, ((uint64_t)num_args << 32) | sharedMemBytes);
@@ -1215,6 +1234,17 @@ static volatile uint8_t *ensure_bar4(void)
     return NULL;
 }
 
+static inline uint64_t maybe_bar4_offset(uint64_t value)
+{
+    uintptr_t ptr = (uintptr_t)value;
+
+    if (g_bar4_ptr && ptr >= (uintptr_t)g_bar4_ptr &&
+        ptr < (uintptr_t)g_bar4_ptr + g_bar4_size) {
+        return (uint64_t)(ptr - (uintptr_t)g_bar4_ptr);
+    }
+    return value;
+}
+
 int cxlCoherentAlloc(uint64_t size, void **host_ptr)
 {
     DLOG("cxlCoherentAlloc(size=%lu)\n", (unsigned long)size);
@@ -1222,9 +1252,24 @@ int cxlCoherentAlloc(uint64_t size, void **host_ptr)
     volatile uint8_t *bar4 = ensure_bar4();
     if (!bar4) return 3;
 
+    if (g_regs) {
+        cmd_lock();
+        reg_write64(CXL_GPU_REG_PARAM0, size);
+        CUresult r = execute_cmd(CXL_GPU_CMD_COHERENT_ALLOC);
+        if (r == CUDA_SUCCESS) {
+            uint64_t offset = reg_read64(CXL_GPU_REG_RESULT0);
+            cmd_unlock();
+            if (offset < g_bar4_size) {
+                *host_ptr = (void *)(bar4 + offset);
+                return 0;
+            }
+            return 2;
+        }
+        cmd_unlock();
+    }
+
     size = (size + 4095) & ~4095UL;
     if (g_coh_offset + size > g_bar4_size) return 2;
-
     *host_ptr = (void *)(bar4 + g_coh_offset);
     g_coh_offset += size;
     return 0;
@@ -1232,7 +1277,16 @@ int cxlCoherentAlloc(uint64_t size, void **host_ptr)
 
 int cxlCoherentFree(void *host_ptr)
 {
-    (void)host_ptr;
+    if (g_regs && host_ptr) {
+        uint64_t offset = bar4_offset_of(host_ptr);
+
+        cmd_lock();
+        reg_write64(CXL_GPU_REG_PARAM0, offset);
+        CUresult r = execute_cmd(CXL_GPU_CMD_COHERENT_FREE);
+        cmd_unlock();
+        return r == CUDA_SUCCESS ? 0 : 1;
+    }
+
     return 0;
 }
 
@@ -1249,23 +1303,48 @@ int cxlCoherentFence(void)
     return 0;
 }
 
+static inline uint64_t bar4_offset_of(void *host_ptr)
+{
+    if (!host_ptr || !g_bar4_ptr) return 0;
+    return (uint64_t)((uint8_t *)host_ptr - (uint8_t *)g_bar4_ptr);
+}
+
 int cxlSetBias(void *host_ptr, uint64_t size, int bias_mode)
 {
-    (void)host_ptr; (void)size; (void)bias_mode;
-    return 0;
+    if (!g_regs) return 1;
+    uint64_t addr = bar4_offset_of(host_ptr);
+    cmd_lock();
+    reg_write64(CXL_GPU_REG_PARAM0, addr);
+    reg_write64(CXL_GPU_REG_PARAM1, size);
+    reg_write64(CXL_GPU_REG_PARAM2, (uint64_t)bias_mode);
+    CUresult r = execute_cmd(CXL_GPU_CMD_SET_BIAS);
+    cmd_unlock();
+    return r == CUDA_SUCCESS ? 0 : 1;
 }
 
 int cxlGetBias(void *host_ptr, int *bias_mode)
 {
-    (void)host_ptr;
-    if (bias_mode) *bias_mode = 0;
-    return 0;
+    if (!g_regs || !bias_mode) return 1;
+    uint64_t addr = bar4_offset_of(host_ptr);
+    cmd_lock();
+    reg_write64(CXL_GPU_REG_PARAM0, addr);
+    CUresult r = execute_cmd(CXL_GPU_CMD_GET_BIAS);
+    *bias_mode = (int)reg_read64(CXL_GPU_REG_RESULT0);
+    cmd_unlock();
+    return r == CUDA_SUCCESS ? 0 : 1;
 }
 
 int cxlBiasFlip(void *host_ptr, uint64_t size, int new_bias)
 {
-    (void)host_ptr; (void)size; (void)new_bias;
-    return 0;
+    if (!g_regs) return 1;
+    uint64_t addr = bar4_offset_of(host_ptr);
+    cmd_lock();
+    reg_write64(CXL_GPU_REG_PARAM0, addr);
+    reg_write64(CXL_GPU_REG_PARAM1, size);
+    reg_write64(CXL_GPU_REG_PARAM2, (uint64_t)new_bias);
+    CUresult r = execute_cmd(CXL_GPU_CMD_BIAS_FLIP);
+    cmd_unlock();
+    return r == CUDA_SUCCESS ? 0 : 1;
 }
 
 typedef struct {
@@ -1279,13 +1358,41 @@ typedef struct {
 int cxlGetCoherencyStats(CXLCoherencyStats *stats)
 {
     if (!stats) return 1;
-    memset(stats, 0, sizeof(*stats));
+    if (!g_regs) { memset(stats, 0, sizeof(*stats)); return 2; }
+
+    cmd_lock();
+    CUresult r = execute_cmd(CXL_GPU_CMD_COH_GET_STATS);
+    if (r != CUDA_SUCCESS) {
+        cmd_unlock();
+        memset(stats, 0, sizeof(*stats));
+        return 3;
+    }
+    stats->snoop_hits          = reg_read64(CXL_GPU_REG_RESULT0);
+    stats->snoop_misses        = reg_read64(CXL_GPU_REG_RESULT1);
+    stats->coherency_requests  = reg_read64(CXL_GPU_REG_RESULT2);
+    stats->back_invalidations  = reg_read64(CXL_GPU_REG_RESULT3);
+
+    uint64_t ext[8];
+    data_read(0, ext, sizeof(ext));
+    stats->writebacks          = ext[0];
+    stats->evictions           = ext[1];
+    stats->bias_flips          = ext[2];
+    stats->device_bias_hits    = ext[3];
+    stats->host_bias_hits      = ext[4];
+    stats->upgrades            = ext[5];
+    stats->downgrades          = ext[6];
+    stats->directory_entries   = ext[7];
+    cmd_unlock();
     return 0;
 }
 
 int cxlResetCoherencyStats(void)
 {
-    return 0;
+    if (!g_regs) return 1;
+    cmd_lock();
+    CUresult r = execute_cmd(CXL_GPU_CMD_COH_RESET_STATS);
+    cmd_unlock();
+    return r == CUDA_SUCCESS ? 0 : 1;
 }
 
 CUresult cuCxlGetCoherentBase(CUdeviceptr *base, size_t *size, CUdevice dev)

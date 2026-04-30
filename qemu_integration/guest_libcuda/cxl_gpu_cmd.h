@@ -160,9 +160,22 @@ typedef enum {
 #define CXL_GPU_REG_COH_DIR_SIZE    0x0318  /* Directory size (entries) */
 #define CXL_GPU_REG_COH_DIR_USED    0x0320  /* Directory used entries */
 
-/* Bias mode constants */
+/* Bias mode constants.
+ * Legacy values 0/1 remain valid and imply 64B flit/cache-line granularity.
+ * Extended encodings use low 8 bits for home domain and upper bits for
+ * granularity in bytes, e.g. CXL_BIAS_ENCODE(CXL_BIAS_DEVICE, 4096).
+ */
 #define CXL_BIAS_HOST               0       /* Host-biased: CPU is coherence home */
 #define CXL_BIAS_DEVICE             1       /* Device-biased: GPU snoop filter is home */
+#define CXL_BIAS_MODE_MASK          0xffULL
+#define CXL_BIAS_GRAN_SHIFT         8
+#define CXL_BIAS_GRAN_FLIT          64ULL
+#define CXL_BIAS_GRAN_PAGE_4K       4096ULL
+#define CXL_BIAS_GRAN_PAGE_2M       2097152ULL
+#define CXL_BIAS_ENCODE(mode, gran) ((((uint64_t)(gran)) << CXL_BIAS_GRAN_SHIFT) | \
+                                     ((uint64_t)(mode) & CXL_BIAS_MODE_MASK))
+#define CXL_BIAS_MODE(encoded)      ((uint8_t)((uint64_t)(encoded) & CXL_BIAS_MODE_MASK))
+#define CXL_BIAS_GRAN(encoded)      ((uint64_t)(encoded) >> CXL_BIAS_GRAN_SHIFT)
 
 /* P2P register offsets (in GPU command region) */
 #define CXL_GPU_REG_P2P_NUM_PEERS       0x0200  /* Number of discovered peers */

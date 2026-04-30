@@ -1,0 +1,35 @@
+[2026-04-29 20:52:08.720] [warning] [main_server.cc:415] Topology file topology.txt not found, using default topology
+[2026-04-29 20:52:08.720] [info] [main_server.cc:420] ========================================
+[2026-04-29 20:52:08.720] [info] [main_server.cc:421] CXLMemSim CXL Type3 Memory Server
+[2026-04-29 20:52:08.720] [info] [main_server.cc:422] ========================================
+[2026-04-29 20:52:08.720] [info] [main_server.cc:423] Server Configuration:
+[2026-04-29 20:52:08.720] [info] [main_server.cc:428]   Communication Mode: TCP
+[2026-04-29 20:52:08.720] [info] [main_server.cc:457]   Port: 9999
+[2026-04-29 20:52:08.720] [info] [main_server.cc:458]   Topology: topology.txt
+[2026-04-29 20:52:08.720] [info] [main_server.cc:459]   Capacity: 256 MB
+[2026-04-29 20:52:08.720] [info] [main_server.cc:460]   Default latency: 100 ns
+[2026-04-29 20:52:08.720] [info] [main_server.cc:461]   Interleave size: 256 bytes
+[2026-04-29 20:52:08.720] [info] [main_server.cc:462] CXL Type3 Operations Supported:
+[2026-04-29 20:52:08.720] [info] [main_server.cc:463]   - CXL_TYPE3_READ
+[2026-04-29 20:52:08.720] [info] [main_server.cc:464]   - CXL_TYPE3_WRITE
+[2026-04-29 20:52:08.720] [info] [main_server.cc:478] ========================================
+[2026-04-29 20:52:08.720] [info] [shared_memory_manager.cc:32] SharedMemoryManager: Capacity 256MB, Total size: 268435456 bytes
+[2026-04-29 20:52:08.721] [info] [main_server.cc:219] LSA initialized: 262144 bytes
+[2026-04-29 20:52:08.721] [info] [shared_memory_manager.cc:99] Reusing existing shared memory: /cxlmemsim_pgas
+[2026-04-29 20:52:08.721] [info] [shared_memory_manager.cc:169] Mapped shared memory at address: 0x7c39faf2d000
+[2026-04-29 20:52:08.721] [info] [shared_memory_manager.cc:178] Shared memory already initialized, using existing data
+[2026-04-29 20:52:08.721] [info] [shared_memory_manager.cc:215] Preserving existing data in shared memory
+[2026-04-29 20:52:08.721] [info] [shared_memory_manager.cc:226] Initialized data area: 268435400 bytes
+[2026-04-29 20:52:08.721] [info] [shared_memory_manager.cc:77] SharedMemoryManager initialized successfully
+[2026-04-29 20:52:08.721] [info] [shared_memory_manager.cc:78]   Shared memory: /cxlmemsim_pgas
+[2026-04-29 20:52:08.721] [info] [shared_memory_manager.cc:79]   Size: 256 MB
+[2026-04-29 20:52:08.721] [info] [shared_memory_manager.cc:80]   Base address: 0x0
+[2026-04-29 20:52:08.721] [info] [shared_memory_manager.cc:81]   Cachelines: 4194303
+[2026-04-29 20:52:08.721] [info] [main_server.cc:611] Shared memory initialized:
+[2026-04-29 20:52:08.721] [info] [main_server.cc:612]   Name: /cxlmemsim_pgas
+[2026-04-29 20:52:08.721] [info] [main_server.cc:613]   Size: 268435456 bytes
+[2026-04-29 20:52:08.721] [info] [main_server.cc:614]   Base address: 0x0
+[2026-04-29 20:52:08.721] [info] [main_server.cc:615]   Cachelines: 4194303
+[2026-04-29 20:52:08.721] [info] [main_server.cc:642] >>> TCP mode: Initializing TCP socket <<<
+[2026-04-29 20:52:08.721] [info] [main_server.cc:674] Server listening on TCP port 9999
+[2026-04-29 20:52:08.721] [info] [main_server.cc:691] Running in TCP mode

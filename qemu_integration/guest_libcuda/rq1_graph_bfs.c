@@ -1441,9 +1441,20 @@ int main(int argc, char **argv)
     }
 
     /* ---- Run experiments ---- */
-    experiment1_bfs(N);
-    experiment2_btree();
-    experiment3_hashtable();
+    /* Env RQ1_EXPS (comma list of 1/2/3, default "1,2,3") selects which to run. */
+    int want_exp1 = 1, want_exp2 = 1, want_exp3 = 1;
+    const char *exps_env = getenv("RQ1_EXPS");
+    if (exps_env && *exps_env) {
+        want_exp1 = want_exp2 = want_exp3 = 0;
+        for (const char *p = exps_env; *p; p++) {
+            if (*p == '1') want_exp1 = 1;
+            else if (*p == '2') want_exp2 = 1;
+            else if (*p == '3') want_exp3 = 1;
+        }
+    }
+    if (want_exp1) experiment1_bfs(N);
+    if (want_exp2) experiment2_btree();
+    if (want_exp3) experiment3_hashtable();
 
     printf("\n================================================================\n");
     printf("  All experiments complete.\n");
