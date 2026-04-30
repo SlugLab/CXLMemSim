@@ -1,29 +1,8 @@
 [
   {
-    "n": 1,
-    "port": 10022,
-    "elapsed_sec": 3.3058676719665527,
-    "status": "done",
-    "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/n1"
-  },
-  {
-    "n": 2,
-    "port": 10023,
-    "elapsed_sec": 3.1489295959472656,
-    "status": "done",
-    "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/n2"
-  },
-  {
-    "n": 4,
-    "port": 10024,
-    "elapsed_sec": 2.8437366485595703,
-    "status": "done",
-    "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/n4"
-  },
-  {
     "n": 8,
-    "port": 10025,
-    "elapsed_sec": 3.2378921508789062,
+    "port": 10107,
+    "elapsed_sec": 31.067359924316406,
     "status": "done",
     "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/n8"
   }

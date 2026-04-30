@@ -1,0 +1,50 @@
+[
+  {
+    "cache_size": "16M",
+    "graph_size": 2000,
+    "port": 10200,
+    "elapsed_sec": 32.010788440704346,
+    "status": "done",
+    "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_size_bfs/16M"
+  },
+  {
+    "cache_size": "32M",
+    "graph_size": 2000,
+    "port": 10201,
+    "elapsed_sec": 30.658540725708008,
+    "status": "done",
+    "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_size_bfs/32M"
+  },
+  {
+    "cache_size": "64M",
+    "graph_size": 2000,
+    "port": 10202,
+    "elapsed_sec": 30.091418743133545,
+    "status": "done",
+    "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_size_bfs/64M"
+  },
+  {
+    "cache_size": "128M",
+    "graph_size": 2000,
+    "port": 10203,
+    "elapsed_sec": 30.043997049331665,
+    "status": "done",
+    "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_size_bfs/128M"
+  },
+  {
+    "cache_size": "256M",
+    "graph_size": 2000,
+    "port": 10204,
+    "elapsed_sec": 30.177042245864868,
+    "status": "done",
+    "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_size_bfs/256M"
+  },
+  {
+    "cache_size": "512M",
+    "graph_size": 2000,
+    "port": 10205,
+    "elapsed_sec": 30.98130750656128,
+    "status": "done",
+    "outdir": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_size_bfs/512M"
+  }
+]

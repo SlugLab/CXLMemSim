@@ -1,0 +1,12 @@
+[
+  {
+    "run_key": "rq1_N2000",
+    "binary": "rq1_graph_bfs",
+    "args": "2000",
+    "returncode": 0,
+    "elapsed_sec": 29.81760334968567,
+    "stdout_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_size_bfs/512M/runs/rq1_N2000.stdout.log",
+    "stderr_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_size_bfs/512M/runs/rq1_N2000.stderr.log",
+    "timed_out": false
+  }
+]

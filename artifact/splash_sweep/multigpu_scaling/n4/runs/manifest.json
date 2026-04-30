@@ -1,12 +1,12 @@
 [
   {
-    "run_key": "rq3",
-    "binary": "rq3_bias_kv",
-    "args": "",
+    "run_key": "rq1_N2000",
+    "binary": "rq1_graph_bfs",
+    "args": "2000",
     "returncode": 0,
-    "elapsed_sec": 1.6830005645751953,
-    "stdout_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/n4/runs/rq3.stdout.log",
-    "stderr_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/n4/runs/rq3.stderr.log",
+    "elapsed_sec": 28.860456228256226,
+    "stdout_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/n4/runs/rq1_N2000.stdout.log",
+    "stderr_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/multigpu_scaling/n4/runs/rq1_N2000.stderr.log",
     "timed_out": false
   }
 ]
