@@ -1,0 +1,93 @@
+[
+  {
+    "cache_size": "512K",
+    "graph_sizes": "50000,100000",
+    "device_fractions": "0.0,0.5,1.0",
+    "methods": "A",
+    "port": 10400,
+    "unit": "cxl-bfs-cache-512k",
+    "status": "done",
+    "returncode": 0,
+    "elapsed_sec": 170.22882056236267,
+    "driver_stdout": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/512K/driver.stdout.log",
+    "driver_stderr": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/512K/driver.stderr.log"
+  },
+  {
+    "cache_size": "1M",
+    "graph_sizes": "50000,100000",
+    "device_fractions": "0.0,0.5,1.0",
+    "methods": "A",
+    "port": 10401,
+    "unit": "cxl-bfs-cache-1m",
+    "status": "done",
+    "returncode": 0,
+    "elapsed_sec": 171.10670638084412,
+    "driver_stdout": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/1M/driver.stdout.log",
+    "driver_stderr": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/1M/driver.stderr.log"
+  },
+  {
+    "cache_size": "2M",
+    "graph_sizes": "50000,100000",
+    "device_fractions": "0.0,0.5,1.0",
+    "methods": "A",
+    "port": 10402,
+    "unit": "cxl-bfs-cache-2m",
+    "status": "done",
+    "returncode": 0,
+    "elapsed_sec": 169.9370846748352,
+    "driver_stdout": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/2M/driver.stdout.log",
+    "driver_stderr": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/2M/driver.stderr.log"
+  },
+  {
+    "cache_size": "4M",
+    "graph_sizes": "50000,100000",
+    "device_fractions": "0.0,0.5,1.0",
+    "methods": "A",
+    "port": 10403,
+    "unit": "cxl-bfs-cache-4m",
+    "status": "done",
+    "returncode": 0,
+    "elapsed_sec": 169.99118852615356,
+    "driver_stdout": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/4M/driver.stdout.log",
+    "driver_stderr": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/4M/driver.stderr.log"
+  },
+  {
+    "cache_size": "8M",
+    "graph_sizes": "50000,100000",
+    "device_fractions": "0.0,0.5,1.0",
+    "methods": "A",
+    "port": 10404,
+    "unit": "cxl-bfs-cache-8m",
+    "status": "done",
+    "returncode": 0,
+    "elapsed_sec": 169.74419975280762,
+    "driver_stdout": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/8M/driver.stdout.log",
+    "driver_stderr": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/8M/driver.stderr.log"
+  },
+  {
+    "cache_size": "16M",
+    "graph_sizes": "50000,100000",
+    "device_fractions": "0.0,0.5,1.0",
+    "methods": "A",
+    "port": 10405,
+    "unit": "cxl-bfs-cache-16m",
+    "status": "done",
+    "returncode": 0,
+    "elapsed_sec": 169.6918249130249,
+    "driver_stdout": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/16M/driver.stdout.log",
+    "driver_stderr": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/16M/driver.stderr.log"
+  },
+  {
+    "cache_size": "32M",
+    "graph_sizes": "50000,100000",
+    "device_fractions": "0.0,0.5,1.0",
+    "methods": "A",
+    "port": 10406,
+    "unit": "cxl-bfs-cache-32m",
+    "status": "done",
+    "returncode": 0,
+    "elapsed_sec": 170.58959794044495,
+    "driver_stdout": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/32M/driver.stdout.log",
+    "driver_stderr": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/32M/driver.stderr.log"
+  }
+]

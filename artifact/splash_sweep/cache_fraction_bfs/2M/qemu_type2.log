@@ -787,4 +787,4 @@ g [0;1;39msystemd-modules-load.service[0m - Load Kernel Modules...
 [!p]104[?7h[6n[32766;32766H[6n[!p]104[?7h[6n[32766;32766H[6n
 Debian GNU/Linux 13 node1 ttyS0
 
-node1 login: 
+node1 login: qemu-system-x86_64: terminating on signal 15 from pid 1 (/sbin/init)

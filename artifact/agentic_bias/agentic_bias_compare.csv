@@ -1,0 +1,17 @@
+backend,granularity,bias_granularity_bytes,mode,steps,trials,median_ns,p25_ns,p75_ns,agent_steps_per_sec,slowdown_vs_native_same_gran,coherency_requests,back_invalidations,writebacks,bias_flips,snoop_hits,snoop_misses,host_bias_hits,device_bias_hits,directory_entries,checksum,source_log
+cxl-type2,4K,4096,host-bias,20000,5,7787263,7769397,7864131,2568296.46,1.0141420305675293,0,0,0,0,0,0,0,0,26624,9581375808366952837,/home/victoryang00/CXLMemSim/artifact/agentic_bias/cxl_type2_agentic_bias_4K.log
+cxl-type2,4K,4096,device-bias,20000,5,7767791,7764489,7771144,2574734.57,1.0112893022684188,0,0,0,0,0,0,0,0,26624,3639725190874658771,/home/victoryang00/CXLMemSim/artifact/agentic_bias/cxl_type2_agentic_bias_4K.log
+cxl-type2,4K,4096,hybrid-agentic,20000,5,7792089,7786617,7899452,2566705.8,1.009644508643557,0,0,0,0,0,0,0,0,26624,6988564705557957505,/home/victoryang00/CXLMemSim/artifact/agentic_bias/cxl_type2_agentic_bias_4K.log
+cxl-type2,4K,4096,phase-flip,20000,5,556640100,549921594,560478057,35929.86,72.51597587994846,41666560,0,0,6260,0,0,0,0,26624,10021739617463566516,/home/victoryang00/CXLMemSim/artifact/agentic_bias/cxl_type2_agentic_bias_4K.log
+cxl-type2,64B,64,host-bias,20000,5,8909676,8813388,8959253,2244750.54,1.0981726900527204,0,0,0,0,0,0,0,0,26624,9581375808366952837,/home/victoryang00/CXLMemSim/artifact/agentic_bias/cxl_type2_agentic_bias_64B.log
+cxl-type2,64B,64,device-bias,20000,5,8980343,8824200,9279278,2227086.43,1.1693132109768014,0,0,0,0,0,0,0,0,26624,3639725190874658771,/home/victoryang00/CXLMemSim/artifact/agentic_bias/cxl_type2_agentic_bias_64B.log
+cxl-type2,64B,64,hybrid-agentic,20000,5,8758255,8674980,8916678,2283559.91,1.131123603878564,0,0,0,0,0,0,0,0,26624,6988564705557957505,/home/victoryang00/CXLMemSim/artifact/agentic_bias/cxl_type2_agentic_bias_64B.log
+cxl-type2,64B,64,phase-flip,20000,5,625033986,611314632,654198502,31998.26,81.27366540944226,41666560,0,0,6260,0,0,0,0,26624,10021739617463566516,/home/victoryang00/CXLMemSim/artifact/agentic_bias/cxl_type2_agentic_bias_64B.log
+native,4K,4096,host-bias,20000,5,7678671,7675356,7684132,2604617.39,1.0,0,0,0,0,0,0,0,0,0,9581375808366952837,/home/victoryang00/CXLMemSim/artifact/agentic_bias/native_agentic_bias_4K.log
+native,4K,4096,device-bias,20000,5,7681077,7680507,7695889,2603801.52,1.0,0,0,0,0,0,0,0,0,0,3639725190874658771,/home/victoryang00/CXLMemSim/artifact/agentic_bias/native_agentic_bias_4K.log
+native,4K,4096,hybrid-agentic,20000,5,7717656,7695089,7760062,2591460.41,1.0,0,0,0,0,0,0,0,0,0,6988564705557957505,/home/victoryang00/CXLMemSim/artifact/agentic_bias/native_agentic_bias_4K.log
+native,4K,4096,phase-flip,20000,5,7676103,7672282,7679938,2605488.75,1.0,0,0,0,0,0,0,0,0,0,10021739617463566516,/home/victoryang00/CXLMemSim/artifact/agentic_bias/native_agentic_bias_4K.log
+native,64B,64,host-bias,20000,5,8113183,7680367,9733047,2465123.74,1.0,0,0,0,0,0,0,0,0,0,9581375808366952837,/home/victoryang00/CXLMemSim/artifact/agentic_bias/native_agentic_bias_64B.log
+native,64B,64,device-bias,20000,5,7680015,7677855,7682163,2604161.58,1.0,0,0,0,0,0,0,0,0,0,3639725190874658771,/home/victoryang00/CXLMemSim/artifact/agentic_bias/native_agentic_bias_64B.log
+native,64B,64,hybrid-agentic,20000,5,7742969,7701133,7754745,2582988.52,1.0,0,0,0,0,0,0,0,0,0,6988564705557957505,/home/victoryang00/CXLMemSim/artifact/agentic_bias/native_agentic_bias_64B.log
+native,64B,64,phase-flip,20000,5,7690486,7690044,7696432,2600615.88,1.0,0,0,0,0,0,0,0,0,0,10021739617463566516,/home/victoryang00/CXLMemSim/artifact/agentic_bias/native_agentic_bias_64B.log

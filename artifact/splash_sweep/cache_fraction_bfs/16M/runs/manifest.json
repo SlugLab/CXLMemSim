@@ -1,0 +1,22 @@
+[
+  {
+    "run_key": "rq1_N50000",
+    "binary": "rq1_graph_bfs",
+    "args": "50000",
+    "returncode": 0,
+    "elapsed_sec": 33.840635538101196,
+    "stdout_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/16M/runs/rq1_N50000.stdout.log",
+    "stderr_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/16M/runs/rq1_N50000.stderr.log",
+    "timed_out": false
+  },
+  {
+    "run_key": "rq1_N100000",
+    "binary": "rq1_graph_bfs",
+    "args": "100000",
+    "returncode": 0,
+    "elapsed_sec": 134.67833256721497,
+    "stdout_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/16M/runs/rq1_N100000.stdout.log",
+    "stderr_path": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/16M/runs/rq1_N100000.stderr.log",
+    "timed_out": false
+  }
+]

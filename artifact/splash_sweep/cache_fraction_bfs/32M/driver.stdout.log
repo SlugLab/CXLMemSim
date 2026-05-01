@@ -1,0 +1,5 @@
+[push] binaries → root@127.0.0.1:10406:/root/splash_cache_fraction_bfs
+  [done] rq1_N50000 rc=0 34.4s
+  [done] rq1_N100000 rc=0 135.0s
+[manifest] /home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/32M/runs/manifest.json
+[done] 2 runs
