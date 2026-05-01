@@ -1,0 +1,62 @@
+================================================================
+  RQ1: Pointer Sharing vs Copy-Based Offload
+  Pointer-Rich Workloads on CXL Type-2 Coherent Memory
+================================================================
+  Using CXL GPU device 0
+  BAR4 base: 0x7ff193866000
+  sizeof(GraphNode) = 64 (expect 64)
+
+================================================================
+  EXPERIMENT 1: BFS -- Pointer Sharing vs Copy-Based Offload
+  N=50000  avg_degree=6  trials=3
+================================================================
+
+--- Graph type: erdos_renyi ---
+  graph=erdos_renyi  N=50000  device_fraction=0.00
+    Method A (pointer-sharing):  median=3313 us  p25=3202 us  p75=3558 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=0 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=50000
+    Method B (copy-based):       SKIPPED (disabled)
+
+  graph=erdos_renyi  N=50000  device_fraction=0.50
+    Method A (pointer-sharing):  median=3236 us  p25=3228 us  p75=3506 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=0 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=50024
+    Method B (copy-based):       SKIPPED (disabled)
+
+  graph=erdos_renyi  N=50000  device_fraction=1.00
+    Method A (pointer-sharing):  median=3218 us  p25=3196 us  p75=3434 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=0 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=50024
+    Method B (copy-based):       SKIPPED (disabled)
+
+
+--- Graph type: barabasi_albert ---
+  graph=barabasi_albert  N=50000  device_fraction=0.00
+    Method A (pointer-sharing):  median=2907 us  p25=2541 us  p75=3013 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=0 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=50024
+    Method B (copy-based):       SKIPPED (disabled)
+
+  graph=barabasi_albert  N=50000  device_fraction=0.50
+    Method A (pointer-sharing):  median=2639 us  p25=2358 us  p75=3045 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=0 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=50024
+    Method B (copy-based):       SKIPPED (disabled)
+
+  graph=barabasi_albert  N=50000  device_fraction=1.00
+    Method A (pointer-sharing):  median=2415 us  p25=2370 us  p75=2870 us
+      coherency: snoop_hits=0 snoop_misses=0 coh_reqs=0 back_inv=0
+                writebacks=0 evictions=0 bias_flips=0
+                dev_bias_hits=0 host_bias_hits=0 dir_entries=50024
+    Method B (copy-based):       SKIPPED (disabled)
+
+
+================================================================
+  All experiments complete.
+================================================================

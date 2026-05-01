@@ -89,5 +89,31 @@
     "elapsed_sec": 170.58959794044495,
     "driver_stdout": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/32M/driver.stdout.log",
     "driver_stderr": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/32M/driver.stderr.log"
+  },
+  {
+    "cache_size": "64M",
+    "graph_sizes": "50000,100000",
+    "device_fractions": "0.0,0.5,1.0",
+    "methods": "A",
+    "port": 10420,
+    "unit": "cxl-bfs-cache-64m",
+    "status": "done",
+    "returncode": 0,
+    "elapsed_sec": 169.85465812683105,
+    "driver_stdout": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/64M/driver.stdout.log",
+    "driver_stderr": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/64M/driver.stderr.log"
+  },
+  {
+    "cache_size": "128M",
+    "graph_sizes": "50000,100000",
+    "device_fractions": "0.0,0.5,1.0",
+    "methods": "A",
+    "port": 10421,
+    "unit": "cxl-bfs-cache-128m",
+    "status": "done",
+    "returncode": 0,
+    "elapsed_sec": 169.90553188323975,
+    "driver_stdout": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/128M/driver.stdout.log",
+    "driver_stderr": "/home/victoryang00/CXLMemSim/artifact/splash_sweep/cache_fraction_bfs/128M/driver.stderr.log"
   }
 ]
