@@ -180,6 +180,18 @@ static void print_coherency_stats(const char *prefix)
            (unsigned long)st.directory_entries);
 }
 
+static int rq1_method_enabled(char method)
+{
+    const char *env = getenv("RQ1_METHODS");
+    if (!env || !*env) return 1;
+
+    if (strstr(env, "all") || strstr(env, "ALL")) return 1;
+    for (const char *p = env; *p; p++) {
+        if (*p == method || *p == method + ('a' - 'A')) return 1;
+    }
+    return 0;
+}
+
 /* ================================================================== */
 /*   EXPERIMENT 1:  BFS on random graphs                              */
 /* ================================================================== */
@@ -471,6 +483,8 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
 {
     printf("  graph=%s  N=%d  device_fraction=%.2f\n", graph_type, N, dev_frac);
 
+    int want_method_a = rq1_method_enabled('A');
+    int want_method_b = rq1_method_enabled('B');
     int dev_count = (int)(dev_frac * N);
     if (dev_count > N) dev_count = N;
 
@@ -609,8 +623,12 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
 
     /* Copy-based graph (for Method B): lives in host_nodes with
      * neighbor_offsets storing node indices */
-    GraphNode *copy_graph = (GraphNode *)calloc((size_t)N, sizeof(GraphNode));
-    int can_run_copy = (copy_graph != NULL);
+    GraphNode *copy_graph = NULL;
+    int can_run_copy = 0;
+    if (want_method_b) {
+        copy_graph = (GraphNode *)calloc((size_t)N, sizeof(GraphNode));
+        can_run_copy = (copy_graph != NULL);
+    }
     if (can_run_copy) {
         /* Build index-based offset table */
         uint64_t *idx_offsets = malloc((size_t)N * sizeof(uint64_t));
@@ -636,7 +654,7 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
     struct timespec t0, t1;
 
     /* Method A: Pointer-sharing (coherent) */
-    if (can_run_coherent) {
+    if (want_method_a && can_run_coherent) {
         cxlResetCoherencyStats();
         for (int trial = 0; trial < NUM_TRIALS; trial++) {
             clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -653,13 +671,15 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
                (unsigned long)(p25 / 1000),
                (unsigned long)(p75 / 1000));
         print_coherency_stats("    ");
-    } else {
+    } else if (want_method_a) {
         printf("    Method A (pointer-sharing):  SKIPPED "
                "(coherent alloc unavailable)\n");
+    } else {
+        printf("    Method A (pointer-sharing):  SKIPPED (disabled)\n");
     }
 
     /* Method B: Copy-based */
-    if (can_run_copy) {
+    if (want_method_b && can_run_copy) {
         cxlResetCoherencyStats();
         for (int trial = 0; trial < NUM_TRIALS; trial++) {
             clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -676,9 +696,11 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
                (unsigned long)(p25 / 1000),
                (unsigned long)(p75 / 1000));
         print_coherency_stats("    ");
-    } else {
+    } else if (want_method_b) {
         printf("    Method B (copy-based):       SKIPPED "
                "(allocation failed)\n");
+    } else {
+        printf("    Method B (copy-based):       SKIPPED (disabled)\n");
     }
 
     /* ---- Cleanup ------------------------------------------------- */
@@ -690,6 +712,44 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
     if (coh_pool) cxlCoherentFree(coh_pool);
 }
 
+static int parse_device_fractions(double *fracs, int max_fracs)
+{
+    static const double defaults[] = { 0.0, 0.25, 0.50, 0.75, 1.0 };
+    int default_count = (int)(sizeof(defaults) / sizeof(defaults[0]));
+    const char *env = getenv("RQ1_DEVICE_FRACTIONS");
+
+    if (!env || !*env) {
+        int n = default_count < max_fracs ? default_count : max_fracs;
+        for (int i = 0; i < n; i++) fracs[i] = defaults[i];
+        return n;
+    }
+
+    char *tmp = strdup(env);
+    if (!tmp) {
+        int n = default_count < max_fracs ? default_count : max_fracs;
+        for (int i = 0; i < n; i++) fracs[i] = defaults[i];
+        return n;
+    }
+
+    int n = 0;
+    for (char *tok = strtok(tmp, ","); tok && n < max_fracs; tok = strtok(NULL, ",")) {
+        char *end = NULL;
+        double v = strtod(tok, &end);
+        if (end == tok || v < 0.0 || v > 1.0) {
+            fprintf(stderr, "    [WARN] ignoring invalid RQ1_DEVICE_FRACTIONS entry '%s'\n", tok);
+            continue;
+        }
+        fracs[n++] = v;
+    }
+    free(tmp);
+
+    if (n == 0) {
+        n = default_count < max_fracs ? default_count : max_fracs;
+        for (int i = 0; i < n; i++) fracs[i] = defaults[i];
+    }
+    return n;
+}
+
 static void experiment1_bfs(int N)
 {
     printf("\n");
@@ -698,9 +758,9 @@ static void experiment1_bfs(int N)
     printf("  N=%d  avg_degree=%d  trials=%d\n", N, AVG_DEGREE, NUM_TRIALS);
     printf("================================================================\n");
 
-    static const double fracs[] = { 0.0, 0.25, 0.50, 0.75, 1.0 };
+    double fracs[16];
+    int n_fracs = parse_device_fractions(fracs, (int)(sizeof(fracs) / sizeof(fracs[0])));
     static const char *graph_types[] = { "erdos_renyi", "barabasi_albert" };
-    int n_fracs = (int)(sizeof(fracs) / sizeof(fracs[0]));
     int n_types = (int)(sizeof(graph_types) / sizeof(graph_types[0]));
 
     for (int g = 0; g < n_types; g++) {

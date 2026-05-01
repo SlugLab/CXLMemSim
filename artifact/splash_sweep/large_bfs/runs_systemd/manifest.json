@@ -1,32 +1,12 @@
 [
   {
-    "run_key": "rq1_N10000",
+    "run_key": "rq1_N100000",
     "binary": "rq1_graph_bfs",
-    "args": "10000",
+    "args": "100000",
     "returncode": 0,
-    "elapsed_sec": 156.2931272983551,
-    "stdout_path": "artifact/splash_sweep/large_bfs/runs_systemd/rq1_N10000.stdout.log",
-    "stderr_path": "artifact/splash_sweep/large_bfs/runs_systemd/rq1_N10000.stderr.log",
-    "timed_out": false
-  },
-  {
-    "run_key": "rq1_N20000",
-    "binary": "rq1_graph_bfs",
-    "args": "20000",
-    "returncode": 0,
-    "elapsed_sec": 318.69812774658203,
-    "stdout_path": "artifact/splash_sweep/large_bfs/runs_systemd/rq1_N20000.stdout.log",
-    "stderr_path": "artifact/splash_sweep/large_bfs/runs_systemd/rq1_N20000.stderr.log",
-    "timed_out": false
-  },
-  {
-    "run_key": "rq1_N50000",
-    "binary": "rq1_graph_bfs",
-    "args": "50000",
-    "returncode": 0,
-    "elapsed_sec": 864.0957870483398,
-    "stdout_path": "artifact/splash_sweep/large_bfs/runs_systemd/rq1_N50000.stdout.log",
-    "stderr_path": "artifact/splash_sweep/large_bfs/runs_systemd/rq1_N50000.stderr.log",
+    "elapsed_sec": 375.6894769668579,
+    "stdout_path": "artifact/splash_sweep/large_bfs/runs_systemd/rq1_N100000.stdout.log",
+    "stderr_path": "artifact/splash_sweep/large_bfs/runs_systemd/rq1_N100000.stderr.log",
     "timed_out": false
   }
 ]

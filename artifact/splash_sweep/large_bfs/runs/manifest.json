@@ -1,0 +1,32 @@
+[
+  {
+    "run_key": "rq1_N10000",
+    "binary": "rq1_graph_bfs",
+    "args": "10000",
+    "returncode": 255,
+    "elapsed_sec": 13.28315782546997,
+    "stdout_path": "artifact/splash_sweep/large_bfs/runs/rq1_N10000.stdout.log",
+    "stderr_path": "artifact/splash_sweep/large_bfs/runs/rq1_N10000.stderr.log",
+    "timed_out": false
+  },
+  {
+    "run_key": "rq1_N20000",
+    "binary": "rq1_graph_bfs",
+    "args": "20000",
+    "returncode": 255,
+    "elapsed_sec": 0.013547658920288086,
+    "stdout_path": "artifact/splash_sweep/large_bfs/runs/rq1_N20000.stdout.log",
+    "stderr_path": "artifact/splash_sweep/large_bfs/runs/rq1_N20000.stderr.log",
+    "timed_out": false
+  },
+  {
+    "run_key": "rq1_N50000",
+    "binary": "rq1_graph_bfs",
+    "args": "50000",
+    "returncode": 255,
+    "elapsed_sec": 0.005460500717163086,
+    "stdout_path": "artifact/splash_sweep/large_bfs/runs/rq1_N50000.stdout.log",
+    "stderr_path": "artifact/splash_sweep/large_bfs/runs/rq1_N50000.stderr.log",
+    "timed_out": false
+  }
+]
