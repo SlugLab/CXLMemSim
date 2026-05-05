@@ -1693,13 +1693,20 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
         uint32_t req = __atomic_load_n(&slot->req_type, __ATOMIC_ACQUIRE);
         if (req == CXL_SHM_REQ_NONE) continue;
 
+        // Multiple PGAS worker threads scan the same slots. Claim the request
+        // before doing any work so only one worker can service a client slot.
+        uint32_t expected = req;
+        if (!__atomic_compare_exchange_n(&slot->req_type, &expected, CXL_SHM_REQ_NONE,
+                                         false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            continue;
+        }
+
         // Calculate cacheline index from address
         uint64_t addr = slot->addr;
         size_t cacheline_idx = addr / 64;
 
         if (cacheline_idx >= num_cachelines) {
             slot->resp_status = CXL_SHM_RESP_ERROR;
-            __atomic_store_n(&slot->req_type, CXL_SHM_REQ_NONE, __ATOMIC_RELEASE);
             continue;
         }
 
@@ -1834,8 +1841,6 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 break;
         }
 
-        // Clear request to mark slot as free
-        __atomic_store_n(&slot->req_type, CXL_SHM_REQ_NONE, __ATOMIC_RELEASE);
     }
 
     return processed;
