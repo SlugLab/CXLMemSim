@@ -12,21 +12,41 @@
 #ifndef CXLMEMSIM_HELPER_H
 #define CXLMEMSIM_HELPER_H
 
+#if defined(__linux__)
+#define CXLMEMSIM_HAS_LINUX_PERF 1
 #include "incore.h"
 #include "uncore.h"
+#include <linux/perf_event.h>
+#else
+#define CXLMEMSIM_HAS_LINUX_PERF 0
+struct perf_event_attr;
+#endif
+
+#if defined(__x86_64__) || defined(__i386__)
+#include <x86intrin.h>
+#else
+#include <atomic>
+#endif
+
+#include <array>
 #include <cstdint>
 #include <filesystem>
-#include <linux/perf_event.h>
 #include <ranges>
 #include <spdlog/spdlog.h>
+#include <string>
+#include <sys/types.h>
+#include <tuple>
 #include <vector>
-#include <x86intrin.h>
 
 #define PAGE_SIZE 4096
 #define DATA_SIZE PAGE_SIZE
 #define MMAP_SIZE (PAGE_SIZE + DATA_SIZE)
 
+#if defined(__x86_64__) || defined(__i386__)
 #define barrier() _mm_mfence()
+#else
+#define barrier() std::atomic_thread_fence(std::memory_order_seq_cst)
+#endif
 
 /* CPU Models */
 enum {
@@ -102,8 +122,10 @@ struct Elem {
 
 class PMUInfo {
 public:
+#if CXLMEMSIM_HAS_LINUX_PERF
     std::vector<Uncore> chas;
     std::vector<Incore> cpus;
+#endif
     Helper *helper;
     PMUInfo(pid_t pid, Helper *h, PerfConfig *perf_config);
     ~PMUInfo();
@@ -132,6 +154,8 @@ public:
                             const std::vector<uint64_t> &perf_conf1, const std::vector<uint64_t> &perf_conf2);
 };
 
+#if CXLMEMSIM_HAS_LINUX_PERF
 long perf_event_open(perf_event_attr *event_attr, pid_t pid, int cpu, int group_fd, unsigned long flags);
+#endif
 
 #endif // CXLMEMSIM_HELPER_H

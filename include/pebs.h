@@ -15,7 +15,11 @@
 #include "helper.h"
 #include <cstdint>
 #include <cxlcontroller.h>
+#if CXLMEMSIM_HAS_LINUX_PERF
 #include <sys/mman.h>
+#else
+struct perf_event_mmap_page;
+#endif
 #include <sys/types.h>
 
 class PEBS {

@@ -324,7 +324,7 @@ libnvcuda.so
 
 ## Packaged QEMU/Spack Flow
 
-For macOS and repeatable QEMU smoke tests, use the companion Spack environment from the Ocean Spack fork. That environment builds the x86_64 CXL-capable QEMU tree, installs launch scripts, and documents the runtime variables used by QEMU and `cxlmemsim_server`.
+For macOS and repeatable QEMU smoke tests, use the companion Spack environment from the Ocean Spack fork. That environment builds the x86_64 CXL-capable QEMU tree, builds `cxlmemsim_server`, installs launch scripts, and documents the runtime variables used by QEMU and the server.
 
 ```bash
 git clone https://github.com/vickiegpt/spack.git ocean-spack
@@ -375,7 +375,7 @@ The launcher reads the following runtime variables:
 | `CXL_MEMSIM_HOST` | `127.0.0.1` | Local host for TCP mode. |
 | `CXL_MEMSIM_PORT` | `9999` | Local TCP server port. |
 | `CXL_PGAS_SHM` | `/cxlmemsim_pgas` | POSIX shared-memory object used by QEMU SHM mode. |
-| `CXL_MEMSIM_SERVER_BINARY` | package `bin/cxlmemsim_server` | Optional server binary for launcher-managed startup. |
+| `CXL_MEMSIM_SERVER_BINARY` | package `bin/cxlmemsim_server` | Server binary started before QEMU. |
 | `CXL_MEMSIM_SERVER_AUTOSTART` | `auto` | Set to `1` to require server startup or `0` to disable it. |
 
 QEMU's `shm` transport uses the PGAS shared-memory protocol, so the packaged launcher maps `CXL_TRANSPORT_MODE=shm` to the server's `--comm-mode pgas-shm`.
