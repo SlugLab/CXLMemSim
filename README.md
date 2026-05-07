@@ -322,6 +322,89 @@ libnvcuda.so.1
 libnvcuda.so
 ```
 
+## Packaged QEMU/Spack Flow
+
+For macOS and repeatable QEMU smoke tests, use the companion Spack environment from the Ocean Spack fork. That environment builds the x86_64 CXL-capable QEMU tree, installs launch scripts, and documents the runtime variables used by QEMU and `cxlmemsim_server`.
+
+```bash
+git clone https://github.com/vickiegpt/spack.git ocean-spack
+cd ocean-spack
+source share/spack/setup-env.sh
+spack env activate ./share/spack/environments/cxlmemsim
+spack concretize -f
+spack install
+spack load cxlmemsim
+```
+
+The detailed usage document is installed in the Spack checkout at:
+
+```text
+share/spack/environments/cxlmemsim/README.md
+```
+
+After loading the package, download the guest kernel and disk image:
+
+```bash
+cxlmemsim-download-qemu-image
+```
+
+The default image directory is `CXL_QEMU_IMAGE_DIR`. To keep the raw guest disk at 4 GB:
+
+```bash
+qemu-img resize "$CXL_QEMU_IMAGE_DIR/qemu.img" 4G
+cp "$CXL_QEMU_IMAGE_DIR/qemu.img" "$CXL_QEMU_IMAGE_DIR/qemu1.img"
+```
+
+Launch the default guest:
+
+```bash
+qemu_launch_cxl.sh
+```
+
+Launch the second guest image:
+
+```bash
+qemu_launch_cxl1.sh
+```
+
+The launcher reads the following runtime variables:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CXL_TRANSPORT_MODE` | `shm` | QEMU transport mode: `shm` or `tcp`. |
+| `CXL_MEMSIM_HOST` | `127.0.0.1` | Local host for TCP mode. |
+| `CXL_MEMSIM_PORT` | `9999` | Local TCP server port. |
+| `CXL_PGAS_SHM` | `/cxlmemsim_pgas` | POSIX shared-memory object used by QEMU SHM mode. |
+| `CXL_MEMSIM_SERVER_BINARY` | package `bin/cxlmemsim_server` | Optional server binary for launcher-managed startup. |
+| `CXL_MEMSIM_SERVER_AUTOSTART` | `auto` | Set to `1` to require server startup or `0` to disable it. |
+
+QEMU's `shm` transport uses the PGAS shared-memory protocol, so the packaged launcher maps `CXL_TRANSPORT_MODE=shm` to the server's `--comm-mode pgas-shm`.
+
+Shared-memory launch:
+
+```bash
+CXL_TRANSPORT_MODE=shm \
+CXL_PGAS_SHM=/cxlmemsim_pgas \
+qemu_launch_cxl.sh
+```
+
+TCP launch on the local port:
+
+```bash
+CXL_TRANSPORT_MODE=tcp \
+CXL_MEMSIM_HOST=127.0.0.1 \
+CXL_MEMSIM_PORT=9999 \
+qemu_launch_cxl.sh
+```
+
+Inside the guest, quick checks are:
+
+```bash
+lspci | grep -i cxl
+dmesg | grep -i cxl
+ls /sys/bus/cxl/devices
+```
+
 ## Running CXLMemSim Server
 
 Basic Type 3 server:
