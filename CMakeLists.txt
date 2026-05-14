@@ -117,6 +117,12 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_wasm_heap_backend cxlmemsim_server_lib cxlmemsim
         cxxopts::cxxopts spdlog::spdlog_header_only ${RT_LIB} ${ATOMIC_LIB})
 
+    add_executable(test_wasm_bridge tests/test_wasm_bridge.cpp src/wasm_bridge.cc)
+    target_include_directories(test_wasm_bridge PRIVATE include src
+        ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
+    target_link_libraries(test_wasm_bridge cxlmemsim cxlmemsim_server_lib cxlmemsim
+        cxxopts::cxxopts spdlog::spdlog_header_only ${RT_LIB} ${ATOMIC_LIB})
+
     # Installation targets
     install(TARGETS cxlmemsim_server
             RUNTIME DESTINATION bin)
