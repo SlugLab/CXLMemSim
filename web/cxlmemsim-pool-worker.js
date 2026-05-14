@@ -94,7 +94,14 @@ function clampSize(size) {
 }
 
 function makePool(name, size) {
-    const buffer = new SharedArrayBuffer(clampSize(size));
+    /* Pool buffer is worker-private — no need for SharedArrayBuffer.
+     * SharedWorker contexts don't reliably receive cross-origin
+     * isolation in Chrome regardless of COEP mode, so plain
+     * ArrayBuffer keeps this construction working. The only SABs
+     * that flow through the worker are the per-request staging SABs
+     * that clients (QEMU, test pages) post in — those are operated
+     * on via Atomics calls below; constructing new SABs would fail. */
+    const buffer = new ArrayBuffer(clampSize(size));
     return {
         name, size: buffer.byteLength,
         buffer, bytes: new Uint8Array(buffer), view: new DataView(buffer),
