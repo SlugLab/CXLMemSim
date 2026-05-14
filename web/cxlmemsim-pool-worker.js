@@ -1,6 +1,11 @@
 'use strict';
 
-console.log('[cxlmemsim-worker] script start', self.location.href);
+const events = new BroadcastChannel('cxlmemsim-events');
+function wlog(text) {
+    try { console.log('[cxlmemsim-worker]', text); } catch (_) {}
+    try { events.postMessage({ type: 'wlog', text: String(text) }); } catch (_) {}
+}
+wlog('script start ' + self.location.href);
 
 /* Same MessagePort protocol as the previous flat-pool worker:
  * connect / sync-request / qemu-message / reset / get-status.
@@ -30,21 +35,19 @@ let bridge = null;
 let bridgeError = null;
 let bridgeReady = null;
 
-const events = new BroadcastChannel('cxlmemsim-events');
-
 async function ensureBridge(capacity) {
     if (bridge) return bridge;
     if (bridgeReady) return bridgeReady;
     bridgeReady = (async () => {
         try {
-            console.log('[cxlmemsim-worker] importing WASM', WASM_URL);
+            wlog('importing WASM ' + WASM_URL);
             const mod = await import(WASM_URL);
-            console.log('[cxlmemsim-worker] WASM module loaded, instantiating');
+            wlog('WASM module fetched, instantiating');
             const Module = await mod.default();
-            console.log('[cxlmemsim-worker] WASM instantiated, capacity=', capacity);
+            wlog('WASM instantiated, capacity=' + capacity);
             const out = Module._malloc(4);
             const rc = Module._cxlmemsim_init(capacity, 0, out);
-            console.log('[cxlmemsim-worker] cxlmemsim_init rc=', rc);
+            wlog('cxlmemsim_init rc=' + rc);
             if (rc !== 0) {
                 Module._free(out);
                 throw new Error('cxlmemsim_init returned ' + rc);
@@ -63,6 +66,7 @@ async function ensureBridge(capacity) {
             return bridge;
         } catch (err) {
             bridgeError = err;
+            wlog('bridge load FAILED: ' + (err && err.message ? err.message : String(err)));
             broadcastDegraded(err && err.message ? err.message : String(err));
             return null;
         }
@@ -382,9 +386,9 @@ function attachPort(port) {
     port.start();
 }
 
-console.log('[cxlmemsim-worker] top-level init complete, binding onconnect');
+wlog('top-level init complete, binding onconnect');
 
 self.onconnect = (event) => {
-    console.log('[cxlmemsim-worker] onconnect fired');
+    wlog('onconnect fired');
     attachPort(event.ports[0]);
 };
