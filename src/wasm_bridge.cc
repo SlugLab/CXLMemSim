@@ -244,6 +244,8 @@ KEEPALIVE void cxlmemsim_handle_type2(uint32_t msg_ptr) {
         if (g_state->shm->write_cacheline(addr, msg + 26, size)) {
             g_state->total_writes++;
             g_state->total_invalidations++;
+        } else {
+            g_state->total_errors++;
         }
     } else if (type == T2_INVALIDATE || type == T2_FLUSH) {
         g_state->total_invalidations++;
@@ -251,6 +253,7 @@ KEEPALIVE void cxlmemsim_handle_type2(uint32_t msg_ptr) {
 }
 
 KEEPALIVE void cxlmemsim_get_stats(uint32_t out_ptr) {
+    if (!out_ptr) return;
     cxlmemsim_stats_t s{};
     if (g_state) {
         s.total_reads = g_state->total_reads.load();
@@ -259,9 +262,8 @@ KEEPALIVE void cxlmemsim_get_stats(uint32_t out_ptr) {
         s.total_invalidations = g_state->total_invalidations.load();
         s.total_errors = g_state->total_errors.load();
         s.total_latency_ns = g_state->total_latency_ns.load();
-        s.pool_capacity_bytes = g_state->shm
-            ? g_state->shm->get_stats().total_capacity
-            : 0;
+        /* g_state->shm is always set while g_state is alive (see init/teardown). */
+        s.pool_capacity_bytes = g_state->shm->get_stats().total_capacity;
         /* MESI histogram (s.mesi_invalid / _shared / _exclusive /
            _modified) is left at zero — coherency-engine wiring is a
            future task. bytes_read / bytes_written are also zero for

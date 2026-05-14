@@ -29,6 +29,11 @@ typedef struct {
 } cxlmemsim_stats_t;
 
 #ifdef __cplusplus
+static_assert(sizeof(cxlmemsim_stats_t) == 256,
+              "cxlmemsim_stats_t layout changed — update JS offsets in cxlmemsim-pool-worker.js");
+#endif
+
+#ifdef __cplusplus
 extern "C" {
 #endif
 
