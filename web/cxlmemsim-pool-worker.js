@@ -1,5 +1,7 @@
 'use strict';
 
+console.log('[cxlmemsim-worker] script start', self.location.href);
+
 /* Same MessagePort protocol as the previous flat-pool worker:
  * connect / sync-request / qemu-message / reset / get-status.
  *
@@ -35,10 +37,14 @@ async function ensureBridge(capacity) {
     if (bridgeReady) return bridgeReady;
     bridgeReady = (async () => {
         try {
+            console.log('[cxlmemsim-worker] importing WASM', WASM_URL);
             const mod = await import(WASM_URL);
+            console.log('[cxlmemsim-worker] WASM module loaded, instantiating');
             const Module = await mod.default();
+            console.log('[cxlmemsim-worker] WASM instantiated, capacity=', capacity);
             const out = Module._malloc(4);
             const rc = Module._cxlmemsim_init(capacity, 0, out);
+            console.log('[cxlmemsim-worker] cxlmemsim_init rc=', rc);
             if (rc !== 0) {
                 Module._free(out);
                 throw new Error('cxlmemsim_init returned ' + rc);
@@ -376,4 +382,9 @@ function attachPort(port) {
     port.start();
 }
 
-self.onconnect = (event) => { attachPort(event.ports[0]); };
+console.log('[cxlmemsim-worker] top-level init complete, binding onconnect');
+
+self.onconnect = (event) => {
+    console.log('[cxlmemsim-worker] onconnect fired');
+    attachPort(event.ports[0]);
+};
