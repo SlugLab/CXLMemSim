@@ -45,12 +45,35 @@ SharedMemoryManager::SharedMemoryManager(size_t capacity_mb, const std::string& 
     }
 }
 
+SharedMemoryManager::SharedMemoryManager(WasmHeapTag, size_t capacity_mb_)
+    : shm_name(""), shm_fd(-1), shm_base(nullptr), shm_size(0), capacity_mb(capacity_mb_),
+      header(nullptr), data_area(nullptr) {
+    shm_size = capacity_mb * 1024 * 1024;
+    use_wasm_heap = true;
+    SPDLOG_INFO("SharedMemoryManager (wasm-heap): Capacity {}MB, Total size: {} bytes",
+                capacity_mb, shm_size);
+}
+
 SharedMemoryManager::~SharedMemoryManager() {
     cleanup();
 }
 
 bool SharedMemoryManager::initialize() {
     try {
+        if (use_wasm_heap) {
+            shm_base = std::aligned_alloc(64, shm_size);
+            if (!shm_base) {
+                SPDLOG_ERROR("WASM heap pool aligned_alloc({}) failed", shm_size);
+                return false;
+            }
+            std::memset(shm_base, 0, shm_size);
+            header = reinterpret_cast<SharedMemoryHeader*>(shm_base);
+            data_area = reinterpret_cast<uint8_t*>(shm_base) + sizeof(SharedMemoryHeader);
+            initialize_header();
+            initialize_data_area();
+            SPDLOG_INFO("SharedMemoryManager (wasm-heap) initialized successfully");
+            return true;
+        }
         // Create or open shared memory or file backing
         if (use_file_backing) {
             if (!create_file_backing()) {
@@ -227,6 +250,13 @@ void SharedMemoryManager::initialize_data_area() {
 }
 
 void SharedMemoryManager::cleanup() {
+    if (use_wasm_heap) {
+        if (shm_base) {
+            std::free(shm_base);
+            shm_base = nullptr;
+        }
+        return;
+    }
     if (shm_base != nullptr && shm_base != MAP_FAILED) {
         munmap(shm_base, shm_size);
         shm_base = nullptr;
@@ -368,38 +398,38 @@ bool SharedMemoryManager::write_cacheline(uint64_t addr, const uint8_t* data, si
         // Use stronger memory barrier for shared memory
         __sync_synchronize();
         // Force sync entire shared memory region to ensure persistence
-        if (msync(shm_base, shm_size, MS_SYNC | MS_INVALIDATE) != 0) {
+        if (!use_wasm_heap && msync(shm_base, shm_size, MS_SYNC | MS_INVALIDATE) != 0) {
             SPDLOG_ERROR("msync failed: {}", strerror(errno));
             // Critical error - data might not be visible to other processes
             return false;
         }
-        
+
         SPDLOG_DEBUG("Total wrote {} bytes starting at addr 0x{:x}", size, addr);
         return true;
     }
-    
+
     uint64_t cacheline_addr = addr_to_cacheline(addr);
-    
+
     uint8_t* cacheline_data = get_cacheline_data(cacheline_addr);
     if (!cacheline_data) {
         SPDLOG_ERROR("Invalid cacheline address: 0x{:x}", cacheline_addr);
         return false;
     }
-    
+
     // Calculate offset within cacheline
     size_t offset = addr - cacheline_addr;
     if (offset + size > SHM_CACHELINE_SIZE) {
         SPDLOG_ERROR("Write crosses cacheline boundary: addr=0x{:x} size={}", addr, size);
         return false;
     }
-    
+
     // Copy data to shared memory
     memcpy(cacheline_data + offset, data, size);
-    
+
     // Memory barrier to ensure write is visible to other processes
     __sync_synchronize();
     // Force sync to backing store
-    if (msync(shm_base, shm_size, MS_SYNC | MS_INVALIDATE) != 0) {
+    if (!use_wasm_heap && msync(shm_base, shm_size, MS_SYNC | MS_INVALIDATE) != 0) {
         SPDLOG_ERROR("msync failed: {}", strerror(errno));
         // Critical error - data might not be visible to other processes
         return false;

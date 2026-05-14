@@ -111,6 +111,12 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_distributed_shm PRIVATE include src ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
     target_link_libraries(test_distributed_shm cxlmemsim_server_lib cxlmemsim cxxopts::cxxopts spdlog::spdlog_header_only ${RT_LIB} ${ATOMIC_LIB})
 
+    add_executable(test_wasm_heap_backend tests/test_wasm_heap_backend.cpp)
+    target_include_directories(test_wasm_heap_backend PRIVATE include src
+        ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
+    target_link_libraries(test_wasm_heap_backend cxlmemsim_server_lib cxlmemsim
+        cxxopts::cxxopts spdlog::spdlog_header_only ${RT_LIB} ${ATOMIC_LIB})
+
     # Installation targets
     install(TARGETS cxlmemsim_server
             RUNTIME DESTINATION bin)

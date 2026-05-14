@@ -59,6 +59,7 @@ private:
     size_t capacity_mb;
     // Optional file backing instead of POSIX shm
     bool use_file_backing = false;
+    bool use_wasm_heap = false;
     std::string backing_file_path;
     
     // Memory layout:
@@ -91,6 +92,11 @@ private:
 public:
     explicit SharedMemoryManager(size_t capacity_mb, const std::string& shm_name = "/cxlmemsim_pgas");
     SharedMemoryManager(size_t capacity_mb, const std::string& shm_name, bool use_file, const std::string& file_path);
+    // Browser/WASM backend: pool lives inside the WASM heap, owned
+    // by this instance via aligned_alloc. No file backing, no
+    // shm_open. Pool bytes are zeroed at construction.
+    struct WasmHeapTag {};
+    SharedMemoryManager(WasmHeapTag, size_t capacity_mb);
     ~SharedMemoryManager();
     
     // Initialize shared memory
