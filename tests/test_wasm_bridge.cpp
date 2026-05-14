@@ -13,7 +13,7 @@
 #include <cstring>
 #include <vector>
 
-#ifndef __EMSCRIPTEN__
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
 #include <sys/mman.h>
 #endif
 
@@ -25,7 +25,7 @@ uint32_t to_offset(void *p) {
 /* In native 64-bit builds the regular heap is above 4 GB, so we
    cannot pass raw pointers through a uint32_t ABI.  Allocate a small
    arena via mmap(MAP_32BIT) which is guaranteed to land below 2 GB. */
-#ifndef __EMSCRIPTEN__
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
 struct Arena32 {
     void *base;
     size_t size;
@@ -63,7 +63,7 @@ int main() {
     std::vector<uint8_t> req(REQ_SIZE, 0);
     std::vector<uint8_t> resp(RESP_SIZE, 0);
 
-#ifndef __EMSCRIPTEN__
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
     /* In native 64-bit builds, allocate buffers in the low 2 GB so
        that the uint32_t ABI round-trip is lossless. */
     constexpr size_t ARENA_SIZE = 4096;
@@ -83,34 +83,47 @@ int main() {
         std::memcpy(req_buf + off, &v, sizeof(v));
     };
 
-    /* WRITE: op=1, addr=0x1000, size=64, data=pattern */
-    req_buf[0] = 1; write_u64(1, 0x1000); write_u64(9, 64);
+    /* WRITE: op=1, addr=0x1008 (intentionally NOT 64-byte aligned), size=56 */
+    req_buf[0] = 1; write_u64(1, 0x1008); write_u64(9, 56);
     write_u64(17, 0); write_u64(25, 0); write_u64(33, 0);
-    for (int i = 0; i < 64; ++i) req_buf[41 + i] = static_cast<uint8_t>(i ^ 0xA5);
+    for (int i = 0; i < 56; ++i) req_buf[41 + i] = static_cast<uint8_t>(i ^ 0xA5);
 
     int32_t n = cxlmemsim_handle_request(to_offset(req_buf),
                                           to_offset(resp_buf),
                                           to_offset(inv_buf), 16);
-    if (n < 0 || resp_buf[0] != 0) {
-        std::fprintf(stderr, "FAIL: write request status=%d n=%d\n",
-                     resp_buf[0], n);
+    if (n != 1) {
+        std::fprintf(stderr, "FAIL: write expected 1 invalidation, got %d\n", n);
+        return 1;
+    }
+    if (resp_buf[0] != 0) {
+        std::fprintf(stderr, "FAIL: write status=%u\n", resp_buf[0]);
+        return 1;
+    }
+    /* Use an unaligned address so the mask check is meaningful. */
+    /* (We pick 0x1008 above; the invalidation must be the line base 0x1000.) */
+    if (inv_buf[0] != static_cast<uint32_t>(0x1000)) {
+        std::fprintf(stderr, "FAIL: write inv[0]=0x%x expected 0x1000\n",
+                     inv_buf[0]);
         return 1;
     }
 
-    /* READ: op=0, addr=0x1000, size=64 */
+    /* READ: op=0, addr=0x1008, size=56 */
     std::memset(req_buf, 0, REQ_SIZE);
     std::memset(resp_buf, 0, RESP_SIZE);
-    req_buf[0] = 0; write_u64(1, 0x1000); write_u64(9, 64);
+    req_buf[0] = 0; write_u64(1, 0x1008); write_u64(9, 56);
 
     n = cxlmemsim_handle_request(to_offset(req_buf),
                                   to_offset(resp_buf),
                                   to_offset(inv_buf), 16);
-    if (n < 0 || resp_buf[0] != 0) {
-        std::fprintf(stderr, "FAIL: read request status=%d n=%d\n",
-                     resp_buf[0], n);
+    if (n != 0) {
+        std::fprintf(stderr, "FAIL: read expected 0 invalidations, got %d\n", n);
         return 1;
     }
-    for (int i = 0; i < 64; ++i) {
+    if (resp_buf[0] != 0) {
+        std::fprintf(stderr, "FAIL: read status=%u\n", resp_buf[0]);
+        return 1;
+    }
+    for (int i = 0; i < 56; ++i) {
         if (resp_buf[17 + i] != static_cast<uint8_t>(i ^ 0xA5)) {
             std::fprintf(stderr,
                 "FAIL: read mismatch at %d (got %u expected %u)\n",

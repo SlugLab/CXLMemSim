@@ -207,11 +207,14 @@ KEEPALIVE int32_t cxlmemsim_handle_request(uint32_t req_ptr,
         break;
     }
 
-    if (status != 0) g_state->total_errors++;
+    if (status != 0) {
+        g_state->total_errors++;
+    } else {
+        g_state->total_latency_ns += latency_ns;
+    }
     resp[0] = status;
     store_u64(resp + 1, latency_ns);
     store_u64(resp + 9, old_value);
-    g_state->total_latency_ns += latency_ns;
     return invalidations;
 }
 
