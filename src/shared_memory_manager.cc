@@ -45,8 +45,8 @@ SharedMemoryManager::SharedMemoryManager(size_t capacity_mb, const std::string& 
     }
 }
 
-SharedMemoryManager::SharedMemoryManager(WasmHeapTag, size_t capacity_mb_)
-    : shm_name(""), shm_fd(-1), shm_base(nullptr), shm_size(0), capacity_mb(capacity_mb_),
+SharedMemoryManager::SharedMemoryManager(WasmHeapTag, size_t capacity_mb)
+    : shm_name(""), shm_fd(-1), shm_base(nullptr), shm_size(0), capacity_mb(capacity_mb),
       header(nullptr), data_area(nullptr) {
     shm_size = capacity_mb * 1024 * 1024;
     use_wasm_heap = true;
@@ -61,6 +61,10 @@ SharedMemoryManager::~SharedMemoryManager() {
 bool SharedMemoryManager::initialize() {
     try {
         if (use_wasm_heap) {
+            if (shm_base) {
+                std::free(shm_base);
+                shm_base = nullptr;
+            }
             shm_base = std::aligned_alloc(64, shm_size);
             if (!shm_base) {
                 SPDLOG_ERROR("WASM heap pool aligned_alloc({}) failed", shm_size);
@@ -255,6 +259,8 @@ void SharedMemoryManager::cleanup() {
             std::free(shm_base);
             shm_base = nullptr;
         }
+        header = nullptr;
+        data_area = nullptr;
         return;
     }
     if (shm_base != nullptr && shm_base != MAP_FAILED) {
