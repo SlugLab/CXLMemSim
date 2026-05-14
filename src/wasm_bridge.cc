@@ -24,12 +24,12 @@ namespace {
 
 struct BridgeState {
     std::unique_ptr<SharedMemoryManager> shm;
-    std::unique_ptr<CXLController> controller;
     std::unique_ptr<InterleavePolicy> alloc_policy;
     std::unique_ptr<HeatAwareMigrationPolicy> migration_policy;
     std::unique_ptr<HugePagePolicy> paging_policy;
     std::unique_ptr<FIFOPolicy> caching_policy;
     std::unique_ptr<CXLMemExpander> endpoint;
+    std::unique_ptr<CXLController> controller;
 
     std::atomic<uint64_t> total_reads{0};
     std::atomic<uint64_t> total_writes{0};
@@ -71,7 +71,11 @@ bool build_default_topology(BridgeState &s, std::string_view topo) {
     s.controller->insert_end_point(s.endpoint.get());
 
     const std::string newick = topo.empty() ? "(1);" : std::string(topo);
-    s.controller->construct_topo(newick);
+    try {
+        s.controller->construct_topo(newick);
+    } catch (const std::exception &) {
+        return false;
+    }
     return true;
 }
 
@@ -118,8 +122,6 @@ KEEPALIVE void cxlmemsim_get_stats(uint32_t /*out_ptr*/) {}
 
 KEEPALIVE void cxlmemsim_reset(void) {
     if (!g_state) return;
-    g_state->shm->cleanup();
-    g_state->shm.reset();
     teardown();
 }
 
