@@ -109,11 +109,110 @@ KEEPALIVE int cxlmemsim_init(uint32_t pool_capacity_bytes,
     return 0;
 }
 
-KEEPALIVE int32_t cxlmemsim_handle_request(uint32_t /*req_ptr*/,
-                                           uint32_t /*resp_ptr*/,
-                                           uint32_t /*inv_out_ptr*/,
-                                           uint32_t /*inv_cap*/) {
-    return -1; /* implemented in Task 4 */
+KEEPALIVE int32_t cxlmemsim_handle_request(uint32_t req_ptr,
+                                           uint32_t resp_ptr,
+                                           uint32_t inv_out_ptr,
+                                           uint32_t inv_cap) {
+    if (!g_state) return -1;
+
+    const uint8_t *req = reinterpret_cast<const uint8_t *>(
+        static_cast<uintptr_t>(req_ptr));
+    uint8_t *resp = reinterpret_cast<uint8_t *>(
+        static_cast<uintptr_t>(resp_ptr));
+
+    auto load_u64 = [](const uint8_t *p) {
+        uint64_t v;
+        std::memcpy(&v, p, sizeof(v));
+        return v;
+    };
+    auto store_u64 = [](uint8_t *p, uint64_t v) {
+        std::memcpy(p, &v, sizeof(v));
+    };
+
+    uint8_t op = req[0];
+    uint64_t addr = load_u64(req + 1);
+    uint64_t size = load_u64(req + 9);
+    uint64_t value = load_u64(req + 25);
+    uint64_t expected = load_u64(req + 33);
+
+    std::memset(resp, 0, 81);
+
+    constexpr uint8_t OP_READ = 0;
+    constexpr uint8_t OP_WRITE = 1;
+    constexpr uint8_t OP_ATOMIC_FAA = 3;
+    constexpr uint8_t OP_ATOMIC_CAS = 4;
+    constexpr uint8_t OP_FENCE = 5;
+    constexpr uint8_t OP_LSA_READ = 6;
+    constexpr uint8_t OP_LSA_WRITE = 7;
+
+    /* Clamp size to one cacheline payload. */
+    if (size > 64) size = 64;
+
+    uint64_t old_value = 0;
+    uint64_t latency_ns = static_cast<uint64_t>(g_state->controller->dramlatency);
+    uint8_t status = 0;
+    int32_t invalidations = 0;
+
+    switch (op) {
+    case OP_READ:
+    case OP_LSA_READ: {
+        if (!g_state->shm->read_cacheline(addr, resp + 17, size)) {
+            status = 2;
+            break;
+        }
+        g_state->total_reads++;
+        break;
+    }
+    case OP_WRITE:
+    case OP_LSA_WRITE: {
+        if (!g_state->shm->write_cacheline(addr, req + 41, size)) {
+            status = 2;
+            break;
+        }
+        g_state->total_writes++;
+        if (inv_out_ptr && inv_cap > 0) {
+            uint32_t *inv = reinterpret_cast<uint32_t *>(
+                static_cast<uintptr_t>(inv_out_ptr));
+            inv[0] = static_cast<uint32_t>(addr & ~uint64_t{63});
+            invalidations = 1;
+            g_state->total_invalidations++;
+        }
+        break;
+    }
+    case OP_ATOMIC_FAA: {
+        uint8_t buf[8] = {0};
+        if (!g_state->shm->read_cacheline(addr, buf, 8)) { status = 2; break; }
+        std::memcpy(&old_value, buf, 8);
+        uint64_t newv = old_value + value;
+        std::memcpy(buf, &newv, 8);
+        if (!g_state->shm->write_cacheline(addr, buf, 8)) { status = 2; break; }
+        g_state->total_atomics++;
+        break;
+    }
+    case OP_ATOMIC_CAS: {
+        uint8_t buf[8] = {0};
+        if (!g_state->shm->read_cacheline(addr, buf, 8)) { status = 2; break; }
+        std::memcpy(&old_value, buf, 8);
+        if (old_value == expected) {
+            std::memcpy(buf, &value, 8);
+            if (!g_state->shm->write_cacheline(addr, buf, 8)) { status = 2; break; }
+        }
+        g_state->total_atomics++;
+        break;
+    }
+    case OP_FENCE:
+        break;
+    default:
+        status = 3;
+        break;
+    }
+
+    if (status != 0) g_state->total_errors++;
+    resp[0] = status;
+    store_u64(resp + 1, latency_ns);
+    store_u64(resp + 9, old_value);
+    g_state->total_latency_ns += latency_ns;
+    return invalidations;
 }
 
 KEEPALIVE void cxlmemsim_handle_type2(uint32_t /*msg_ptr*/) {}
