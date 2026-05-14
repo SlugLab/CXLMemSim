@@ -327,6 +327,16 @@ function attachPort(port) {
                 type: 'connected', clientId: id,
                 pool: pool.name, size: pool.size
             });
+            /* If the bridge is already loaded (e.g. an earlier tab
+             * triggered ensureBridge), re-announce so this new tab's
+             * dashboard learns the state without waiting for traffic. */
+            if (bridge) {
+                events.postMessage({ type: 'bridge-ready' });
+                publishStats(pool, true);
+            } else if (bridgeError) {
+                port.postMessage({ type: 'degraded',
+                    reason: String(bridgeError.message || bridgeError) });
+            }
             ensureBridge(pool.size).then((b) => {
                 if (!b && bridgeError) {
                     port.postMessage({ type: 'degraded',
