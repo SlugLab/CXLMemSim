@@ -131,6 +131,28 @@ int main() {
             return 1;
         }
     }
+
+    {
+        auto *stats = reinterpret_cast<cxlmemsim_stats_t *>(
+            arena.alloc(sizeof(cxlmemsim_stats_t), 16));
+        std::memset(stats, 0, sizeof(*stats));
+        cxlmemsim_get_stats(to_offset(stats));
+        if (stats->total_reads != 1 || stats->total_writes != 1 ||
+            stats->total_invalidations != 1) {
+            std::fprintf(stderr,
+                "FAIL: stats reads=%llu writes=%llu inv=%llu\n",
+                (unsigned long long)stats->total_reads,
+                (unsigned long long)stats->total_writes,
+                (unsigned long long)stats->total_invalidations);
+            return 1;
+        }
+        if (stats->pool_capacity_bytes != 4ULL * 1024 * 1024) {
+            std::fprintf(stderr,
+                "FAIL: stats pool_capacity_bytes=%llu\n",
+                (unsigned long long)stats->pool_capacity_bytes);
+            return 1;
+        }
+    }
 #else
     /* WASM/Emscripten path: heap is 32-bit linear, vectors work fine. */
     auto write_u64 = [&](size_t off, uint64_t v) {
@@ -170,6 +192,26 @@ int main() {
             std::fprintf(stderr,
                 "FAIL: read mismatch at %d (got %u expected %u)\n",
                 i, resp[17 + i], (i ^ 0xA5));
+            return 1;
+        }
+    }
+
+    {
+        cxlmemsim_stats_t stats{};
+        cxlmemsim_get_stats(to_offset(&stats));
+        if (stats.total_reads != 1 || stats.total_writes != 1 ||
+            stats.total_invalidations != 1) {
+            std::fprintf(stderr,
+                "FAIL: stats reads=%llu writes=%llu inv=%llu\n",
+                (unsigned long long)stats.total_reads,
+                (unsigned long long)stats.total_writes,
+                (unsigned long long)stats.total_invalidations);
+            return 1;
+        }
+        if (stats.pool_capacity_bytes != 4ULL * 1024 * 1024) {
+            std::fprintf(stderr,
+                "FAIL: stats pool_capacity_bytes=%llu\n",
+                (unsigned long long)stats.pool_capacity_bytes);
             return 1;
         }
     }

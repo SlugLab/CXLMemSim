@@ -218,9 +218,59 @@ KEEPALIVE int32_t cxlmemsim_handle_request(uint32_t req_ptr,
     return invalidations;
 }
 
-KEEPALIVE void cxlmemsim_handle_type2(uint32_t /*msg_ptr*/) {}
+KEEPALIVE void cxlmemsim_handle_type2(uint32_t msg_ptr) {
+    if (!g_state) return;
+    const uint8_t *msg = reinterpret_cast<const uint8_t *>(
+        static_cast<uintptr_t>(msg_ptr));
 
-KEEPALIVE void cxlmemsim_get_stats(uint32_t /*out_ptr*/) {}
+    /* Type-2 message header layout (see cxlmemsim-pool-worker.js
+       makeType2Message): type(4) size(4) addr(8) timestamp(8)
+       state(1) source(1) reserved(0..) data[26..90] */
+    uint32_t type;
+    uint32_t size;
+    uint64_t addr;
+    std::memcpy(&type, msg + 0, 4);
+    std::memcpy(&size, msg + 4, 4);
+    std::memcpy(&addr, msg + 8, 8);
+    if (size > 64) size = 64;
+
+    constexpr uint32_t T2_WRITE = 2;
+    constexpr uint32_t T2_WRITEBACK = 8;
+    constexpr uint32_t T2_GPU_ACCESS = 9;
+    constexpr uint32_t T2_INVALIDATE = 7;
+    constexpr uint32_t T2_FLUSH = 3;
+
+    if (type == T2_WRITE || type == T2_WRITEBACK || type == T2_GPU_ACCESS) {
+        if (g_state->shm->write_cacheline(addr, msg + 26, size)) {
+            g_state->total_writes++;
+            g_state->total_invalidations++;
+        }
+    } else if (type == T2_INVALIDATE || type == T2_FLUSH) {
+        g_state->total_invalidations++;
+    }
+}
+
+KEEPALIVE void cxlmemsim_get_stats(uint32_t out_ptr) {
+    cxlmemsim_stats_t s{};
+    if (g_state) {
+        s.total_reads = g_state->total_reads.load();
+        s.total_writes = g_state->total_writes.load();
+        s.total_atomics = g_state->total_atomics.load();
+        s.total_invalidations = g_state->total_invalidations.load();
+        s.total_errors = g_state->total_errors.load();
+        s.total_latency_ns = g_state->total_latency_ns.load();
+        s.pool_capacity_bytes = g_state->shm
+            ? g_state->shm->get_stats().total_capacity
+            : 0;
+        /* MESI histogram (s.mesi_invalid / _shared / _exclusive /
+           _modified) is left at zero — coherency-engine wiring is a
+           future task. bytes_read / bytes_written are also zero for
+           now; the bridge counts ops, not bytes — JS-side stats cover
+           the byte totals. */
+    }
+    std::memcpy(reinterpret_cast<void *>(static_cast<uintptr_t>(out_ptr)),
+                &s, sizeof(s));
+}
 
 KEEPALIVE void cxlmemsim_reset(void) {
     if (!g_state) return;

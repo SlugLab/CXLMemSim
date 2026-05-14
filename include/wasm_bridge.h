@@ -10,6 +10,24 @@
 
 #include <stdint.h>
 
+/* 256-byte fixed-layout stats block returned by cxlmemsim_get_stats. */
+typedef struct {
+    uint64_t total_reads;
+    uint64_t total_writes;
+    uint64_t total_atomics;
+    uint64_t total_invalidations;
+    uint64_t total_errors;
+    uint64_t bytes_read;
+    uint64_t bytes_written;
+    uint64_t total_latency_ns;
+    uint64_t pool_capacity_bytes;
+    uint64_t mesi_invalid;
+    uint64_t mesi_shared;
+    uint64_t mesi_exclusive;
+    uint64_t mesi_modified;
+    uint64_t reserved[19];
+} cxlmemsim_stats_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
