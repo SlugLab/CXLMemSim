@@ -52,6 +52,8 @@ async function ensureBridge(capacity) {
                 statsPtr: Module._malloc(STATS_SIZE),
                 capacity
             };
+            events.postMessage({ type: 'bridge-ready' });
+            for (const pool of pools.values()) publishStats(pool, true);
             return bridge;
         } catch (err) {
             bridgeError = err;
@@ -269,9 +271,9 @@ function handleQemuMessage(pool, client, msg) {
 }
 
 let lastBroadcast = 0;
-function publishStats(pool) {
+function publishStats(pool, force = false) {
     const now = Date.now();
-    if (now - lastBroadcast < 50) return;
+    if (!force && now - lastBroadcast < 50) return;
     lastBroadcast = now;
     let extra = {};
     if (bridge) {
@@ -356,7 +358,10 @@ function attachPort(port) {
             broadcastStatus(pool);
             return;
         }
-        if (msg.type === 'get-status') broadcastStatus(pool);
+        if (msg.type === 'get-status') {
+            broadcastStatus(pool);
+            publishStats(pool, true);
+        }
     };
     port.start();
 }
