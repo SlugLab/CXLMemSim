@@ -21,8 +21,18 @@
 
 #include "cxlcontroller.h"
 #include "helper.h"
+#include <cstdint>
+#if CXLMEMSIM_HAS_LINUX_PERF
 #include <linux/perf_event.h>
 #include <sys/mman.h>
+#else
+struct perf_event_header {
+    uint32_t type;
+    uint16_t misc;
+    uint16_t size;
+};
+struct perf_event_mmap_page;
+#endif
 class CXLController; // Forward declaration
 
 struct lbr {

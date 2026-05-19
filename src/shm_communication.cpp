@@ -11,6 +11,31 @@
 #include <cerrno>
 #include <sys/types.h>
 
+static int cxl_sem_timedwait(sem_t* sem, const struct timespec* abs_timeout) {
+#if defined(__APPLE__)
+    while (true) {
+        if (sem_trywait(sem) == 0) {
+            return 0;
+        }
+        if (errno != EAGAIN) {
+            return -1;
+        }
+
+        struct timespec now;
+        clock_gettime(CLOCK_REALTIME, &now);
+        if (now.tv_sec > abs_timeout->tv_sec ||
+            (now.tv_sec == abs_timeout->tv_sec && now.tv_nsec >= abs_timeout->tv_nsec)) {
+            errno = ETIMEDOUT;
+            return -1;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+#else
+    return sem_timedwait(sem, abs_timeout);
+#endif
+}
+
 ShmCommunicationManager::ShmCommunicationManager(const std::string& name, bool server_mode)
     : shm_name(name), shm_fd(-1), shm_comm(nullptr), is_server(server_mode), 
       client_id(0), request_sem(nullptr), response_sem(nullptr) {
@@ -277,7 +302,7 @@ bool ShmCommunicationManager::wait_for_request(uint32_t& out_client_id, ShmReque
             ts.tv_nsec -= 1000000000;
         }
         
-        if (sem_timedwait(request_sem, &ts) == 0) {
+        if (cxl_sem_timedwait(request_sem, &ts) == 0) {
             // Semaphore signaled, retry
             return wait_for_request(out_client_id, request, 0);
         }
@@ -421,7 +446,7 @@ bool ShmCommunicationManager::wait_for_response(ShmResponse& response, int timeo
             ts.tv_nsec -= 1000000000;
         }
         
-        sem_timedwait(response_sem, &ts);
+        cxl_sem_timedwait(response_sem, &ts);
     }
     
     return false;

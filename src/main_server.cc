@@ -13,8 +13,6 @@
 #include "cxlcontroller.h"
 #include "cxlendpoint.h"
 #include "distributed_server.h"
-#include "helper.h"
-#include "monitor.h"
 #include "policy.h"
 #include "shm_communication.h"
 #include <algorithm>
@@ -47,9 +45,7 @@
 #endif
 
 // Global variables
-Helper helper{};
 CXLController* controller = nullptr;
-Monitors* monitors = nullptr;  // Required by helper.cpp signal handlers
 
 // Operation type constants
 constexpr uint8_t OP_READ = 0;
@@ -935,7 +931,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     if (req.op_type == OP_WRITE) {
         // Log first 16 bytes of write data
         std::stringstream data_str;
-        for (int i = 0; i < std::min(16UL, req.size); i++) {
+        for (uint64_t i = 0; i < std::min<uint64_t>(16, req.size); i++) {
             data_str << std::hex << std::setfill('0') << std::setw(2) 
                     << static_cast<int>(req.data[i]) << " ";
         }
@@ -1012,7 +1008,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             
             // Log the data being read
             std::stringstream read_data_str;
-            for (int i = 0; i < std::min(16UL, req.size); i++) {
+            for (uint64_t i = 0; i < std::min<uint64_t>(16, req.size); i++) {
                 read_data_str << std::hex << std::setfill('0') << std::setw(2) 
                              << static_cast<int>(resp.data[i]) << " ";
             }
@@ -1095,7 +1091,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             uint8_t verify_data[64];
             if (shm_manager->read_cacheline(req.addr, verify_data, req.size)) {
                 std::stringstream verify_str;
-                for (int i = 0; i < std::min(16UL, req.size); i++) {
+                for (uint64_t i = 0; i < std::min<uint64_t>(16, req.size); i++) {
                     verify_str << std::hex << std::setfill('0') << std::setw(2) 
                               << static_cast<int>(verify_data[i]) << " ";
                 }

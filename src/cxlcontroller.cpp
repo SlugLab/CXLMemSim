@@ -11,7 +11,6 @@
 
 #include "cxlcontroller.h"
 #include "lbr.h"
-#include "monitor.h"
 #include "../include/distributed_server.h"
 
 void CXLController::insert_end_point(CXLMemExpander *end_point) { this->cur_expanders.emplace_back(end_point); }

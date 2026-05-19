@@ -11,7 +11,9 @@
 
 #include "helper.h"
 #include <fstream>
+#if CXLMEMSIM_HAS_LINUX_PERF
 #include <monitor.h>
+#endif
 #include <signal.h>
 #include <string>
 #include <vector>
@@ -55,9 +57,11 @@ ModelContext model_ctx[] = {{CPU_MDL_BDX,
                              }},
                             {CPU_MDL_END, {""}}};
 
+#if CXLMEMSIM_HAS_LINUX_PERF
 long perf_event_open(struct perf_event_attr *event_attr, pid_t pid, int cpu, int group_fd, unsigned long flags) {
     return syscall(__NR_perf_event_open, event_attr, pid, cpu, group_fd, flags);
 }
+#endif
 
 int Helper::num_of_cpu() {
     int ncpu = sysconf(_SC_NPROCESSORS_ONLN);
@@ -122,8 +126,13 @@ Helper::Helper() {
 }
 void Helper::noop_handler(int) { ; }
 void Helper::suspend_handler(int) {
+#if CXLMEMSIM_HAS_LINUX_PERF
+    if (!monitors) {
+        return;
+    }
     for (auto &m : monitors->mon)
         m.status = MONITOR_SUSPEND;
+#endif
 }
 void Helper::detach_children() {
     struct sigaction sa {};
@@ -142,6 +151,9 @@ void Helper::detach_children() {
     }
 }
 int PMUInfo::start_all_pmcs() {
+#if !CXLMEMSIM_HAS_LINUX_PERF
+    return 0;
+#else
     /* enable all pmcs to count */
     int r, i;
     for (i = 0; i < this->cpus.size(); i++) {
@@ -152,8 +164,10 @@ int PMUInfo::start_all_pmcs() {
         }
     }
     return 0;
+#endif
 }
 PMUInfo::PMUInfo(pid_t pid, Helper *helper, PerfConfig *perf_config) : helper(helper) {
+#if CXLMEMSIM_HAS_LINUX_PERF
     for (auto i : helper->used_cpu) {
         this->chas.emplace_back(i, perf_config);
     }
@@ -172,8 +186,12 @@ PMUInfo::PMUInfo(pid_t pid, Helper *helper, PerfConfig *perf_config) : helper(he
     if (r < 0) {
         SPDLOG_ERROR("start_all_pmcs failed\n");
     }
+#endif
 }
 int PMUInfo::stop_all_pmcs() {
+#if !CXLMEMSIM_HAS_LINUX_PERF
+    return 0;
+#else
     /* disable all pmcs to count */
 
     for (int i = 0; i < this->cpus.size(); i++) {
@@ -183,9 +201,13 @@ int PMUInfo::stop_all_pmcs() {
         }
     }
     return 0;
+#endif
 }
 
 int PMUInfo::unfreeze_counters_cha_all() const {
+#if !CXLMEMSIM_HAS_LINUX_PERF
+    return 0;
+#else
     for (int i = 0; i < this->chas.size(); i++) {
         for (const int j : {0, 1, 2, 3}) {
             if (int r = this->chas[i].perf[j]->start(); r < 0) {
@@ -195,8 +217,12 @@ int PMUInfo::unfreeze_counters_cha_all() const {
         }
     }
     return 0;
+#endif
 }
 int PMUInfo::freeze_counters_cha_all() const {
+#if !CXLMEMSIM_HAS_LINUX_PERF
+    return 0;
+#else
 
     for (int i = 0; i < this->chas.size(); i++) {
         for (const int j : {0, 1, 2, 3}) {
@@ -207,9 +233,12 @@ int PMUInfo::freeze_counters_cha_all() const {
         }
     }
     return 0;
+#endif
 }
 PMUInfo::~PMUInfo() {
+#if CXLMEMSIM_HAS_LINUX_PERF
     this->cpus.clear();
     this->chas.clear();
+#endif
     stop_all_pmcs();
 }
