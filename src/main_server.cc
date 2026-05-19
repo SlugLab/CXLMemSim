@@ -266,7 +266,6 @@ void signal_handler(int sig) {
         SPDLOG_INFO("Shutting down server...");
         g_server->stop();
     }
-    exit(0);
 }
 
 int main(int argc, char *argv[]) {
@@ -722,9 +721,7 @@ void ThreadPerConnectionServer::run() {
 void ThreadPerConnectionServer::stop() {
     running = false;
 
-    if (comm_mode == CommMode::PGAS_SHM) {
-        cleanup_pgas_shm();
-    } else if (comm_mode == CommMode::TCP) {
+    if (comm_mode == CommMode::TCP) {
         close(server_fd);
     }
 
@@ -740,7 +737,7 @@ void ThreadPerConnectionServer::stop() {
     SPDLOG_INFO("  Back Invalidations: {}", back_invalidations.load());
 
     // Print CXL controller topology statistics (switches/expanders/counters)
-    if (controller) {
+    if (controller && comm_mode != CommMode::PGAS_SHM) {
         std::cout << std::format("{}", *controller) << std::endl;
     }
 }
@@ -1678,6 +1675,8 @@ void ThreadPerConnectionServer::run_pgas_shm_mode() {
             worker.join();
         }
     }
+
+    cleanup_pgas_shm();
 }
 
 int ThreadPerConnectionServer::poll_pgas_shm_requests() {
@@ -1703,6 +1702,7 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
 
         // Calculate cacheline index from address
         uint64_t addr = slot->addr;
+        uint64_t request_ts = slot->timestamp;
         size_t cacheline_idx = addr / 64;
 
         if (cacheline_idx >= num_cachelines) {
@@ -1719,7 +1719,7 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
             case CXL_SHM_REQ_READ: {
                 // Update metadata
                 entry->metadata.access_count++;
-                entry->metadata.last_access_time = slot->timestamp;
+                entry->metadata.last_access_time = request_ts;
 
                 // Copy data to slot
                 size_t copy_size = std::min((size_t)slot->size, (size_t)64);
@@ -1732,20 +1732,16 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 // Store cache state in first byte of data response padding
                 // Client can check this for coherency information
 
-                __atomic_thread_fence(__ATOMIC_RELEASE);
-                slot->resp_status = CXL_SHM_RESP_OK;
                 total_reads++;
 
-                // Propagate stats through CXL topology
+                // PGAS server mode may be used with a minimal topology file whose
+                // switch objects are not fully materialized. Keep the authoritative
+                // operation counters independent from that optional topology walk.
                 controller->counter.inc_local();
-                for (auto &sw : controller->switches) {
-                    sw->insert(slot->timestamp, 0, addr, addr, 0);
-                }
-                for (auto &ep : controller->expanders) {
-                    ep->insert(slot->timestamp, 0, addr, addr, ep->id);
-                }
 
                 log_periodic_stats("PGAS_READ", total_reads.load());
+                __atomic_thread_fence(__ATOMIC_RELEASE);
+                slot->resp_status = CXL_SHM_RESP_OK;
                 processed++;
                 break;
             }
@@ -1758,25 +1754,21 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
 
                 // Update metadata
                 entry->metadata.access_count++;
-                entry->metadata.last_access_time = slot->timestamp;
+                entry->metadata.last_access_time = request_ts;
                 entry->metadata.cache_state = 3;  // MODIFIED
                 entry->metadata.version++;
 
                 slot->latency_ns = (uint64_t)base_latency;
-                __atomic_thread_fence(__ATOMIC_RELEASE);
-                slot->resp_status = CXL_SHM_RESP_OK;
                 total_writes++;
 
-                // Propagate stats through CXL topology
+                // PGAS server mode may be used with a minimal topology file whose
+                // switch objects are not fully materialized. Keep the authoritative
+                // operation counters independent from that optional topology walk.
                 controller->counter.inc_local();
-                for (auto &sw : controller->switches) {
-                    sw->insert(slot->timestamp, 0, addr, addr, 0);
-                }
-                for (auto &ep : controller->expanders) {
-                    ep->insert(slot->timestamp, 0, addr, addr, ep->id);
-                }
 
                 log_periodic_stats("PGAS_WRITE", total_writes.load());
+                __atomic_thread_fence(__ATOMIC_RELEASE);
+                slot->resp_status = CXL_SHM_RESP_OK;
                 processed++;
                 break;
             }

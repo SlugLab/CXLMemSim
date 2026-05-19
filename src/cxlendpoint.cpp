@@ -496,6 +496,9 @@ int CXLSwitch::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint
                  this->id);
 
     for (auto &expander : this->expanders) {
+        if (expander == nullptr) {
+            continue;
+        }
         // 在每个 expander 上尝试插入
         int ret = expander->insert(timestamp, tid, phys_addr, virt_addr, index);
         if (ret == 1) {
@@ -509,6 +512,9 @@ int CXLSwitch::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint
     }
     // 如果没有合适的 expander，就尝试下属的 switch
     for (auto &sw : this->switches) {
+        if (sw == nullptr) {
+            continue;
+        }
         int ret = sw->insert(timestamp, tid, phys_addr, virt_addr, index);
         if (ret == 1) {
             this->counter.inc_store();
