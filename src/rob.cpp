@@ -13,112 +13,101 @@
 #include <fstream>
 
 std::unordered_map<std::string, int> instructionLatencyMap = {
-    // 基本整数ALU操作 (IntAlu) - 1周期 (matching gem5's IntAluOp)
-    {"mov", 1}, // MOV_R_R: 寄存器间移动 - matches gem5 exactly
-    {"add", 1}, // ADD_R_R, ADD_R_I: 加法操作
-    {"sub", 1}, // SUB_R_I: 减法操作
-    {"and", 1}, // TEST_R_R: 位与操作
-    {"or", 1}, // 位或操作
-    {"xor", 1}, // 位异或操作
-    {"cmp", 1}, // CMP_M_I: 比较操作 (ALU部分)
-    {"limm", 1}, // 立即数加载
-    {"rdip", 1}, // 读取指令指针
-    {"wrip", 1}, // 写入指令指针 (控制转移)
+    // ALU (IntAlu) - 1 (matching gem5's IntAluOp)
+    {"mov", 1}, // MOV_R_R:  - matches gem5 exactly
+    {"add", 1}, // ADD_R_R, ADD_R_I:
+    {"sub", 1}, // SUB_R_I:
+    {"and", 1}, // TEST_R_R:
+    {"or", 1},
+    {"xor", 1},
+    {"cmp", 1}, // CMP_M_I:  (ALU)
+    {"limm", 1},
+    {"rdip", 1},
+    {"wrip", 1}, //  ()
 
-    // 整数乘法 (IntMult) - 3周期
-    {"mul", 3}, // 整数乘法
-    {"imul", 3}, // 有符号整数乘法
+    //  (IntMult) - 3
+    {"mul", 3},
+    {"imul", 3},
+    //  (IntDiv) - x861
+    {"div", 1}, // x86
+    {"idiv", 1}, // x86
 
-    // 整数除法 (IntDiv) - x86特殊优化为1周期
-    {"div", 1}, // x86除法微操作已优化
-    {"idiv", 1}, // x86有符号除法微操作已优化
+    //  -
+    {"ld", 1}, //  (miss)
+    {"st", 1},
+    //  -
+    {"jz", 1}, // JZ_I:
+    {"jnz", 1}, // JNZ_I:
+    {"jmp", 1},
+    {"je", 1},
+    {"jne", 1},
+    {"jl", 1},
+    {"jg", 1},
+    {"jle", 1},
+    {"jge", 1},
+    //  (FP_ALU) - 2
+    {"fadd", 2}, // FloatAdd:
+    {"fsub", 2}, // FloatAdd:
+    {"fcmp", 2}, // FloatCmp:
+    {"fcvt", 2}, // FloatCvt:
 
-    // 内存访问操作 - 延迟主要由缓存决定，这里是基础延迟
-    {"ld", 1}, // 内存加载基础延迟 (不包括缓存miss)
-    {"st", 1}, // 内存存储基础延迟
+    //  (FP_MultDiv)
+    {"fmul", 4}, // FloatMult:  - 4
+    {"fmadd", 5}, // FloatMultAcc:  - 5
+    {"fdiv", 12}, // FloatDiv:  - 12
+    {"fsqrt", 24}, // FloatSqrt:  - 24
+    {"fmisc", 3}, // FloatMisc:  - 3
 
-    // 分支操作 - 主要是条件码设置
-    {"jz", 1}, // JZ_I: 零标志跳转的准备工作
-    {"jnz", 1}, // JNZ_I: 非零标志跳转的准备工作
-    {"jmp", 1}, // 无条件跳转
-    {"je", 1}, // 相等跳转
-    {"jne", 1}, // 不等跳转
-    {"jl", 1}, // 小于跳转
-    {"jg", 1}, // 大于跳转
-    {"jle", 1}, // 小于等于跳转
-    {"jge", 1}, // 大于等于跳转
+    // SIMD - 1
+    {"simd_add", 1}, // SIMD
+    {"simd_mul", 1}, // SIMD
+    {"simd_cmp", 1}, // SIMD
+    {"simd_cvt", 1}, // SIMD
+    {"simd_misc", 1}, // SIMD
 
-    // 浮点运算 (FP_ALU) - 2周期
-    {"fadd", 2}, // FloatAdd: 浮点加法
-    {"fsub", 2}, // FloatAdd: 浮点减法
-    {"fcmp", 2}, // FloatCmp: 浮点比较
-    {"fcvt", 2}, // FloatCvt: 浮点转换
+    // x86
+    {"lea", 1},
+    {"nop", 1},
+    {"push", 1}, //  ()
+    {"pop", 1}, //  ()
+    {"call", 1}, //  ()
+    {"ret", 1}, //  ()
 
-    // 浮点乘除法 (FP_MultDiv)
-    {"fmul", 4}, // FloatMult: 浮点乘法 - 4周期
-    {"fmadd", 5}, // FloatMultAcc: 浮点累乘 - 5周期
-    {"fdiv", 12}, // FloatDiv: 浮点除法 - 12周期，非流水线
-    {"fsqrt", 24}, // FloatSqrt: 浮点开方 - 24周期，非流水线
-    {"fmisc", 3}, // FloatMisc: 其他浮点操作 - 3周期
-
-    // SIMD操作 - 多数为1周期
-    {"simd_add", 1}, // SIMD加法
-    {"simd_mul", 1}, // SIMD乘法
-    {"simd_cmp", 1}, // SIMD比较
-    {"simd_cvt", 1}, // SIMD转换
-    {"simd_misc", 1}, // SIMD杂项操作
-
-    // x86特有微操作
-    {"lea", 1}, // 有效地址计算
-    {"nop", 1}, // 空操作
-    {"push", 1}, // 压栈 (不包括内存访问延迟)
-    {"pop", 1}, // 出栈 (不包括内存访问延迟)
-    {"call", 1}, // 函数调用 (不包括内存访问延迟)
-    {"ret", 1}, // 函数返回 (不包括内存访问延迟)
-
-    // 位操作
-    {"shl", 1}, // 逻辑左移
-    {"shr", 1}, // 逻辑右移
-    {"sar", 1}, // 算术右移
-    {"rol", 1}, // 循环左移
-    {"ror", 1}, // 循环右移
-
-    // 其他常见x86指令
-    {"inc", 1}, // 自增
-    {"dec", 1}, // 自减
-    {"neg", 1}, // 取负
-    {"not", 1}, // 位取反
-    {"test", 1}, // 测试 (设置标志位)
-    {"cmov", 1}, // 条件移动
-
-    // 字符串操作 (简化)
-    {"movs", 1}, // 字符串移动
-    {"stos", 1}, // 字符串存储
-    {"lods", 1}, // 字符串加载
-    {"scas", 1}, // 字符串扫描
-    {"cmps", 1}, // 字符串比较
-
-    // 特殊指令
-    {"cpuid", 20}, // CPU信息查询 - 较高延迟
-    {"rdtsc", 3}, // 读取时间戳计数器
-    {"mfence", 1}, // 内存栅栏
-    {"sfence", 1}, // 存储栅栏
-    {"lfence", 1} // 加载栅栏
-};
-// 发射指令到ROB
-// 修改issue函数，调整发射逻辑
+    {"shl", 1},
+    {"shr", 1},
+    {"sar", 1},
+    {"rol", 1},
+    {"ror", 1},
+    // x86
+    {"inc", 1},
+    {"dec", 1},
+    {"neg", 1},
+    {"not", 1},
+    {"test", 1}, //  ()
+    {"cmov", 1},
+    //  ()
+    {"movs", 1},
+    {"stos", 1},
+    {"lods", 1},
+    {"scas", 1},
+    {"cmps", 1},
+    {"cpuid", 20}, // CPU -
+    {"rdtsc", 3},
+    {"mfence", 1},
+    {"sfence", 1},
+    {"lfence", 1}};
+// ROB
+// issue
 bool Rob::issue(const InstructionGroup &ins) {
-    // 保持原有的队列满检查
     if (queue_.size() >= maxSize_) {
         stallCount_++;
         stallEventCount_++;
-        return false; // ROB已满，停顿
+        return false; // ROB
     }
 
-    // 将指令加入ROB尾部
+    // ROB
     queue_.push_back(ins);
 
-    // 对于内存访问指令，通知控制器
     if (ins.address != 0) {
         counter++;
         auto lbrs = std::vector<lbr>();
@@ -133,7 +122,7 @@ bool Rob::issue(const InstructionGroup &ins) {
     return true;
 }
 
-// 修改canRetire函数，确保内存指令有足够的延迟
+// canRetire
 bool Rob::canRetire(const InstructionGroup &ins) {
     // Fast path for non-memory instructions (like gem5's register operations)
     if (ins.address == 0) {
@@ -151,8 +140,8 @@ bool Rob::canRetire(const InstructionGroup &ins) {
 
         // Check if this is a simple register operation (like MOV)
         bool isSimpleRegOp = ins.instruction.find("mov") != std::string::npos ||
-                            ins.instruction.find("add") != std::string::npos ||
-                            ins.instruction.find("sub") != std::string::npos;
+                             ins.instruction.find("add") != std::string::npos ||
+                             ins.instruction.find("sub") != std::string::npos;
 
         if (isSimpleRegOp && ins.address == 0) {
             // For register-only operations, use fixed 1-cycle latency like gem5
@@ -160,8 +149,8 @@ bool Rob::canRetire(const InstructionGroup &ins) {
         } else {
             // For memory operations, apply pipeline-aware latency calculation
             // The CXL pipeline model now handles overlapping requests
-            baseLatency *= 0.08;  // Reduced further to account for pipeline benefits
-            
+            baseLatency *= 0.08; // Reduced further to account for pipeline benefits
+
             // Check for pipeline optimization scenarios
             if (queue_.size() > 1) {
                 // Multiple instructions in flight, benefit from pipeline
@@ -178,13 +167,15 @@ bool Rob::canRetire(const InstructionGroup &ins) {
 
         // Apply proportional stall count (no excessive multiplier)
         stallCount_ += cur_latency;
-        if (stallCount_ % 2 == 0) { stallEventCount_ += 1; }
+        if (stallCount_ % 2 == 0) {
+            stallEventCount_ += 1;
+        }
 
         currentCycle_ += cur_latency;
         const_cast<InstructionGroup &>(ins).retireTimestamp += cur_latency;
     } else {
         // For already calculated latency, just apply minimal additional cycles
-        cur_latency = 1;  // Minimal additional latency for subsequent processing
+        cur_latency = 1; // Minimal additional latency for subsequent processing
         currentCycle_ += cur_latency;
     }
 
@@ -193,7 +184,7 @@ bool Rob::canRetire(const InstructionGroup &ins) {
     uint64_t waitTime = currentCycle_ - ins.cycleCount;
 
     // More lenient stall condition - only stall for significant delays
-    if (waitTime < (cur_latency / 2)) {  // Reduced stall threshold
+    if (waitTime < (cur_latency / 2)) { // Reduced stall threshold
         stallCount_++;
         stallEventCount_++;
         return false;
@@ -203,11 +194,10 @@ bool Rob::canRetire(const InstructionGroup &ins) {
     return true;
 }
 
-// 修改tick函数，限制每周期退休指令数量
+// tick
 void Rob::tick() {
     currentCycle_++;
 
-    // 打印队列状态，更频繁地显示
     if (currentCycle_ % 5000 == 0) {
         SPDLOG_INFO("Cycle {}: Queue size {}, Stalls {}, ROB Events {}", currentCycle_, queue_.size(), stallCount_,
                     stallEventCount_);
@@ -220,7 +210,7 @@ void Rob::tick() {
     for (int i = 0; i < MAX_RETIRE_PER_CYCLE && !queue_.empty(); i++) {
         auto &oldestIns = queue_.front();
         if (!canRetire(oldestIns)) {
-            break; // 遇到不能退休的指令就停止
+            break;
         }
         queue_.pop_front();
     }
@@ -229,20 +219,16 @@ void Rob::tick() {
     // Only stall when there are real resource constraints or dependencies
 }
 
-// 添加新函数来处理非常规退休（确保计数器正确更新）
 bool Rob::tryAlternativeRetire() {
-    // 检查队列中的非头部指令
     auto it = queue_.begin();
-    ++it; // 跳过队列头部
-
+    ++it;
     for (int i = 0; i < 5 && it != queue_.end(); ++i, ++it) {
-        if (it->address == 0) { // 如果是非内存指令
+        if (it->address == 0) {
             queue_.erase(it);
             return true;
         }
     }
 
-    // 如果找不到可以退休的指令，记录一次停顿
     stallCount_++;
     stallEventCount_++;
     return false;

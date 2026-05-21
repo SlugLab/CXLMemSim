@@ -35,7 +35,8 @@ Monitors* monitors = nullptr;
 
 static constexpr uint64_t NODE0_BASE = 0x100000000ULL; // 4GB
 static constexpr uint64_t NODE1_BASE = 0x200000000ULL; // 8GB
-static constexpr size_t CAPACITY_MB = 64;              // 64MB per node
+static constexpr size_t CAPACITY_MB = 64;
+    // 64MB per node
 
 struct TestResult {
     int passed = 0;

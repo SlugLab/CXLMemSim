@@ -4,10 +4,10 @@
  *
  * Compile: gcc -O2 -o rq4_devfrac_sweep rq4_devfrac_sweep.c -L. -lcuda -lrt -lm -Wl,-rpath,.
  */
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <time.h>
 
 typedef int CUresult;
@@ -34,22 +34,22 @@ typedef struct {
 extern int cxlGetCoherencyStats(CXLCoherencyStats *);
 
 /* Safe memset for BAR4 memory */
-static void cxl_memset(volatile void *dst, int val, size_t n)
-{
+static void cxl_memset(volatile void *dst, int val, size_t n) {
     volatile unsigned char *d = (volatile unsigned char *)dst;
     for (size_t i = 0; i < n; i++)
         d[i] = (unsigned char)val;
 }
 
-#define NUM_BUCKETS  500
-#define NUM_OPS      10000
-#define NUM_TRIALS   5
+#define NUM_BUCKETS 500
+#define NUM_OPS 10000
+#define NUM_TRIALS 5
 
 typedef struct {
     uint64_t key;
     uint64_t value;
-    uint64_t next;    /* index+1 into chain array, 0 = end */
-    uint8_t  pad[40]; /* fill to 64 bytes */
+    uint64_t next;
+    /* index+1 into chain array, 0 = end */
+    uint8_t pad[40]; /* fill to 64 bytes */
 } HTNode;
 
 static uint64_t xor_state = 0xDEADBEEF12345ULL;
@@ -75,8 +75,7 @@ static int cmp_u64(const void *a, const void *b) {
  * Run hash table workload.  Buckets always in device memory.
  * dev_frac of chain nodes go to device memory, rest to host.
  */
-static double run_ht(double dev_frac, void *dev_pool, uint64_t dev_pool_size)
-{
+static double run_ht(double dev_frac, void *dev_pool, uint64_t dev_pool_size) {
     /* Bucket array in device memory (first part of dev_pool) */
     uint64_t bucket_bytes = NUM_BUCKETS * sizeof(uint64_t);
     uint64_t *buckets = (uint64_t *)dev_pool;
@@ -113,7 +112,8 @@ static double run_ht(double dev_frac, void *dev_pool, uint64_t dev_pool_size)
                 node_idx = chain_count + 1; /* 1-based */
             } else {
                 node = (HTNode *)calloc(1, sizeof(HTNode));
-                if (!node) continue;
+                if (!node)
+                    continue;
                 host_nodes[host_count++] = node;
                 node_idx = chain_count + 1;
             }
@@ -139,15 +139,19 @@ static double run_ht(double dev_frac, void *dev_pool, uint64_t dev_pool_size)
     return (elapsed > 0) ? (double)NUM_OPS * 1e9 / (double)elapsed : 0;
 }
 
-int main(void)
-{
+int main(void) {
     printf("=== RQ4: Hash Table Device Fraction Sweep ===\n\n");
     fflush(stdout);
 
     CUresult err = cuInit(0);
-    if (err != CUDA_SUCCESS) { fprintf(stderr, "cuInit failed\n"); return 1; }
-    CUdevice dev; cuDeviceGet(&dev, 0);
-    CUcontext ctx; cuCtxCreate_v2(&ctx, 0, dev);
+    if (err != CUDA_SUCCESS) {
+        fprintf(stderr, "cuInit failed\n");
+        return 1;
+    }
+    CUdevice dev;
+    cuDeviceGet(&dev, 0);
+    CUcontext ctx;
+    cuCtxCreate_v2(&ctx, 0, dev);
     printf("  CXL GPU device 0\n");
     printf("  Buckets=%d  Ops=%d  Trials=%d\n\n", NUM_BUCKETS, NUM_OPS, NUM_TRIALS);
     fflush(stdout);
@@ -175,11 +179,8 @@ int main(void)
             samples[t] = (uint64_t)run_ht(fracs[fi], dev_pool, pool_sz);
         }
         qsort(samples, NUM_TRIALS, sizeof(uint64_t), cmp_u64);
-        printf("f=%-10.2f %12lu %12lu %12lu\n",
-               fracs[fi],
-               (unsigned long)samples[NUM_TRIALS/2],
-               (unsigned long)samples[NUM_TRIALS/4],
-               (unsigned long)samples[3*NUM_TRIALS/4]);
+        printf("f=%-10.2f %12lu %12lu %12lu\n", fracs[fi], (unsigned long)samples[NUM_TRIALS / 2],
+               (unsigned long)samples[NUM_TRIALS / 4], (unsigned long)samples[3 * NUM_TRIALS / 4]);
         fflush(stdout);
     }
 

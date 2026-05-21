@@ -6,12 +6,12 @@
  * Native:  gcc -O2 -o gpu_validation_bench gpu_validation_bench.c -lcuda -lrt -lm
  * Guest:   gcc -O2 -o gpu_validation_bench gpu_validation_bench.c -L. -lcuda -lrt -lm -Wl,-rpath,.
  */
+#include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <time.h>
-#include <math.h>
 
 typedef int CUresult;
 typedef int CUdevice;
@@ -54,12 +54,14 @@ static uint64_t median(uint64_t *arr, int n) {
 
 #define TRIALS 10
 
-int main(void)
-{
-    printf("{\n");  /* JSON output for easy parsing */
+int main(void) {
+    printf("{\n"); /* JSON output for easy parsing */
 
     CUresult err = cuInit(0);
-    if (err != CUDA_SUCCESS) { fprintf(stderr, "cuInit failed: %d\n", err); return 1; }
+    if (err != CUDA_SUCCESS) {
+        fprintf(stderr, "cuInit failed: %d\n", err);
+        return 1;
+    }
 
     int dev_count = 0;
     cuDeviceGetCount(&dev_count);
@@ -77,17 +79,17 @@ int main(void)
     int has_cxl = (cxlCoherentAlloc != NULL);
 
     printf("  \"device\": \"%s\",\n", name);
-    printf("  \"total_mem_mb\": %zu,\n", total_mem / (1024*1024));
+    printf("  \"total_mem_mb\": %zu,\n", total_mem / (1024 * 1024));
     printf("  \"mode\": \"%s\",\n", has_cxl ? "cxl_emulated" : "native");
     printf("  \"trials\": %d,\n", TRIALS);
 
-    /* ── 1. cuMemAlloc latency ── */
+    /*  1. cuMemAlloc latency  */
     {
         uint64_t samples[TRIALS];
         for (int t = 0; t < TRIALS; t++) {
             CUdeviceptr ptr;
             uint64_t t0 = time_ns();
-            cuMemAlloc_v2(&ptr, 1024 * 1024);  /* 1 MB */
+            cuMemAlloc_v2(&ptr, 1024 * 1024); /* 1 MB */
             uint64_t t1 = time_ns();
             samples[t] = t1 - t0;
             cuMemFree_v2(ptr);
@@ -95,7 +97,7 @@ int main(void)
         printf("  \"alloc_1mb_us\": %.1f,\n", (double)median(samples, TRIALS) / 1000.0);
     }
 
-    /* ── 2. cuMemcpy H2D bandwidth ── */
+    /*  2. cuMemcpy H2D bandwidth  */
     {
         size_t sizes[] = {4096, 65536, 1048576, 4194304};
         int nsz = 4;
@@ -117,8 +119,8 @@ int main(void)
             }
             double med_us = (double)median(samples, TRIALS) / 1000.0;
             double bw_mbs = (double)sz / (med_us / 1e6) / (1024.0 * 1024.0);
-            printf("    {\"size\": %zu, \"median_us\": %.1f, \"bw_mbs\": %.1f}%s\n",
-                   sz, med_us, bw_mbs, si < nsz - 1 ? "," : "");
+            printf("    {\"size\": %zu, \"median_us\": %.1f, \"bw_mbs\": %.1f}%s\n", sz, med_us, bw_mbs,
+                   si < nsz - 1 ? "," : "");
 
             cuMemFree_v2(dptr);
             free(host_buf);
@@ -126,7 +128,7 @@ int main(void)
         printf("  ],\n");
     }
 
-    /* ── 3. cuMemcpy D2H bandwidth ── */
+    /*  3. cuMemcpy D2H bandwidth  */
     {
         size_t sizes[] = {4096, 65536, 1048576, 4194304};
         int nsz = 4;
@@ -148,8 +150,8 @@ int main(void)
             }
             double med_us = (double)median(samples, TRIALS) / 1000.0;
             double bw_mbs = (double)sz / (med_us / 1e6) / (1024.0 * 1024.0);
-            printf("    {\"size\": %zu, \"median_us\": %.1f, \"bw_mbs\": %.1f}%s\n",
-                   sz, med_us, bw_mbs, si < nsz - 1 ? "," : "");
+            printf("    {\"size\": %zu, \"median_us\": %.1f, \"bw_mbs\": %.1f}%s\n", sz, med_us, bw_mbs,
+                   si < nsz - 1 ? "," : "");
 
             cuMemFree_v2(dptr);
             free(host_buf);
@@ -157,7 +159,7 @@ int main(void)
         printf("  ],\n");
     }
 
-    /* ── 4. Coherent memory (CXL guest only) ── */
+    /*  4. Coherent memory (CXL guest only)  */
     if (has_cxl) {
         void *coh_ptr = NULL;
         uint64_t coh_size = 4096;
@@ -172,10 +174,9 @@ int main(void)
                     p[0] = (uint64_t)i;
                 }
                 uint64_t t1 = time_ns();
-                samples[t] = (t1 - t0);  /* total for 1000 writes */
+                samples[t] = (t1 - t0); /* total for 1000 writes */
             }
-            printf("  \"coherent_write_ns_per_op\": %.1f,\n",
-                   (double)median(samples, TRIALS) / 1000.0);
+            printf("  \"coherent_write_ns_per_op\": %.1f,\n", (double)median(samples, TRIALS) / 1000.0);
 
             /* Read latency */
             for (int t = 0; t < TRIALS; t++) {
@@ -189,8 +190,7 @@ int main(void)
                 (void)sink;
                 samples[t] = (t1 - t0);
             }
-            printf("  \"coherent_read_ns_per_op\": %.1f,\n",
-                   (double)median(samples, TRIALS) / 1000.0);
+            printf("  \"coherent_read_ns_per_op\": %.1f,\n", (double)median(samples, TRIALS) / 1000.0);
 
             cxlCoherentFree(coh_ptr);
         }
@@ -207,8 +207,7 @@ int main(void)
             uint64_t t1 = time_ns();
             samples[t] = t1 - t0;
         }
-        printf("  \"host_ddr_write_ns_per_op\": %.1f,\n",
-               (double)median(samples, TRIALS) / 1000.0);
+        printf("  \"host_ddr_write_ns_per_op\": %.1f,\n", (double)median(samples, TRIALS) / 1000.0);
 
         for (int t = 0; t < TRIALS; t++) {
             volatile uint64_t sink = 0;
@@ -220,8 +219,7 @@ int main(void)
             (void)sink;
             samples[t] = t1 - t0;
         }
-        printf("  \"host_ddr_read_ns_per_op\": %.1f,\n",
-               (double)median(samples, TRIALS) / 1000.0);
+        printf("  \"host_ddr_read_ns_per_op\": %.1f,\n", (double)median(samples, TRIALS) / 1000.0);
         free(buf);
     }
 

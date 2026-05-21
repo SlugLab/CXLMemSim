@@ -1,13 +1,12 @@
 #include "../include/rdma_communication.h"
-#include <iostream>
-#include <cstring>
-#include <thread>
-#include <chrono>
 #include <arpa/inet.h>
+#include <chrono>
+#include <cstring>
+#include <iostream>
+#include <thread>
 #include <unistd.h>
 
-RDMAConnection::RDMAConnection()
-    : running_(false), connected_(false) {
+RDMAConnection::RDMAConnection() : running_(false), connected_(false) {
 #ifdef HAS_RDMA
     cm_id_ = nullptr;
     event_channel_ = nullptr;
@@ -38,15 +37,13 @@ int RDMAConnection::setup_connection_resources() {
         return -1;
     }
 
-    conn_info_.send_cq = ibv_create_cq(conn_info_.context, RDMA_CQ_SIZE,
-                                       nullptr, conn_info_.comp_channel, 0);
+    conn_info_.send_cq = ibv_create_cq(conn_info_.context, RDMA_CQ_SIZE, nullptr, conn_info_.comp_channel, 0);
     if (!conn_info_.send_cq) {
         std::cerr << "Failed to create send CQ" << std::endl;
         return -1;
     }
 
-    conn_info_.recv_cq = ibv_create_cq(conn_info_.context, RDMA_CQ_SIZE,
-                                       nullptr, conn_info_.comp_channel, 0);
+    conn_info_.recv_cq = ibv_create_cq(conn_info_.context, RDMA_CQ_SIZE, nullptr, conn_info_.comp_channel, 0);
     if (!conn_info_.recv_cq) {
         std::cerr << "Failed to create receive CQ" << std::endl;
         return -1;
@@ -71,8 +68,7 @@ int RDMAConnection::register_memory_region() {
     memset(conn_info_.buffer, 0, conn_info_.buffer_size);
 
     conn_info_.mr = ibv_reg_mr(conn_info_.pd, conn_info_.buffer, conn_info_.buffer_size,
-                               IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
-                               IBV_ACCESS_REMOTE_READ);
+                               IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
     if (!conn_info_.mr) {
         std::cerr << "Failed to register memory region" << std::endl;
         free(conn_info_.buffer);
@@ -82,7 +78,7 @@ int RDMAConnection::register_memory_region() {
     return 0;
 }
 
-int RDMAConnection::setup_qp_parameters(struct ibv_qp_init_attr& qp_attr) {
+int RDMAConnection::setup_qp_parameters(struct ibv_qp_init_attr &qp_attr) {
     memset(&qp_attr, 0, sizeof(qp_attr));
     qp_attr.send_cq = conn_info_.send_cq;
     qp_attr.recv_cq = conn_info_.recv_cq;
@@ -119,7 +115,7 @@ int RDMAConnection::post_receive() {
     return 0;
 }
 
-int RDMAConnection::post_send(const RDMAMessage* msg) {
+int RDMAConnection::post_send(const RDMAMessage *msg) {
     struct ibv_send_wr wr, *bad_wr = nullptr;
     struct ibv_sge sge;
 
@@ -204,8 +200,9 @@ void RDMAConnection::cleanup_resources() {
 
 #endif // HAS_RDMA
 
-int RDMAConnection::send_message(const RDMAMessage& msg) {
-    if (!connected_) return -1;
+int RDMAConnection::send_message(const RDMAMessage &msg) {
+    if (!connected_)
+        return -1;
 #ifdef HAS_RDMA
     return post_send(&msg);
 #else
@@ -214,8 +211,9 @@ int RDMAConnection::send_message(const RDMAMessage& msg) {
 #endif
 }
 
-int RDMAConnection::receive_message(RDMAMessage& msg) {
-    if (!connected_) return -1;
+int RDMAConnection::receive_message(RDMAMessage &msg) {
+    if (!connected_)
+        return -1;
 #ifdef HAS_RDMA
     struct ibv_wc wc;
     int ne;
@@ -229,7 +227,7 @@ int RDMAConnection::receive_message(RDMAMessage& msg) {
         return -1;
     }
 
-    memcpy(&msg, reinterpret_cast<void*>(wc.wr_id), sizeof(RDMAMessage));
+    memcpy(&msg, reinterpret_cast<void *>(wc.wr_id), sizeof(RDMAMessage));
 
     return post_receive();
 #else
@@ -250,8 +248,7 @@ void RDMAConnection::disconnect() {
 
 // ---- RDMAServer ----
 
-RDMAServer::RDMAServer(const std::string& addr, uint16_t port)
-    : bind_addr_(addr), port_(port) {
+RDMAServer::RDMAServer(const std::string &addr, uint16_t port) : bind_addr_(addr), port_(port) {
 #ifdef HAS_RDMA
     listen_id_ = nullptr;
 #endif
@@ -291,7 +288,7 @@ int RDMAServer::start() {
         inet_pton(AF_INET, bind_addr_.c_str(), &addr.sin_addr);
     }
 
-    if (rdma_bind_addr(listen_id_, reinterpret_cast<struct sockaddr*>(&addr))) {
+    if (rdma_bind_addr(listen_id_, reinterpret_cast<struct sockaddr *>(&addr))) {
         std::cerr << "Failed to bind RDMA address" << std::endl;
         return -1;
     }
@@ -312,7 +309,7 @@ int RDMAServer::start() {
 
 int RDMAServer::accept_connection() {
 #ifdef HAS_RDMA
-    struct rdma_cm_event* event = nullptr;
+    struct rdma_cm_event *event = nullptr;
 
     if (rdma_get_cm_event(event_channel_, &event)) {
         std::cerr << "Failed to get CM event" << std::endl;
@@ -406,13 +403,9 @@ void RDMAServer::stop() {
 
 // ---- RDMAClient ----
 
-RDMAClient::RDMAClient(const std::string& addr, uint16_t port)
-    : server_addr_(addr), server_port_(port) {
-}
+RDMAClient::RDMAClient(const std::string &addr, uint16_t port) : server_addr_(addr), server_port_(port) {}
 
-RDMAClient::~RDMAClient() {
-    disconnect();
-}
+RDMAClient::~RDMAClient() { disconnect(); }
 
 int RDMAClient::connect() {
 #ifdef HAS_RDMA
@@ -434,13 +427,12 @@ int RDMAClient::connect() {
     addr.sin_port = htons(server_port_);
     inet_pton(AF_INET, server_addr_.c_str(), &addr.sin_addr);
 
-    if (rdma_resolve_addr(cm_id_, nullptr,
-                         reinterpret_cast<struct sockaddr*>(&addr), 2000)) {
+    if (rdma_resolve_addr(cm_id_, nullptr, reinterpret_cast<struct sockaddr *>(&addr), 2000)) {
         std::cerr << "Failed to resolve RDMA address" << std::endl;
         return -1;
     }
 
-    struct rdma_cm_event* event = nullptr;
+    struct rdma_cm_event *event = nullptr;
     if (rdma_get_cm_event(event_channel_, &event)) {
         std::cerr << "Failed to get CM event" << std::endl;
         return -1;
@@ -526,8 +518,9 @@ int RDMAClient::connect() {
 #endif
 }
 
-int RDMAClient::send_request(const RDMARequest& req, RDMAResponse& resp) {
-    if (!connected_) return -1;
+int RDMAClient::send_request(const RDMARequest &req, RDMAResponse &resp) {
+    if (!connected_)
+        return -1;
 
     RDMAMessage msg;
     msg.request = req;

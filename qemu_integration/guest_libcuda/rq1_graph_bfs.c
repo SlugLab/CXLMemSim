@@ -15,12 +15,12 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <time.h>
-#include <math.h>
 
 #include "cxl_gpu_cmd.h"
 
@@ -65,56 +65,52 @@ extern int cxlResetCoherencyStats(void);
 /* ------------------------------------------------------------------ */
 /* Configuration                                                      */
 /* ------------------------------------------------------------------ */
-#define DEFAULT_NUM_NODES   2000
-#define AVG_DEGREE          6
-#define MAX_NEIGHBORS       6
-#define NUM_TRIALS          3
-#define BFS_QUEUE_SCALE     4       /* queue = BFS_QUEUE_SCALE * N */
+#define DEFAULT_NUM_NODES 2000
+#define AVG_DEGREE 6
+#define MAX_NEIGHBORS 6
+#define NUM_TRIALS 3
+#define BFS_QUEUE_SCALE 4 /* queue = BFS_QUEUE_SCALE * N */
 
 /* Graph node: exactly 64 bytes (one cache line) */
 typedef struct GraphNode {
-    uint64_t id;                        /*  8 bytes */
-    uint32_t visited;                   /*  4 bytes */
-    uint32_t num_neighbors;             /*  4 bytes */
-    uint64_t neighbor_offsets[6];       /* 48 bytes */
-} GraphNode;                            /* = 64 bytes total */
+    uint64_t id;
+    /*  8 bytes */
+    uint32_t visited;
+    /*  4 bytes */
+    uint32_t num_neighbors;
+    /*  4 bytes */
+    uint64_t neighbor_offsets[6];
+    /* 48 bytes */
+} GraphNode;
+/* = 64 bytes total */
 
 /* ------------------------------------------------------------------ */
 /* Utility: timing                                                    */
 /* ------------------------------------------------------------------ */
-static inline uint64_t ts_to_ns(struct timespec *ts)
-{
+static inline uint64_t ts_to_ns(struct timespec *ts) {
     return (uint64_t)ts->tv_sec * 1000000000ULL + (uint64_t)ts->tv_nsec;
 }
 
-static inline uint64_t elapsed_ns(struct timespec *t0, struct timespec *t1)
-{
-    return ts_to_ns(t1) - ts_to_ns(t0);
-}
+static inline uint64_t elapsed_ns(struct timespec *t0, struct timespec *t1) { return ts_to_ns(t1) - ts_to_ns(t0); }
 
 /* ------------------------------------------------------------------ */
 /* Utility: BAR4 base for offset computation                          */
 /* ------------------------------------------------------------------ */
 static uint8_t *g_bar4_base;
 
-static void init_bar4_base(void)
-{
+static void init_bar4_base(void) {
     /* cxlDeviceToHost(0) returns bar4 + 0, i.e. the BAR4 base pointer */
     g_bar4_base = (uint8_t *)cxlDeviceToHost(0);
 }
 
-static inline uint64_t host_to_dev_offset(void *host_ptr)
-{
-    return (uint64_t)((uint8_t *)host_ptr - g_bar4_base);
-}
+static inline uint64_t host_to_dev_offset(void *host_ptr) { return (uint64_t)((uint8_t *)host_ptr - g_bar4_base); }
 
 /* ------------------------------------------------------------------ */
 /* Utility: simple PRNG (xorshift64)                                  */
 /* ------------------------------------------------------------------ */
 static uint64_t rng_state = 0x12345678DEADBEEFULL;
 
-static inline uint64_t xorshift64(void)
-{
+static inline uint64_t xorshift64(void) {
     uint64_t x = rng_state;
     x ^= x << 13;
     x ^= x >> 7;
@@ -123,29 +119,22 @@ static inline uint64_t xorshift64(void)
     return x;
 }
 
-static inline double rng_uniform(void)
-{
+static inline double rng_uniform(void) {
     return (double)(xorshift64() & 0xFFFFFFFFFFFFULL) / (double)0xFFFFFFFFFFFFULL;
 }
 
-static void rng_seed(uint64_t s)
-{
-    rng_state = s ? s : 1;
-}
+static void rng_seed(uint64_t s) { rng_state = s ? s : 1; }
 
 /* ------------------------------------------------------------------ */
 /* Utility: percentile on sorted array                                */
 /* ------------------------------------------------------------------ */
-static int cmp_u64(const void *a, const void *b)
-{
+static int cmp_u64(const void *a, const void *b) {
     uint64_t va = *(const uint64_t *)a;
     uint64_t vb = *(const uint64_t *)b;
     return (va > vb) - (va < vb);
 }
 
-static void compute_stats(uint64_t *vals, int n,
-                           uint64_t *med, uint64_t *p25, uint64_t *p75)
-{
+static void compute_stats(uint64_t *vals, int n, uint64_t *med, uint64_t *p25, uint64_t *p75) {
     qsort(vals, (size_t)n, sizeof(uint64_t), cmp_u64);
     *p25 = vals[n / 4];
     *med = vals[n / 2];
@@ -155,8 +144,7 @@ static void compute_stats(uint64_t *vals, int n,
 /* ------------------------------------------------------------------ */
 /* Utility: print coherency stats                                     */
 /* ------------------------------------------------------------------ */
-static void print_coherency_stats(const char *prefix)
-{
+static void print_coherency_stats(const char *prefix) {
     CXLCoherencyStats st;
     if (cxlGetCoherencyStats(&st) != CUDA_SUCCESS) {
         printf("%s  (unable to read coherency stats)\n", prefix);
@@ -164,30 +152,26 @@ static void print_coherency_stats(const char *prefix)
     }
     printf("%s  coherency: snoop_hits=%lu snoop_misses=%lu "
            "coh_reqs=%lu back_inv=%lu\n",
-           prefix,
-           (unsigned long)st.snoop_hits, (unsigned long)st.snoop_misses,
-           (unsigned long)st.coherency_requests,
+           prefix, (unsigned long)st.snoop_hits, (unsigned long)st.snoop_misses, (unsigned long)st.coherency_requests,
            (unsigned long)st.back_invalidations);
-    printf("%s            writebacks=%lu evictions=%lu bias_flips=%lu\n",
-           prefix,
-           (unsigned long)st.writebacks, (unsigned long)st.evictions,
-           (unsigned long)st.bias_flips);
+    printf("%s            writebacks=%lu evictions=%lu bias_flips=%lu\n", prefix, (unsigned long)st.writebacks,
+           (unsigned long)st.evictions, (unsigned long)st.bias_flips);
     printf("%s            dev_bias_hits=%lu host_bias_hits=%lu "
            "dir_entries=%lu\n",
-           prefix,
-           (unsigned long)st.device_bias_hits,
-           (unsigned long)st.host_bias_hits,
+           prefix, (unsigned long)st.device_bias_hits, (unsigned long)st.host_bias_hits,
            (unsigned long)st.directory_entries);
 }
 
-static int rq1_method_enabled(char method)
-{
+static int rq1_method_enabled(char method) {
     const char *env = getenv("RQ1_METHODS");
-    if (!env || !*env) return 1;
+    if (!env || !*env)
+        return 1;
 
-    if (strstr(env, "all") || strstr(env, "ALL")) return 1;
+    if (strstr(env, "all") || strstr(env, "ALL"))
+        return 1;
     for (const char *p = env; *p; p++) {
-        if (*p == method || *p == method + ('a' - 'A')) return 1;
+        if (*p == method || *p == method + ('a' - 'A'))
+            return 1;
     }
     return 0;
 }
@@ -202,8 +186,7 @@ static int rq1_method_enabled(char method)
  * Build an Erdos-Renyi graph: each node gets ~avg_degree random neighbors.
  * We sample neighbors directly rather than iterating all O(N^2) pairs.
  */
-static void build_erdos_renyi(GraphNode *nodes, int N, uint64_t *offsets)
-{
+static void build_erdos_renyi(GraphNode *nodes, int N, uint64_t *offsets) {
     for (int i = 0; i < N; i++) {
         nodes[i].id = (uint64_t)i;
         nodes[i].visited = 0;
@@ -224,7 +207,8 @@ static void build_erdos_renyi(GraphNode *nodes, int N, uint64_t *offsets)
         while (added < target_deg && attempts < target_deg * 4) {
             attempts++;
             int j = (int)(xorshift64() % (uint64_t)N);
-            if (j == i) continue;
+            if (j == i)
+                continue;
 
             /* Check for duplicate */
             int dup = 0;
@@ -234,7 +218,8 @@ static void build_erdos_renyi(GraphNode *nodes, int N, uint64_t *offsets)
                     break;
                 }
             }
-            if (dup) continue;
+            if (dup)
+                continue;
 
             nodes[i].neighbor_offsets[nodes[i].num_neighbors++] = offsets[j];
             added++;
@@ -247,13 +232,15 @@ static void build_erdos_renyi(GraphNode *nodes, int N, uint64_t *offsets)
  * Start with a small clique of m0 nodes, then attach new nodes with
  * m edges each, where m = min(AVG_DEGREE/2, m0).
  */
-static void build_barabasi_albert(GraphNode *nodes, int N, uint64_t *offsets)
-{
+static void build_barabasi_albert(GraphNode *nodes, int N, uint64_t *offsets) {
     int m0 = AVG_DEGREE;
-    int m  = AVG_DEGREE / 2;
-    if (m < 1) m = 1;
-    if (m0 < m) m0 = m;
-    if (m0 > N) m0 = N;
+    int m = AVG_DEGREE / 2;
+    if (m < 1)
+        m = 1;
+    if (m0 < m)
+        m0 = m;
+    if (m0 > N)
+        m0 = N;
 
     /* degree array for preferential attachment */
     int *degree = calloc((size_t)N, sizeof(int));
@@ -284,7 +271,8 @@ static void build_barabasi_albert(GraphNode *nodes, int N, uint64_t *offsets)
     }
 
     int total_degree = 0;
-    for (int i = 0; i < m0; i++) total_degree += degree[i];
+    for (int i = 0; i < m0; i++)
+        total_degree += degree[i];
 
     /* Attach remaining nodes */
     for (int new_node = m0; new_node < N; new_node++) {
@@ -300,7 +288,10 @@ static void build_barabasi_albert(GraphNode *nodes, int N, uint64_t *offsets)
                 target = 0;
                 for (int t = 0; t < new_node; t++) {
                     cumul += (double)degree[t];
-                    if (cumul >= r) { target = t; break; }
+                    if (cumul >= r) {
+                        target = t;
+                        break;
+                    }
                     target = t;
                 }
             } else {
@@ -315,14 +306,15 @@ static void build_barabasi_albert(GraphNode *nodes, int N, uint64_t *offsets)
                     break;
                 }
             }
-            if (dup) continue;
-            if (nodes[new_node].num_neighbors >= MAX_NEIGHBORS) break;
-            if (nodes[target].num_neighbors >= MAX_NEIGHBORS) continue;
+            if (dup)
+                continue;
+            if (nodes[new_node].num_neighbors >= MAX_NEIGHBORS)
+                break;
+            if (nodes[target].num_neighbors >= MAX_NEIGHBORS)
+                continue;
 
-            nodes[new_node].neighbor_offsets[nodes[new_node].num_neighbors++] =
-                offsets[target];
-            nodes[target].neighbor_offsets[nodes[target].num_neighbors++] =
-                offsets[new_node];
+            nodes[new_node].neighbor_offsets[nodes[new_node].num_neighbors++] = offsets[target];
+            nodes[target].neighbor_offsets[nodes[target].num_neighbors++] = offsets[new_node];
             degree[new_node]++;
             degree[target]++;
             total_degree += 2;
@@ -340,28 +332,33 @@ static void build_barabasi_albert(GraphNode *nodes, int N, uint64_t *offsets)
  * All nodes live in coherent memory.  Neighbor offsets are BAR4 device
  * offsets resolved via cxlDeviceToHost().
  */
-static int bfs_coherent(uint64_t *node_offsets, int N, int start_id)
-{
+static int bfs_coherent(uint64_t *node_offsets, int N, int start_id) {
     /* Reset visited flags */
     for (int i = 0; i < N; i++) {
         GraphNode *nd = (GraphNode *)cxlDeviceToHost(node_offsets[i]);
-        if (!nd) return -1;
+        if (!nd)
+            return -1;
         nd->visited = 0;
     }
     cxlCoherentFence();
 
     /* BFS queue (offsets into coherent memory) */
     int qcap = N * BFS_QUEUE_SCALE;
-    if (qcap < 256) qcap = 256;
+    if (qcap < 256)
+        qcap = 256;
     uint64_t *queue = malloc((size_t)qcap * sizeof(uint64_t));
-    if (!queue) return -1;
+    if (!queue)
+        return -1;
 
     int head = 0, tail = 0;
     int visited_count = 0;
 
     /* Enqueue start */
     GraphNode *start = (GraphNode *)cxlDeviceToHost(node_offsets[start_id]);
-    if (!start) { free(queue); return -1; }
+    if (!start) {
+        free(queue);
+        return -1;
+    }
     start->visited = 1;
     queue[tail++] = node_offsets[start_id];
     visited_count++;
@@ -369,13 +366,16 @@ static int bfs_coherent(uint64_t *node_offsets, int N, int start_id)
     while (head < tail) {
         uint64_t cur_off = queue[head++];
         GraphNode *cur = (GraphNode *)cxlDeviceToHost(cur_off);
-        if (!cur) continue;
+        if (!cur)
+            continue;
 
         for (uint32_t j = 0; j < cur->num_neighbors && j < MAX_NEIGHBORS; j++) {
             uint64_t nb_off = cur->neighbor_offsets[j];
-            if (nb_off == 0) continue;
+            if (nb_off == 0)
+                continue;
             GraphNode *nb = (GraphNode *)cxlDeviceToHost(nb_off);
-            if (!nb) continue;
+            if (!nb)
+                continue;
             if (!nb->visited) {
                 nb->visited = 1;
                 visited_count++;
@@ -395,8 +395,7 @@ static int bfs_coherent(uint64_t *node_offsets, int N, int start_id)
  * Graph lives in host memory.  Each BFS level serializes the frontier
  * to device via cuMemcpyHtoD, then copies results back.
  */
-static int bfs_copy_based(GraphNode *host_nodes, int N, int start_id)
-{
+static int bfs_copy_based(GraphNode *host_nodes, int N, int start_id) {
     /* Reset visited */
     for (int i = 0; i < N; i++)
         host_nodes[i].visited = 0;
@@ -431,7 +430,12 @@ static int bfs_copy_based(GraphNode *host_nodes, int N, int start_id)
 
     /* Staging buffer for batched copy */
     GraphNode *stage = malloc((size_t)N * sizeof(GraphNode));
-    if (!stage) { free(frontier); free(next_frontier); cuMemFree_v2(dev_buf); return -1; }
+    if (!stage) {
+        free(frontier);
+        free(next_frontier);
+        cuMemFree_v2(dev_buf);
+        return -1;
+    }
 
     while (front_size > 0) {
         /* Batch: gather frontier nodes into contiguous staging buffer */
@@ -439,12 +443,10 @@ static int bfs_copy_based(GraphNode *host_nodes, int N, int start_id)
             stage[f] = host_nodes[frontier[f]];
 
         /* Single bulk copy to device */
-        cuMemcpyHtoD_v2(dev_buf, stage,
-                         (size_t)front_size * sizeof(GraphNode));
+        cuMemcpyHtoD_v2(dev_buf, stage, (size_t)front_size * sizeof(GraphNode));
 
         /* Single bulk copy back ("device processed") */
-        cuMemcpyDtoH_v2(stage, dev_buf,
-                         (size_t)front_size * sizeof(GraphNode));
+        cuMemcpyDtoH_v2(stage, dev_buf, (size_t)front_size * sizeof(GraphNode));
 
         GraphNode *tmp = stage;
 
@@ -453,7 +455,8 @@ static int bfs_copy_based(GraphNode *host_nodes, int N, int start_id)
             for (uint32_t j = 0; j < tmp[f].num_neighbors && j < MAX_NEIGHBORS; j++) {
                 /* In copy-based mode, neighbor_offsets stores node indices */
                 int nb_idx = (int)tmp[f].neighbor_offsets[j];
-                if (nb_idx < 0 || nb_idx >= N) continue;
+                if (nb_idx < 0 || nb_idx >= N)
+                    continue;
                 if (!host_nodes[nb_idx].visited) {
                     host_nodes[nb_idx].visited = 1;
                     visited_count++;
@@ -479,14 +482,14 @@ static int bfs_copy_based(GraphNode *host_nodes, int N, int start_id)
 
 /* ---- Run BFS experiment for a given graph type and device fraction */
 
-static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
-{
+static void run_bfs_experiment(const char *graph_type, int N, double dev_frac) {
     printf("  graph=%s  N=%d  device_fraction=%.2f\n", graph_type, N, dev_frac);
 
     int want_method_a = rq1_method_enabled('A');
     int want_method_b = rq1_method_enabled('B');
     int dev_count = (int)(dev_frac * N);
-    if (dev_count > N) dev_count = N;
+    if (dev_count > N)
+        dev_count = N;
 
     /* ---- Allocate nodes ------------------------------------------ */
     /* Coherent pool for device-fraction nodes */
@@ -497,7 +500,8 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
         if (ret != CUDA_SUCCESS || !coh_pool) {
             /* Retry with smaller N */
             int new_dev = dev_count / 2;
-            fprintf(stderr, "    [WARN] cxlCoherentAlloc(%zu) failed, "
+            fprintf(stderr,
+                    "    [WARN] cxlCoherentAlloc(%zu) failed, "
                     "reducing device nodes %d -> %d\n",
                     coh_size, dev_count, new_dev);
             dev_count = new_dev;
@@ -506,7 +510,7 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
                 ret = cxlCoherentAlloc((uint64_t)coh_size, &coh_pool);
                 if (ret != CUDA_SUCCESS || !coh_pool) {
                     fprintf(stderr, "    [ERROR] cxlCoherentAlloc still failed, "
-                            "skipping\n");
+                                    "skipping\n");
                     return;
                 }
             }
@@ -519,7 +523,8 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
         host_nodes = (GraphNode *)calloc((size_t)host_count, sizeof(GraphNode));
         if (!host_nodes) {
             fprintf(stderr, "    [ERROR] malloc for host nodes failed\n");
-            if (coh_pool) cxlCoherentFree(coh_pool);
+            if (coh_pool)
+                cxlCoherentFree(coh_pool);
             return;
         }
     }
@@ -534,7 +539,8 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
     if (!node_offsets) {
         fprintf(stderr, "    [ERROR] malloc for offset table failed\n");
         free(host_nodes);
-        if (coh_pool) cxlCoherentFree(coh_pool);
+        if (coh_pool)
+            cxlCoherentFree(coh_pool);
         return;
     }
 
@@ -554,7 +560,8 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
     if (host_count > 0) {
         int ret = cxlCoherentAlloc((uint64_t)host_coh_size, &host_coh_pool);
         if (ret != CUDA_SUCCESS || !host_coh_pool) {
-            fprintf(stderr, "    [WARN] cxlCoherentAlloc for host portion "
+            fprintf(stderr,
+                    "    [WARN] cxlCoherentAlloc for host portion "
                     "failed (%zu bytes), falling back to copy-only\n",
                     host_coh_size);
             /* Mark that coherent BFS cannot run with mixed placement */
@@ -565,8 +572,7 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
     GraphNode *host_coh_nodes = (GraphNode *)host_coh_pool;
     for (int i = 0; i < host_count; i++) {
         if (host_coh_pool) {
-            node_offsets[dev_count + i] =
-                host_to_dev_offset(&host_coh_nodes[i]);
+            node_offsets[dev_count + i] = host_to_dev_offset(&host_coh_nodes[i]);
         } else {
             /* Placeholder: coherent BFS will be skipped */
             node_offsets[dev_count + i] = 0;
@@ -614,8 +620,7 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
         }
         for (int i = 0; i < host_count; i++) {
             if (host_coh_nodes) {
-                memcpy(&host_coh_nodes[i], &all_coherent[dev_count + i],
-                       sizeof(GraphNode));
+                memcpy(&host_coh_nodes[i], &all_coherent[dev_count + i], sizeof(GraphNode));
             }
         }
         cxlCoherentFence();
@@ -638,7 +643,7 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
             for (int i = 0; i < N; i++)
                 idx_offsets[i] = (uint64_t)i;
 
-            rng_seed(42);  /* Same seed for comparable graphs */
+            rng_seed(42); /* Same seed for comparable graphs */
             if (strcmp(graph_type, "erdos_renyi") == 0) {
                 build_erdos_renyi(copy_graph, N, idx_offsets);
             } else {
@@ -667,9 +672,7 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
         compute_stats(coh_times, NUM_TRIALS, &med, &p25, &p75);
         printf("    Method A (pointer-sharing):  median=%lu us  "
                "p25=%lu us  p75=%lu us\n",
-               (unsigned long)(med / 1000),
-               (unsigned long)(p25 / 1000),
-               (unsigned long)(p75 / 1000));
+               (unsigned long)(med / 1000), (unsigned long)(p25 / 1000), (unsigned long)(p75 / 1000));
         print_coherency_stats("    ");
     } else if (want_method_a) {
         printf("    Method A (pointer-sharing):  SKIPPED "
@@ -692,9 +695,7 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
         compute_stats(copy_times, NUM_TRIALS, &med, &p25, &p75);
         printf("    Method B (copy-based):       median=%lu us  "
                "p25=%lu us  p75=%lu us\n",
-               (unsigned long)(med / 1000),
-               (unsigned long)(p25 / 1000),
-               (unsigned long)(p75 / 1000));
+               (unsigned long)(med / 1000), (unsigned long)(p25 / 1000), (unsigned long)(p75 / 1000));
         print_coherency_stats("    ");
     } else if (want_method_b) {
         printf("    Method B (copy-based):       SKIPPED "
@@ -708,26 +709,29 @@ static void run_bfs_experiment(const char *graph_type, int N, double dev_frac)
     free(copy_graph);
     free(node_offsets);
     free(host_nodes);
-    if (host_coh_pool) cxlCoherentFree(host_coh_pool);
-    if (coh_pool) cxlCoherentFree(coh_pool);
+    if (host_coh_pool)
+        cxlCoherentFree(host_coh_pool);
+    if (coh_pool)
+        cxlCoherentFree(coh_pool);
 }
 
-static int parse_device_fractions(double *fracs, int max_fracs)
-{
-    static const double defaults[] = { 0.0, 0.25, 0.50, 0.75, 1.0 };
+static int parse_device_fractions(double *fracs, int max_fracs) {
+    static const double defaults[] = {0.0, 0.25, 0.50, 0.75, 1.0};
     int default_count = (int)(sizeof(defaults) / sizeof(defaults[0]));
     const char *env = getenv("RQ1_DEVICE_FRACTIONS");
 
     if (!env || !*env) {
         int n = default_count < max_fracs ? default_count : max_fracs;
-        for (int i = 0; i < n; i++) fracs[i] = defaults[i];
+        for (int i = 0; i < n; i++)
+            fracs[i] = defaults[i];
         return n;
     }
 
     char *tmp = strdup(env);
     if (!tmp) {
         int n = default_count < max_fracs ? default_count : max_fracs;
-        for (int i = 0; i < n; i++) fracs[i] = defaults[i];
+        for (int i = 0; i < n; i++)
+            fracs[i] = defaults[i];
         return n;
     }
 
@@ -745,13 +749,13 @@ static int parse_device_fractions(double *fracs, int max_fracs)
 
     if (n == 0) {
         n = default_count < max_fracs ? default_count : max_fracs;
-        for (int i = 0; i < n; i++) fracs[i] = defaults[i];
+        for (int i = 0; i < n; i++)
+            fracs[i] = defaults[i];
     }
     return n;
 }
 
-static void experiment1_bfs(int N)
-{
+static void experiment1_bfs(int N) {
     printf("\n");
     printf("================================================================\n");
     printf("  EXPERIMENT 1: BFS -- Pointer Sharing vs Copy-Based Offload\n");
@@ -760,7 +764,7 @@ static void experiment1_bfs(int N)
 
     double fracs[16];
     int n_fracs = parse_device_fractions(fracs, (int)(sizeof(fracs) / sizeof(fracs[0])));
-    static const char *graph_types[] = { "erdos_renyi", "barabasi_albert" };
+    static const char *graph_types[] = {"erdos_renyi", "barabasi_albert"};
     int n_types = (int)(sizeof(graph_types) / sizeof(graph_types[0]));
 
     for (int g = 0; g < n_types; g++) {
@@ -783,24 +787,25 @@ static void experiment1_bfs(int N)
  *   - Branching factor B (configurable)
  */
 
-#define BTREE_MAX_B     256
-#define BTREE_NUM_KEYS  10000
-#define BTREE_NUM_OPS   5000
+#define BTREE_MAX_B 256
+#define BTREE_NUM_KEYS 10000
+#define BTREE_NUM_OPS 5000
 
 typedef struct BTreeLeaf {
     uint64_t keys[BTREE_MAX_B];
     uint64_t vals[BTREE_MAX_B];
     uint32_t count;
     uint32_t _pad;
-    uint64_t next_offset;   /* BAR4 offset of next leaf, 0 = none */
+    uint64_t next_offset; /* BAR4 offset of next leaf, 0 = none */
 } BTreeLeaf;
 
 typedef struct BTreeInternal {
     uint64_t keys[BTREE_MAX_B];
-    void    *children[BTREE_MAX_B + 1]; /* host pointers for internal,
-                                           device offsets for leaves */
+    void *children[BTREE_MAX_B + 1]; /* host pointers for internal,
+                                        device offsets for leaves */
     uint32_t count;
-    uint32_t is_leaf_level;             /* 1 if children are leaves */
+    uint32_t is_leaf_level;
+    /* 1 if children are leaves */
 } BTreeInternal;
 
 /* Simplified B+ tree: single level of internal nodes pointing to leaves.
@@ -808,16 +813,19 @@ typedef struct BTreeInternal {
  * for leaf access patterns. */
 typedef struct BTree {
     BTreeInternal *root;
-    void          *leaf_pool;       /* coherent pool for leaves */
-    BTreeLeaf     *leaves;          /* pointer into leaf_pool */
-    int            num_leaves;
-    int            B;               /* branching factor (keys per leaf) */
+    void *leaf_pool;
+    /* coherent pool for leaves */
+    BTreeLeaf *leaves;
+    /* pointer into leaf_pool */
+    int num_leaves;
+    int B;
+    /* branching factor (keys per leaf) */
 } BTree;
 
-static BTree *btree_create(int B, int num_leaves)
-{
+static BTree *btree_create(int B, int num_leaves) {
     BTree *tree = calloc(1, sizeof(BTree));
-    if (!tree) return NULL;
+    if (!tree)
+        return NULL;
 
     tree->B = B;
     tree->num_leaves = num_leaves;
@@ -826,8 +834,7 @@ static BTree *btree_create(int B, int num_leaves)
     size_t leaf_size = (size_t)num_leaves * sizeof(BTreeLeaf);
     int ret = cxlCoherentAlloc((uint64_t)leaf_size, &tree->leaf_pool);
     if (ret != CUDA_SUCCESS || !tree->leaf_pool) {
-        fprintf(stderr, "    [WARN] B-tree leaf alloc failed (%zu bytes)\n",
-                leaf_size);
+        fprintf(stderr, "    [WARN] B-tree leaf alloc failed (%zu bytes)\n", leaf_size);
         free(tree);
         return NULL;
     }
@@ -850,18 +857,18 @@ static BTree *btree_create(int B, int num_leaves)
     return tree;
 }
 
-static void btree_destroy(BTree *tree)
-{
-    if (!tree) return;
+static void btree_destroy(BTree *tree) {
+    if (!tree)
+        return;
     free(tree->root);
-    if (tree->leaf_pool) cxlCoherentFree(tree->leaf_pool);
+    if (tree->leaf_pool)
+        cxlCoherentFree(tree->leaf_pool);
     free(tree);
 }
 
 /* Insert key into tree.  Simplified: distribute keys round-robin into
  * pre-allocated leaves sorted by key ranges. */
-static void btree_bulk_insert(BTree *tree, uint64_t *keys, int nkeys)
-{
+static void btree_bulk_insert(BTree *tree, uint64_t *keys, int nkeys) {
     /* Sort keys */
     qsort(keys, (size_t)nkeys, sizeof(uint64_t), cmp_u64);
 
@@ -869,20 +876,19 @@ static void btree_bulk_insert(BTree *tree, uint64_t *keys, int nkeys)
     int leaf_idx = 0;
 
     /* Fill leaves */
-    for (int i = 0; i < nkeys && leaf_idx < tree->num_leaves; ) {
+    for (int i = 0; i < nkeys && leaf_idx < tree->num_leaves;) {
         BTreeLeaf *leaf = &tree->leaves[leaf_idx];
         leaf->count = 0;
         int fill = 0;
         while (fill < per_leaf && i < nkeys) {
             leaf->keys[fill] = keys[i];
-            leaf->vals[fill] = keys[i] * 17 + 3;  /* dummy value */
+            leaf->vals[fill] = keys[i] * 17 + 3; /* dummy value */
             fill++;
             i++;
         }
         leaf->count = (uint32_t)fill;
         if (leaf_idx + 1 < tree->num_leaves) {
-            leaf->next_offset =
-                host_to_dev_offset(&tree->leaves[leaf_idx + 1]);
+            leaf->next_offset = host_to_dev_offset(&tree->leaves[leaf_idx + 1]);
         } else {
             leaf->next_offset = 0;
         }
@@ -896,8 +902,7 @@ static void btree_bulk_insert(BTree *tree, uint64_t *keys, int nkeys)
             tree->root->keys[tree->root->count] = tree->leaves[i].keys[0];
             tree->root->count++;
         }
-        tree->root->children[i] = (void *)(uintptr_t)
-            host_to_dev_offset(&tree->leaves[i]);
+        tree->root->children[i] = (void *)(uintptr_t)host_to_dev_offset(&tree->leaves[i]);
     }
 
     cxlCoherentFence();
@@ -905,8 +910,7 @@ static void btree_bulk_insert(BTree *tree, uint64_t *keys, int nkeys)
 
 /* Lookup via pointer sharing: traverse internal node (host), then
  * access leaf via cxlDeviceToHost */
-static int btree_lookup_coherent(BTree *tree, uint64_t key, uint64_t *val)
-{
+static int btree_lookup_coherent(BTree *tree, uint64_t key, uint64_t *val) {
     /* Find child in internal node */
     int child_idx = 0;
     for (uint32_t i = 0; i < tree->root->count; i++) {
@@ -918,7 +922,8 @@ static int btree_lookup_coherent(BTree *tree, uint64_t key, uint64_t *val)
 
     uint64_t leaf_off = (uint64_t)(uintptr_t)tree->root->children[child_idx];
     BTreeLeaf *leaf = (BTreeLeaf *)cxlDeviceToHost(leaf_off);
-    if (!leaf) return -1;
+    if (!leaf)
+        return -1;
 
     /* Linear scan within leaf */
     for (uint32_t i = 0; i < leaf->count; i++) {
@@ -927,12 +932,11 @@ static int btree_lookup_coherent(BTree *tree, uint64_t key, uint64_t *val)
             return 0;
         }
     }
-    return -1;  /* Not found */
+    return -1; /* Not found */
 }
 
 /* Lookup via copy-back: copy leaf to host, then search */
-static int btree_lookup_copy(BTree *tree, uint64_t key, uint64_t *val)
-{
+static int btree_lookup_copy(BTree *tree, uint64_t key, uint64_t *val) {
     int child_idx = 0;
     for (uint32_t i = 0; i < tree->root->count; i++) {
         if (key >= tree->root->keys[i])
@@ -946,7 +950,8 @@ static int btree_lookup_copy(BTree *tree, uint64_t key, uint64_t *val)
     /* Allocate device buffer and copy leaf */
     CUdeviceptr dev_ptr = 0;
     CUresult rc = cuMemAlloc_v2(&dev_ptr, sizeof(BTreeLeaf));
-    if (rc != CUDA_SUCCESS) return -1;
+    if (rc != CUDA_SUCCESS)
+        return -1;
 
     /* Copy from coherent memory to device, then to host buffer */
     BTreeLeaf local_leaf;
@@ -965,16 +970,14 @@ static int btree_lookup_copy(BTree *tree, uint64_t key, uint64_t *val)
     return -1;
 }
 
-static void experiment2_btree(void)
-{
+static void experiment2_btree(void) {
     printf("\n");
     printf("================================================================\n");
     printf("  EXPERIMENT 2: B+ Tree -- Pointer Sharing vs Copy-Back\n");
-    printf("  keys=%d  lookup_ops=%d  trials=%d\n",
-           BTREE_NUM_KEYS, BTREE_NUM_OPS, NUM_TRIALS);
+    printf("  keys=%d  lookup_ops=%d  trials=%d\n", BTREE_NUM_KEYS, BTREE_NUM_OPS, NUM_TRIALS);
     printf("================================================================\n");
 
-    static const int branching[] = { 4, 16, 64, 256 };
+    static const int branching[] = {4, 16, 64, 256};
     int n_branching = (int)(sizeof(branching) / sizeof(branching[0]));
 
     /* Generate random keys */
@@ -1043,9 +1046,7 @@ static void experiment2_btree(void)
         compute_stats(coh_times, NUM_TRIALS, &med, &p25, &p75);
         printf("    Pointer-sharing lookup:  median=%lu us  p25=%lu us  "
                "p75=%lu us  (%lu ns/op)\n",
-               (unsigned long)(med / 1000),
-               (unsigned long)(p25 / 1000),
-               (unsigned long)(p75 / 1000),
+               (unsigned long)(med / 1000), (unsigned long)(p25 / 1000), (unsigned long)(p75 / 1000),
                (unsigned long)(med / BTREE_NUM_OPS));
         print_coherency_stats("    ");
 
@@ -1067,9 +1068,7 @@ static void experiment2_btree(void)
         compute_stats(copy_times, NUM_TRIALS, &med, &p25, &p75);
         printf("    Copy-based lookup:      median=%lu us  p25=%lu us  "
                "p75=%lu us  (%lu ns/op)\n",
-               (unsigned long)(med / 1000),
-               (unsigned long)(p25 / 1000),
-               (unsigned long)(p75 / 1000),
+               (unsigned long)(med / 1000), (unsigned long)(p25 / 1000), (unsigned long)(p75 / 1000),
                (unsigned long)(med / BTREE_NUM_OPS));
         print_coherency_stats("    ");
 
@@ -1084,34 +1083,39 @@ static void experiment2_btree(void)
 /*   EXPERIMENT 3:  Chained hash table                                */
 /* ================================================================== */
 
-#define HASH_NUM_BUCKETS    1024
-#define HASH_NUM_OPS        20000
-#define HASH_CHAIN_MAX      16
+#define HASH_NUM_BUCKETS 1024
+#define HASH_NUM_OPS 20000
+#define HASH_CHAIN_MAX 16
 
 typedef struct HashEntry {
     uint64_t key;
     uint64_t value;
-    uint64_t next_offset;       /* BAR4 offset of next entry, 0 = end */
-    uint64_t _pad;              /* pad to 32 bytes */
+    uint64_t next_offset;
+    /* BAR4 offset of next entry, 0 = end */
+    uint64_t _pad;
+    /* pad to 32 bytes */
 } HashEntry;
 
 typedef struct HashBucket {
-    uint64_t head_offset;       /* BAR4 offset of first HashEntry, 0 = empty */
-    uint64_t _pad[3];           /* pad to 32 bytes */
+    uint64_t head_offset;
+    /* BAR4 offset of first HashEntry, 0 = empty */
+    uint64_t _pad[3];
+    /* pad to 32 bytes */
 } HashBucket;
 
 typedef struct HashTable {
-    void       *bucket_pool;    /* coherent allocation for buckets */
+    void *bucket_pool;
+    /* coherent allocation for buckets */
     HashBucket *buckets;
-    void       *entry_pool;     /* coherent allocation for entries */
-    HashEntry  *entries;
-    int         num_buckets;
-    int         entry_cap;
-    int         entry_used;
+    void *entry_pool;
+    /* coherent allocation for entries */
+    HashEntry *entries;
+    int num_buckets;
+    int entry_cap;
+    int entry_used;
 } HashTable;
 
-static uint64_t hash_fn(uint64_t key, int num_buckets)
-{
+static uint64_t hash_fn(uint64_t key, int num_buckets) {
     /* murmur-style finalizer */
     key ^= key >> 33;
     key *= 0xFF51AFD7ED558CCDULL;
@@ -1121,10 +1125,10 @@ static uint64_t hash_fn(uint64_t key, int num_buckets)
     return key % (uint64_t)num_buckets;
 }
 
-static HashTable *hash_create(int num_buckets, int entry_cap)
-{
+static HashTable *hash_create(int num_buckets, int entry_cap) {
     HashTable *ht = calloc(1, sizeof(HashTable));
-    if (!ht) return NULL;
+    if (!ht)
+        return NULL;
 
     ht->num_buckets = num_buckets;
     ht->entry_cap = entry_cap;
@@ -1161,11 +1165,13 @@ static HashTable *hash_create(int num_buckets, int entry_cap)
     return ht;
 }
 
-static void hash_destroy(HashTable *ht)
-{
-    if (!ht) return;
-    if (ht->entry_pool) cxlCoherentFree(ht->entry_pool);
-    if (ht->bucket_pool) cxlCoherentFree(ht->bucket_pool);
+static void hash_destroy(HashTable *ht) {
+    if (!ht)
+        return;
+    if (ht->entry_pool)
+        cxlCoherentFree(ht->entry_pool);
+    if (ht->bucket_pool)
+        cxlCoherentFree(ht->bucket_pool);
     free(ht);
 }
 
@@ -1173,8 +1179,7 @@ static void hash_destroy(HashTable *ht)
  * Coherent put: follow chain pointers via cxlDeviceToHost,
  * allocate new entry from the coherent pool.
  */
-static int hash_put_coherent(HashTable *ht, uint64_t key, uint64_t value)
-{
+static int hash_put_coherent(HashTable *ht, uint64_t key, uint64_t value) {
     uint64_t idx = hash_fn(key, ht->num_buckets);
     HashBucket *bkt = &ht->buckets[idx];
 
@@ -1182,7 +1187,8 @@ static int hash_put_coherent(HashTable *ht, uint64_t key, uint64_t value)
     uint64_t cur_off = bkt->head_offset;
     while (cur_off != 0) {
         HashEntry *entry = (HashEntry *)cxlDeviceToHost(cur_off);
-        if (!entry) break;
+        if (!entry)
+            break;
         if (entry->key == key) {
             entry->value = value;
             return 0;
@@ -1191,7 +1197,8 @@ static int hash_put_coherent(HashTable *ht, uint64_t key, uint64_t value)
     }
 
     /* Allocate new entry */
-    if (ht->entry_used >= ht->entry_cap) return -1;
+    if (ht->entry_used >= ht->entry_cap)
+        return -1;
     HashEntry *new_entry = &ht->entries[ht->entry_used++];
     new_entry->key = key;
     new_entry->value = value;
@@ -1204,15 +1211,15 @@ static int hash_put_coherent(HashTable *ht, uint64_t key, uint64_t value)
 /*
  * Coherent get: follow chain pointers via cxlDeviceToHost.
  */
-static int hash_get_coherent(HashTable *ht, uint64_t key, uint64_t *value)
-{
+static int hash_get_coherent(HashTable *ht, uint64_t key, uint64_t *value) {
     uint64_t idx = hash_fn(key, ht->num_buckets);
     HashBucket *bkt = &ht->buckets[idx];
 
     uint64_t cur_off = bkt->head_offset;
     while (cur_off != 0) {
         HashEntry *entry = (HashEntry *)cxlDeviceToHost(cur_off);
-        if (!entry) break;
+        if (!entry)
+            break;
         if (entry->key == key) {
             *value = entry->value;
             return 0;
@@ -1225,8 +1232,7 @@ static int hash_get_coherent(HashTable *ht, uint64_t key, uint64_t *value)
 /*
  * Copy-based put: copy bucket from device, modify locally, copy back.
  */
-static int hash_put_copy(HashTable *ht, uint64_t key, uint64_t value)
-{
+static int hash_put_copy(HashTable *ht, uint64_t key, uint64_t value) {
     uint64_t idx = hash_fn(key, ht->num_buckets);
     uint64_t bkt_off = host_to_dev_offset(&ht->buckets[idx]);
 
@@ -1248,7 +1254,8 @@ static int hash_put_copy(HashTable *ht, uint64_t key, uint64_t value)
     }
 
     /* Allocate new entry */
-    if (ht->entry_used >= ht->entry_cap) return -1;
+    if (ht->entry_used >= ht->entry_cap)
+        return -1;
     HashEntry *new_entry = &ht->entries[ht->entry_used++];
     uint64_t new_off = host_to_dev_offset(new_entry);
 
@@ -1268,8 +1275,7 @@ static int hash_put_copy(HashTable *ht, uint64_t key, uint64_t value)
 /*
  * Copy-based get: copy bucket and chain entries from device.
  */
-static int hash_get_copy(HashTable *ht, uint64_t key, uint64_t *value)
-{
+static int hash_get_copy(HashTable *ht, uint64_t key, uint64_t *value) {
     uint64_t idx = hash_fn(key, ht->num_buckets);
     uint64_t bkt_off = host_to_dev_offset(&ht->buckets[idx]);
 
@@ -1291,13 +1297,11 @@ static int hash_get_copy(HashTable *ht, uint64_t key, uint64_t *value)
     return -1;
 }
 
-static void experiment3_hashtable(void)
-{
+static void experiment3_hashtable(void) {
     printf("\n");
     printf("================================================================\n");
     printf("  EXPERIMENT 3: Chained Hash Table -- Coherent vs Copy-Based\n");
-    printf("  buckets=%d  ops=%d  trials=%d\n",
-           HASH_NUM_BUCKETS, HASH_NUM_OPS, NUM_TRIALS);
+    printf("  buckets=%d  ops=%d  trials=%d\n", HASH_NUM_BUCKETS, HASH_NUM_OPS, NUM_TRIALS);
     printf("================================================================\n");
 
     /* Generate keys and values */
@@ -1358,17 +1362,13 @@ static void experiment3_hashtable(void)
         compute_stats(put_times, NUM_TRIALS, &med, &p25, &p75);
         printf("    PUT: median=%lu us  p25=%lu us  p75=%lu us  "
                "(%lu ns/op)\n",
-               (unsigned long)(med / 1000),
-               (unsigned long)(p25 / 1000),
-               (unsigned long)(p75 / 1000),
+               (unsigned long)(med / 1000), (unsigned long)(p25 / 1000), (unsigned long)(p75 / 1000),
                (unsigned long)(med / HASH_NUM_OPS));
 
         compute_stats(get_times, NUM_TRIALS, &med, &p25, &p75);
         printf("    GET: median=%lu us  p25=%lu us  p75=%lu us  "
                "(%lu ns/op)\n",
-               (unsigned long)(med / 1000),
-               (unsigned long)(p25 / 1000),
-               (unsigned long)(p75 / 1000),
+               (unsigned long)(med / 1000), (unsigned long)(p25 / 1000), (unsigned long)(p75 / 1000),
                (unsigned long)(med / HASH_NUM_OPS));
         print_coherency_stats("    ");
     }
@@ -1417,17 +1417,13 @@ hash_copy:
         compute_stats(put_times, NUM_TRIALS, &med, &p25, &p75);
         printf("    PUT: median=%lu us  p25=%lu us  p75=%lu us  "
                "(%lu ns/op)\n",
-               (unsigned long)(med / 1000),
-               (unsigned long)(p25 / 1000),
-               (unsigned long)(p75 / 1000),
+               (unsigned long)(med / 1000), (unsigned long)(p25 / 1000), (unsigned long)(p75 / 1000),
                (unsigned long)(med / HASH_NUM_OPS));
 
         compute_stats(get_times, NUM_TRIALS, &med, &p25, &p75);
         printf("    GET: median=%lu us  p25=%lu us  p75=%lu us  "
                "(%lu ns/op)\n",
-               (unsigned long)(med / 1000),
-               (unsigned long)(p25 / 1000),
-               (unsigned long)(p75 / 1000),
+               (unsigned long)(med / 1000), (unsigned long)(p25 / 1000), (unsigned long)(p75 / 1000),
                (unsigned long)(med / HASH_NUM_OPS));
         print_coherency_stats("    ");
     }
@@ -1441,13 +1437,13 @@ hash_done:
 /*   Main                                                             */
 /* ================================================================== */
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     int N = DEFAULT_NUM_NODES;
 
     if (argc > 1) {
         int n = atoi(argv[1]);
-        if (n > 0) N = n;
+        if (n > 0)
+            N = n;
     }
 
     printf("================================================================\n");
@@ -1471,7 +1467,8 @@ int main(int argc, char **argv)
         int found = 0;
         for (int di = 0; di < dev_count && !found; di++) {
             err = cuDeviceGet(&dev, di);
-            if (err != CUDA_SUCCESS) continue;
+            if (err != CUDA_SUCCESS)
+                continue;
             CUcontext try_ctx;
             err = cuCtxCreate_v2(&try_ctx, 0, dev);
             if (err == CUDA_SUCCESS) {
@@ -1496,8 +1493,7 @@ int main(int argc, char **argv)
     printf("  BAR4 base: %p\n", (void *)g_bar4_base);
     printf("  sizeof(GraphNode) = %zu (expect 64)\n", sizeof(GraphNode));
     if (sizeof(GraphNode) != 64) {
-        fprintf(stderr, "WARNING: GraphNode is %zu bytes, expected 64\n",
-                sizeof(GraphNode));
+        fprintf(stderr, "WARNING: GraphNode is %zu bytes, expected 64\n", sizeof(GraphNode));
     }
 
     /* ---- Run experiments ---- */
@@ -1507,14 +1503,20 @@ int main(int argc, char **argv)
     if (exps_env && *exps_env) {
         want_exp1 = want_exp2 = want_exp3 = 0;
         for (const char *p = exps_env; *p; p++) {
-            if (*p == '1') want_exp1 = 1;
-            else if (*p == '2') want_exp2 = 1;
-            else if (*p == '3') want_exp3 = 1;
+            if (*p == '1')
+                want_exp1 = 1;
+            else if (*p == '2')
+                want_exp2 = 1;
+            else if (*p == '3')
+                want_exp3 = 1;
         }
     }
-    if (want_exp1) experiment1_bfs(N);
-    if (want_exp2) experiment2_btree();
-    if (want_exp3) experiment3_hashtable();
+    if (want_exp1)
+        experiment1_bfs(N);
+    if (want_exp2)
+        experiment2_btree();
+    if (want_exp3)
+        experiment3_hashtable();
 
     printf("\n================================================================\n");
     printf("  All experiments complete.\n");

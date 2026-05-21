@@ -8,10 +8,10 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <time.h>
 
 #include "cxl_gpu_cmd.h"
@@ -19,7 +19,7 @@
 /* CUDA types and functions (from libcuda.so) */
 typedef int CUresult;
 typedef int CUdevice;
-typedef void* CUcontext;
+typedef void *CUcontext;
 typedef uint64_t CUdeviceptr;
 
 #define CUDA_SUCCESS 0
@@ -44,52 +44,49 @@ typedef struct {
 
 extern int cxl_p2p_discover_peers(int *num_peers);
 extern int cxl_p2p_get_peer_info(uint32_t peer_id, CXLPeerInfo *info);
-extern int cxl_p2p_gpu_to_mem(uint32_t t3_peer_id, uint64_t gpu_offset,
-                              uint64_t mem_offset, uint64_t size);
-extern int cxl_p2p_mem_to_gpu(uint32_t t3_peer_id, uint64_t mem_offset,
-                              uint64_t gpu_offset, uint64_t size);
-extern int cxl_p2p_mem_to_mem(uint32_t src_peer_id, uint32_t dst_peer_id,
-                              uint64_t src_offset, uint64_t dst_offset, uint64_t size);
+extern int cxl_p2p_gpu_to_mem(uint32_t t3_peer_id, uint64_t gpu_offset, uint64_t mem_offset, uint64_t size);
+extern int cxl_p2p_mem_to_gpu(uint32_t t3_peer_id, uint64_t mem_offset, uint64_t gpu_offset, uint64_t size);
+extern int cxl_p2p_mem_to_mem(uint32_t src_peer_id, uint32_t dst_peer_id, uint64_t src_offset, uint64_t dst_offset,
+                              uint64_t size);
 extern int cxl_p2p_sync(void);
-extern int cxl_p2p_get_status(int *num_peers, uint64_t *transfers_completed,
-                              uint64_t *bytes_transferred);
+extern int cxl_p2p_get_status(int *num_peers, uint64_t *transfers_completed, uint64_t *bytes_transferred);
 
 /* Test configuration */
-#define TEST_SIZE_SMALL     (64 * 1024)      /* 64KB */
-#define TEST_SIZE_MEDIUM    (1024 * 1024)    /* 1MB */
-#define TEST_SIZE_LARGE     (16 * 1024 * 1024) /* 16MB */
+#define TEST_SIZE_SMALL (64 * 1024) /* 64KB */
+#define TEST_SIZE_MEDIUM (1024 * 1024) /* 1MB */
+#define TEST_SIZE_LARGE (16 * 1024 * 1024) /* 16MB */
 
 static CUcontext g_ctx = NULL;
 static int g_num_peers = 0;
 static uint32_t g_type3_peer_id = 0;
 
 /* Test helpers */
-#define CHECK_CUDA(call) do { \
-    CUresult _result = (call); \
-    if (_result != CUDA_SUCCESS) { \
-        printf("CUDA error %d at %s:%d\n", _result, __FILE__, __LINE__); \
-        return -1; \
-    } \
-} while(0)
+#define CHECK_CUDA(call)                                                                                               \
+    do {                                                                                                               \
+        CUresult _result = (call);                                                                                     \
+        if (_result != CUDA_SUCCESS) {                                                                                 \
+            printf("CUDA error %d at %s:%d\n", _result, __FILE__, __LINE__);                                           \
+            return -1;                                                                                                 \
+        }                                                                                                              \
+    } while (0)
 
-#define CHECK_P2P(call) do { \
-    int _result = (call); \
-    if (_result != CUDA_SUCCESS) { \
-        printf("P2P error %d at %s:%d\n", _result, __FILE__, __LINE__); \
-        return -1; \
-    } \
-} while(0)
+#define CHECK_P2P(call)                                                                                                \
+    do {                                                                                                               \
+        int _result = (call);                                                                                          \
+        if (_result != CUDA_SUCCESS) {                                                                                 \
+            printf("P2P error %d at %s:%d\n", _result, __FILE__, __LINE__);                                            \
+            return -1;                                                                                                 \
+        }                                                                                                              \
+    } while (0)
 
-static double get_time_ms(void)
-{
+static double get_time_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec * 1000.0 + ts.tv_nsec / 1000000.0;
 }
 
 /* Initialize CUDA and P2P */
-static int init_cuda_and_p2p(void)
-{
+static int init_cuda_and_p2p(void) {
     CUdevice dev;
 
     printf("Initializing CUDA and P2P...\n");
@@ -113,10 +110,9 @@ static int init_cuda_and_p2p(void)
     for (uint32_t i = 1; i <= (uint32_t)g_num_peers; i++) {
         CXLPeerInfo info;
         if (cxl_p2p_get_peer_info(i, &info) == CUDA_SUCCESS) {
-            printf("  Peer %u: type=%u (%s), size=%lu MB, coherent=%d\n",
-                   i, info.peer_type,
-                   info.peer_type == CXL_P2P_PEER_TYPE2 ? "GPU" : "Memory",
-                   info.mem_size / (1024*1024), info.coherent);
+            printf("  Peer %u: type=%u (%s), size=%lu MB, coherent=%d\n", i, info.peer_type,
+                   info.peer_type == CXL_P2P_PEER_TYPE2 ? "GPU" : "Memory", info.mem_size / (1024 * 1024),
+                   info.coherent);
 
             if (info.peer_type == CXL_P2P_PEER_TYPE3 && g_type3_peer_id == 0) {
                 g_type3_peer_id = i;
@@ -133,8 +129,7 @@ static int init_cuda_and_p2p(void)
     return 0;
 }
 
-static void cleanup_cuda(void)
-{
+static void cleanup_cuda(void) {
     if (g_ctx) {
         cuCtxDestroy_v2(g_ctx);
         g_ctx = NULL;
@@ -142,8 +137,7 @@ static void cleanup_cuda(void)
 }
 
 /* Test 1: Basic P2P Discovery */
-static int test_p2p_discovery(void)
-{
+static int test_p2p_discovery(void) {
     printf("\n=== Test 1: P2P Discovery ===\n");
 
     int num_peers;
@@ -154,10 +148,8 @@ static int test_p2p_discovery(void)
     for (uint32_t i = 1; i <= (uint32_t)num_peers; i++) {
         CXLPeerInfo info;
         if (cxl_p2p_get_peer_info(i, &info) == CUDA_SUCCESS) {
-            printf("  Peer %u: type=%s, mem=%lu MB, coherent=%s\n",
-                   i,
-                   info.peer_type == CXL_P2P_PEER_TYPE2 ? "Type2(GPU)" : "Type3(Mem)",
-                   info.mem_size / (1024*1024),
+            printf("  Peer %u: type=%s, mem=%lu MB, coherent=%s\n", i,
+                   info.peer_type == CXL_P2P_PEER_TYPE2 ? "Type2(GPU)" : "Type3(Mem)", info.mem_size / (1024 * 1024),
                    info.coherent ? "yes" : "no");
         }
     }
@@ -167,8 +159,7 @@ static int test_p2p_discovery(void)
 }
 
 /* Test 2: GPU to Type3 Memory Transfer */
-static int test_gpu_to_mem(void)
-{
+static int test_gpu_to_mem(void) {
     printf("\n=== Test 2: GPU to Type3 Memory Transfer ===\n");
 
     if (g_type3_peer_id == 0) {
@@ -203,8 +194,8 @@ static int test_gpu_to_mem(void)
     CHECK_P2P(cxl_p2p_sync());
     double elapsed = get_time_ms() - start;
 
-    printf("  Transferred %zu bytes GPU->Type3 in %.2f ms (%.2f MB/s)\n",
-           size, elapsed, (size / (1024.0 * 1024.0)) / (elapsed / 1000.0));
+    printf("  Transferred %zu bytes GPU->Type3 in %.2f ms (%.2f MB/s)\n", size, elapsed,
+           (size / (1024.0 * 1024.0)) / (elapsed / 1000.0));
 
     CHECK_CUDA(cuMemFree_v2(gpu_buf));
     free(host_data);
@@ -214,8 +205,7 @@ static int test_gpu_to_mem(void)
 }
 
 /* Test 3: Type3 Memory to GPU Transfer */
-static int test_mem_to_gpu(void)
-{
+static int test_mem_to_gpu(void) {
     printf("\n=== Test 3: Type3 Memory to GPU Transfer ===\n");
 
     if (g_type3_peer_id == 0) {
@@ -241,8 +231,8 @@ static int test_mem_to_gpu(void)
     CHECK_P2P(cxl_p2p_sync());
     double elapsed = get_time_ms() - start;
 
-    printf("  Transferred %zu bytes Type3->GPU in %.2f ms (%.2f MB/s)\n",
-           size, elapsed, (size / (1024.0 * 1024.0)) / (elapsed / 1000.0));
+    printf("  Transferred %zu bytes Type3->GPU in %.2f ms (%.2f MB/s)\n", size, elapsed,
+           (size / (1024.0 * 1024.0)) / (elapsed / 1000.0));
 
     /* Verify by copying back to host */
     CHECK_CUDA(cuMemcpyDtoH_v2(host_verify, gpu_buf, size));
@@ -250,8 +240,8 @@ static int test_mem_to_gpu(void)
     int errors = 0;
     for (size_t i = 0; i < size && errors < 10; i++) {
         if (host_verify[i] != (uint8_t)(i & 0xFF)) {
-            printf("  Data mismatch at offset %zu: expected 0x%02x, got 0x%02x\n",
-                   i, (uint8_t)(i & 0xFF), host_verify[i]);
+            printf("  Data mismatch at offset %zu: expected 0x%02x, got 0x%02x\n", i, (uint8_t)(i & 0xFF),
+                   host_verify[i]);
             errors++;
         }
     }
@@ -269,8 +259,7 @@ static int test_mem_to_gpu(void)
 }
 
 /* Test 4: Round-trip P2P Transfer */
-static int test_roundtrip(void)
-{
+static int test_roundtrip(void) {
     printf("\n=== Test 4: Round-trip P2P Transfer ===\n");
 
     if (g_type3_peer_id == 0) {
@@ -318,8 +307,7 @@ static int test_roundtrip(void)
     for (size_t i = 0; i < size; i++) {
         if (host_verify[i] != host_original[i]) {
             if (errors < 10) {
-                printf("  Mismatch at %zu: expected 0x%02x, got 0x%02x\n",
-                       i, host_original[i], host_verify[i]);
+                printf("  Mismatch at %zu: expected 0x%02x, got 0x%02x\n", i, host_original[i], host_verify[i]);
             }
             errors++;
         }
@@ -339,8 +327,7 @@ static int test_roundtrip(void)
 }
 
 /* Test 5: Large Transfer Performance */
-static int test_large_transfer(void)
-{
+static int test_large_transfer(void) {
     printf("\n=== Test 5: Large Transfer Performance ===\n");
 
     if (g_type3_peer_id == 0) {
@@ -361,8 +348,7 @@ static int test_large_transfer(void)
     double elapsed_g2m = get_time_ms() - start;
 
     double bw_g2m = (size / (1024.0 * 1024.0)) / (elapsed_g2m / 1000.0);
-    printf("  GPU->Type3: %zu bytes in %.2f ms = %.2f MB/s\n",
-           size, elapsed_g2m, bw_g2m);
+    printf("  GPU->Type3: %zu bytes in %.2f ms = %.2f MB/s\n", size, elapsed_g2m, bw_g2m);
 
     /* Measure Type3 -> GPU bandwidth */
     start = get_time_ms();
@@ -371,8 +357,7 @@ static int test_large_transfer(void)
     double elapsed_m2g = get_time_ms() - start;
 
     double bw_m2g = (size / (1024.0 * 1024.0)) / (elapsed_m2g / 1000.0);
-    printf("  Type3->GPU: %zu bytes in %.2f ms = %.2f MB/s\n",
-           size, elapsed_m2g, bw_m2g);
+    printf("  Type3->GPU: %zu bytes in %.2f ms = %.2f MB/s\n", size, elapsed_m2g, bw_m2g);
 
     CHECK_CUDA(cuMemFree_v2(gpu_buf));
 
@@ -381,8 +366,7 @@ static int test_large_transfer(void)
 }
 
 /* Test 6: P2P Status and Statistics */
-static int test_p2p_status(void)
-{
+static int test_p2p_status(void) {
     printf("\n=== Test 6: P2P Status and Statistics ===\n");
 
     int num_peers;
@@ -393,8 +377,7 @@ static int test_p2p_status(void)
 
     printf("  Number of peers: %d\n", num_peers);
     printf("  Transfers completed: %lu\n", (unsigned long)transfers_completed);
-    printf("  Bytes transferred: %lu (%.2f MB)\n",
-           (unsigned long)bytes_transferred,
+    printf("  Bytes transferred: %lu (%.2f MB)\n", (unsigned long)bytes_transferred,
            bytes_transferred / (1024.0 * 1024.0));
 
     printf("  PASSED\n");
@@ -408,18 +391,17 @@ typedef struct {
 } TestEntry;
 
 static TestEntry tests[] = {
-    { "P2P Discovery", test_p2p_discovery },
-    { "GPU to Type3 Memory", test_gpu_to_mem },
-    { "Type3 Memory to GPU", test_mem_to_gpu },
-    { "Round-trip Transfer", test_roundtrip },
-    { "Large Transfer Performance", test_large_transfer },
-    { "P2P Status", test_p2p_status },
+    {"P2P Discovery", test_p2p_discovery},
+    {"GPU to Type3 Memory", test_gpu_to_mem},
+    {"Type3 Memory to GPU", test_mem_to_gpu},
+    {"Round-trip Transfer", test_roundtrip},
+    {"Large Transfer Performance", test_large_transfer},
+    {"P2P Status", test_p2p_status},
 };
 
 #define NUM_TESTS (sizeof(tests) / sizeof(tests[0]))
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     int test_num = -1;
     int passed = 0, failed = 0, skipped = 0;
 
@@ -455,8 +437,7 @@ int main(int argc, char *argv[])
 
     /* Print summary */
     printf("\n======================\n");
-    printf("Test Summary: %d passed, %d failed, %d skipped\n",
-           passed, failed, skipped);
+    printf("Test Summary: %d passed, %d failed, %d skipped\n", passed, failed, skipped);
 
     /* Print final P2P statistics */
     printf("\nFinal P2P Statistics:\n");

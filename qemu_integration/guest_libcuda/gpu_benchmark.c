@@ -3,10 +3,10 @@
  * Tests PTX loading and kernel execution through hetGPU backend
  */
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <time.h>
 
 /* CUDA types */
@@ -31,113 +31,107 @@ extern CUresult cuMemcpyHtoD(CUdeviceptr dstDevice, const void *srcHost, size_t 
 extern CUresult cuMemcpyDtoH(void *dstHost, CUdeviceptr srcDevice, size_t byteCount);
 extern CUresult cuModuleLoadData(CUmodule *module, const void *image);
 extern CUresult cuModuleGetFunction(CUfunction *hfunc, CUmodule hmod, const char *name);
-extern CUresult cuLaunchKernel(CUfunction f,
-                               unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
+extern CUresult cuLaunchKernel(CUfunction f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
                                unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
-                               unsigned int sharedMemBytes, void *hStream,
-                               void **kernelParams, void **extra);
+                               unsigned int sharedMemBytes, void *hStream, void **kernelParams, void **extra);
 
 /* Simple vector add PTX kernel - PTX 8.0 required for sm_90 (H100) */
-static const char *vector_add_ptx =
-    ".version 8.0\n"
-    ".target sm_90\n"
-    ".address_size 64\n"
-    "\n"
-    ".visible .entry vector_add(\n"
-    "    .param .u64 a,\n"
-    "    .param .u64 b,\n"
-    "    .param .u64 c,\n"
-    "    .param .u32 n\n"
-    ")\n"
-    "{\n"
-    "    .reg .pred %p<2>;\n"
-    "    .reg .f32 %f<4>;\n"
-    "    .reg .b32 %r<5>;\n"
-    "    .reg .b64 %rd<11>;\n"
-    "\n"
-    "    ld.param.u64 %rd1, [a];\n"
-    "    ld.param.u64 %rd2, [b];\n"
-    "    ld.param.u64 %rd3, [c];\n"
-    "    ld.param.u32 %r1, [n];\n"
-    "    mov.u32 %r2, %ctaid.x;\n"
-    "    mov.u32 %r3, %ntid.x;\n"
-    "    mov.u32 %r4, %tid.x;\n"
-    "    mad.lo.s32 %r2, %r3, %r2, %r4;\n"
-    "    setp.ge.s32 %p1, %r2, %r1;\n"
-    "    @%p1 bra $L__BB0_2;\n"
-    "\n"
-    "    cvta.to.global.u64 %rd4, %rd1;\n"
-    "    mul.wide.s32 %rd5, %r2, 4;\n"
-    "    add.s64 %rd6, %rd4, %rd5;\n"
-    "    cvta.to.global.u64 %rd7, %rd2;\n"
-    "    add.s64 %rd8, %rd7, %rd5;\n"
-    "    ld.global.f32 %f1, [%rd6];\n"
-    "    ld.global.f32 %f2, [%rd8];\n"
-    "    add.f32 %f3, %f1, %f2;\n"
-    "    cvta.to.global.u64 %rd9, %rd3;\n"
-    "    add.s64 %rd10, %rd9, %rd5;\n"
-    "    st.global.f32 [%rd10], %f3;\n"
-    "\n"
-    "$L__BB0_2:\n"
-    "    ret;\n"
-    "}\n";
+static const char *vector_add_ptx = ".version 8.0\n"
+                                    ".target sm_90\n"
+                                    ".address_size 64\n"
+                                    "\n"
+                                    ".visible .entry vector_add(\n"
+                                    "    .param .u64 a,\n"
+                                    "    .param .u64 b,\n"
+                                    "    .param .u64 c,\n"
+                                    "    .param .u32 n\n"
+                                    ")\n"
+                                    "{\n"
+                                    "    .reg .pred %p<2>;\n"
+                                    "    .reg .f32 %f<4>;\n"
+                                    "    .reg .b32 %r<5>;\n"
+                                    "    .reg .b64 %rd<11>;\n"
+                                    "\n"
+                                    "    ld.param.u64 %rd1, [a];\n"
+                                    "    ld.param.u64 %rd2, [b];\n"
+                                    "    ld.param.u64 %rd3, [c];\n"
+                                    "    ld.param.u32 %r1, [n];\n"
+                                    "    mov.u32 %r2, %ctaid.x;\n"
+                                    "    mov.u32 %r3, %ntid.x;\n"
+                                    "    mov.u32 %r4, %tid.x;\n"
+                                    "    mad.lo.s32 %r2, %r3, %r2, %r4;\n"
+                                    "    setp.ge.s32 %p1, %r2, %r1;\n"
+                                    "    @%p1 bra $L__BB0_2;\n"
+                                    "\n"
+                                    "    cvta.to.global.u64 %rd4, %rd1;\n"
+                                    "    mul.wide.s32 %rd5, %r2, 4;\n"
+                                    "    add.s64 %rd6, %rd4, %rd5;\n"
+                                    "    cvta.to.global.u64 %rd7, %rd2;\n"
+                                    "    add.s64 %rd8, %rd7, %rd5;\n"
+                                    "    ld.global.f32 %f1, [%rd6];\n"
+                                    "    ld.global.f32 %f2, [%rd8];\n"
+                                    "    add.f32 %f3, %f1, %f2;\n"
+                                    "    cvta.to.global.u64 %rd9, %rd3;\n"
+                                    "    add.s64 %rd10, %rd9, %rd5;\n"
+                                    "    st.global.f32 [%rd10], %f3;\n"
+                                    "\n"
+                                    "$L__BB0_2:\n"
+                                    "    ret;\n"
+                                    "}\n";
 
 /* Matrix multiply PTX kernel (simple) - PTX 8.0 required for sm_90 (H100) */
-static const char *matmul_ptx =
-    ".version 8.0\n"
-    ".target sm_90\n"
-    ".address_size 64\n"
-    "\n"
-    ".visible .entry matmul(\n"
-    "    .param .u64 A,\n"
-    "    .param .u64 B,\n"
-    "    .param .u64 C,\n"
-    "    .param .u32 N\n"
-    ")\n"
-    "{\n"
-    "    .reg .pred %p<2>;\n"
-    "    .reg .f32 %f<4>;\n"
-    "    .reg .b32 %r<10>;\n"
-    "    .reg .b64 %rd<20>;\n"
-    "\n"
-    "    ld.param.u64 %rd1, [A];\n"
-    "    ld.param.u64 %rd2, [B];\n"
-    "    ld.param.u64 %rd3, [C];\n"
-    "    ld.param.u32 %r1, [N];\n"
-    "    mov.u32 %r2, %ctaid.x;\n"
-    "    mov.u32 %r3, %ctaid.y;\n"
-    "    mov.u32 %r4, %ntid.x;\n"
-    "    mov.u32 %r5, %tid.x;\n"
-    "    mov.u32 %r6, %tid.y;\n"
-    "    mad.lo.s32 %r7, %r4, %r2, %r5;\n"  /* col */
-    "    mad.lo.s32 %r8, %r4, %r3, %r6;\n"  /* row */
-    "    setp.ge.s32 %p1, %r7, %r1;\n"
-    "    @%p1 bra $L__END;\n"
-    "    setp.ge.s32 %p1, %r8, %r1;\n"
-    "    @%p1 bra $L__END;\n"
-    "\n"
-    "    /* C[row*N+col] = A[row*N+0]*B[0*N+col] (simplified) */\n"
-    "    cvta.to.global.u64 %rd4, %rd3;\n"
-    "    mul.lo.s32 %r9, %r8, %r1;\n"
-    "    add.s32 %r9, %r9, %r7;\n"
-    "    mul.wide.s32 %rd5, %r9, 4;\n"
-    "    add.s64 %rd6, %rd4, %rd5;\n"
-    "    mov.f32 %f1, 1.0;\n"  /* Placeholder result */
-    "    st.global.f32 [%rd6], %f1;\n"
-    "\n"
-    "$L__END:\n"
-    "    ret;\n"
-    "}\n";
+static const char *matmul_ptx = ".version 8.0\n"
+                                ".target sm_90\n"
+                                ".address_size 64\n"
+                                "\n"
+                                ".visible .entry matmul(\n"
+                                "    .param .u64 A,\n"
+                                "    .param .u64 B,\n"
+                                "    .param .u64 C,\n"
+                                "    .param .u32 N\n"
+                                ")\n"
+                                "{\n"
+                                "    .reg .pred %p<2>;\n"
+                                "    .reg .f32 %f<4>;\n"
+                                "    .reg .b32 %r<10>;\n"
+                                "    .reg .b64 %rd<20>;\n"
+                                "\n"
+                                "    ld.param.u64 %rd1, [A];\n"
+                                "    ld.param.u64 %rd2, [B];\n"
+                                "    ld.param.u64 %rd3, [C];\n"
+                                "    ld.param.u32 %r1, [N];\n"
+                                "    mov.u32 %r2, %ctaid.x;\n"
+                                "    mov.u32 %r3, %ctaid.y;\n"
+                                "    mov.u32 %r4, %ntid.x;\n"
+                                "    mov.u32 %r5, %tid.x;\n"
+                                "    mov.u32 %r6, %tid.y;\n"
+                                "    mad.lo.s32 %r7, %r4, %r2, %r5;\n" /* col */
+                                "    mad.lo.s32 %r8, %r4, %r3, %r6;\n" /* row */
+                                "    setp.ge.s32 %p1, %r7, %r1;\n"
+                                "    @%p1 bra $L__END;\n"
+                                "    setp.ge.s32 %p1, %r8, %r1;\n"
+                                "    @%p1 bra $L__END;\n"
+                                "\n"
+                                "    /* C[row*N+col] = A[row*N+0]*B[0*N+col] (simplified) */\n"
+                                "    cvta.to.global.u64 %rd4, %rd3;\n"
+                                "    mul.lo.s32 %r9, %r8, %r1;\n"
+                                "    add.s32 %r9, %r9, %r7;\n"
+                                "    mul.wide.s32 %rd5, %r9, 4;\n"
+                                "    add.s64 %rd6, %rd4, %rd5;\n"
+                                "    mov.f32 %f1, 1.0;\n" /* Placeholder result */
+                                "    st.global.f32 [%rd6], %f1;\n"
+                                "\n"
+                                "$L__END:\n"
+                                "    ret;\n"
+                                "}\n";
 
-static double get_time_ms(void)
-{
+static double get_time_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec * 1000.0 + ts.tv_nsec / 1000000.0;
 }
 
-static int check_cuda(CUresult err, const char *call, int line)
-{
+static int check_cuda(CUresult err, const char *call, int line) {
     if (err != CUDA_SUCCESS) {
         fprintf(stderr, "CUDA Error %d at line %d: %s\n", err, line, call);
         return -1;
@@ -145,10 +139,11 @@ static int check_cuda(CUresult err, const char *call, int line)
     return 0;
 }
 
-#define CHECK_CUDA(call) if (check_cuda((call), #call, __LINE__)) return -1
+#define CHECK_CUDA(call)                                                                                               \
+    if (check_cuda((call), #call, __LINE__))                                                                           \
+    return -1
 
-int benchmark_vector_add(int n, int iterations)
-{
+int benchmark_vector_add(int n, int iterations) {
     CUdevice device;
     CUcontext ctx;
     CUmodule module;
@@ -204,7 +199,7 @@ int benchmark_vector_add(int n, int iterations)
     int blocks = (n + threads - 1) / threads;
 
     for (i = 0; i < iterations; i++) {
-        void *args[] = { &d_a, &d_b, &d_c, &n, NULL };
+        void *args[] = {&d_a, &d_b, &d_c, &n, NULL};
 
         start = get_time_ms();
         CHECK_CUDA(cuLaunchKernel(func, blocks, 1, 1, threads, 1, 1, 0, NULL, args, NULL));
@@ -230,7 +225,7 @@ int benchmark_vector_add(int n, int iterations)
 
     printf("\nResults:\n");
     printf("  Average kernel time: %.3f ms\n", total_time / iterations);
-    printf("  Throughput: %.2f GB/s\n", (3.0 * size / (1024*1024*1024)) / (total_time / iterations / 1000));
+    printf("  Throughput: %.2f GB/s\n", (3.0 * size / (1024 * 1024 * 1024)) / (total_time / iterations / 1000));
     printf("  Verification: %s (%d errors)\n", errors == 0 ? "PASSED" : "FAILED", errors);
 
     /* Cleanup */
@@ -245,8 +240,7 @@ int benchmark_vector_add(int n, int iterations)
     return errors == 0 ? 0 : -1;
 }
 
-int benchmark_memory_bandwidth(size_t size, int iterations)
-{
+int benchmark_memory_bandwidth(size_t size, int iterations) {
     CUdevice device;
     CUcontext ctx;
     CUdeviceptr d_buf;
@@ -294,11 +288,9 @@ int benchmark_memory_bandwidth(size_t size, int iterations)
     }
 
     printf("\nResults:\n");
-    printf("  HtoD: %.2f GB/s (%.3f ms avg)\n",
-           (size / (1024.0*1024*1024)) / (htod_time / iterations / 1000),
+    printf("  HtoD: %.2f GB/s (%.3f ms avg)\n", (size / (1024.0 * 1024 * 1024)) / (htod_time / iterations / 1000),
            htod_time / iterations);
-    printf("  DtoH: %.2f GB/s (%.3f ms avg)\n",
-           (size / (1024.0*1024*1024)) / (dtoh_time / iterations / 1000),
+    printf("  DtoH: %.2f GB/s (%.3f ms avg)\n", (size / (1024.0 * 1024 * 1024)) / (dtoh_time / iterations / 1000),
            dtoh_time / iterations);
 
     /* Cleanup */
@@ -309,18 +301,17 @@ int benchmark_memory_bandwidth(size_t size, int iterations)
     return 0;
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     int ret = 0;
 
     printf("CXL Type 2 GPU Benchmark Suite\n");
     printf("==============================\n");
 
     /* Memory bandwidth test */
-    ret |= benchmark_memory_bandwidth(64 * 1024 * 1024, 10);  /* 64MB, 10 iterations */
+    ret |= benchmark_memory_bandwidth(64 * 1024 * 1024, 10); /* 64MB, 10 iterations */
 
     /* Vector add test */
-    ret |= benchmark_vector_add(1024 * 1024, 10);  /* 1M elements, 10 iterations */
+    ret |= benchmark_vector_add(1024 * 1024, 10); /* 1M elements, 10 iterations */
 
     printf("\n==============================\n");
     printf("Benchmark %s\n", ret == 0 ? "PASSED" : "FAILED");

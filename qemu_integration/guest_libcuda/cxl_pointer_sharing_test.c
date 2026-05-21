@@ -5,10 +5,10 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <time.h>
 
 #include "cxl_gpu_cmd.h"
@@ -40,22 +40,29 @@ static int tests_passed = 0;
 static int tests_failed = 0;
 
 #define TEST(name) printf("  [TEST] %s... ", name)
-#define PASS() do { printf("PASS\n"); tests_passed++; } while(0)
-#define FAIL(msg) do { printf("FAIL: %s\n", msg); tests_failed++; } while(0)
+#define PASS()                                                                                                         \
+    do {                                                                                                               \
+        printf("PASS\n");                                                                                              \
+        tests_passed++;                                                                                                \
+    } while (0)
+#define FAIL(msg)                                                                                                      \
+    do {                                                                                                               \
+        printf("FAIL: %s\n", msg);                                                                                     \
+        tests_failed++;                                                                                                \
+    } while (0)
 
 /*
  * Offset-based linked list node. Both CPU and GPU use the same offset
  * within BAR4 to reference nodes, enabling true pointer sharing.
  */
 typedef struct CohListNode {
-    uint64_t next_offset;   /* 0 = end of list, otherwise BAR4 offset */
+    uint64_t next_offset; /* 0 = end of list, otherwise BAR4 offset */
     uint64_t value;
 } CohListNode;
 
 #define LIST_END 0
 
-static void test_linked_list_build_traverse(void)
-{
+static void test_linked_list_build_traverse(void) {
     TEST("Build and traverse linked list in coherent memory");
 
     const int NUM_NODES = 100;
@@ -75,8 +82,7 @@ static void test_linked_list_build_traverse(void)
     for (int i = 0; i < NUM_NODES; i++) {
         nodes[i].value = (uint64_t)(i * 42 + 7);
         if (i < NUM_NODES - 1) {
-            nodes[i].next_offset = base_offset +
-                                   (uint64_t)(i + 1) * sizeof(CohListNode);
+            nodes[i].next_offset = base_offset + (uint64_t)(i + 1) * sizeof(CohListNode);
         } else {
             nodes[i].next_offset = LIST_END;
         }
@@ -110,16 +116,14 @@ static void test_linked_list_build_traverse(void)
 
     if (count != NUM_NODES || errors > 0) {
         char msg[128];
-        snprintf(msg, sizeof(msg), "traversed %d/%d nodes, %d errors",
-                 count, NUM_NODES, errors);
+        snprintf(msg, sizeof(msg), "traversed %d/%d nodes, %d errors", count, NUM_NODES, errors);
         FAIL(msg);
     } else {
         PASS();
     }
 }
 
-static void test_linked_list_reverse(void)
-{
+static void test_linked_list_reverse(void) {
     TEST("Reverse linked list in-place using shared pointers");
 
     const int NUM_NODES = 50;
@@ -139,8 +143,7 @@ static void test_linked_list_reverse(void)
     for (int i = 0; i < NUM_NODES; i++) {
         nodes[i].value = (uint64_t)i;
         if (i < NUM_NODES - 1) {
-            nodes[i].next_offset = base_offset +
-                                   (uint64_t)(i + 1) * sizeof(CohListNode);
+            nodes[i].next_offset = base_offset + (uint64_t)(i + 1) * sizeof(CohListNode);
         } else {
             nodes[i].next_offset = LIST_END;
         }
@@ -199,8 +202,7 @@ typedef struct CohGraphNode {
     uint32_t visited;
 } CohGraphNode;
 
-static void test_graph_traversal(void)
-{
+static void test_graph_traversal(void) {
     TEST("Graph traversal with shared pointers (BFS)");
 
     const int NUM_NODES = 16;
@@ -227,8 +229,7 @@ static void test_graph_traversal(void)
     /* Ring: 0->1->2->...->15->0 */
     for (int i = 0; i < NUM_NODES; i++) {
         int next = (i + 1) % NUM_NODES;
-        graph[i].neighbor_offsets[graph[i].num_neighbors++] =
-            base_offset + (uint64_t)next * sizeof(CohGraphNode);
+        graph[i].neighbor_offsets[graph[i].num_neighbors++] = base_offset + (uint64_t)next * sizeof(CohGraphNode);
     }
 
     cxlCoherentFence();
@@ -247,8 +248,7 @@ static void test_graph_traversal(void)
         visit_count++;
 
         for (uint32_t j = 0; j < node->num_neighbors; j++) {
-            CohGraphNode *neighbor =
-                (CohGraphNode *)cxlDeviceToHost(node->neighbor_offsets[j]);
+            CohGraphNode *neighbor = (CohGraphNode *)cxlDeviceToHost(node->neighbor_offsets[j]);
             if (neighbor && !neighbor->visited) {
                 neighbor->visited = 1;
                 if (tail < 32) {
@@ -269,8 +269,7 @@ static void test_graph_traversal(void)
     }
 }
 
-static void test_copy_vs_coherent_comparison(void)
-{
+static void test_copy_vs_coherent_comparison(void) {
     TEST("Copy-based vs coherent comparison (timing)");
 
     const int NUM_NODES = 1000;
@@ -301,13 +300,13 @@ static void test_copy_vs_coherent_comparison(void)
         volatile uint64_t val = host_list[idx].value;
         (void)val;
         uint64_t next = host_list[idx].next_offset;
-        if (next == 0) break;
+        if (next == 0)
+            break;
         idx = next;
         count++;
     }
     clock_gettime(CLOCK_MONOTONIC, &t2);
-    uint64_t copy_ns = (t2.tv_sec - t1.tv_sec) * 1000000000ULL +
-                       (t2.tv_nsec - t1.tv_nsec);
+    uint64_t copy_ns = (t2.tv_sec - t1.tv_sec) * 1000000000ULL + (t2.tv_nsec - t1.tv_nsec);
 
     /* Method 2: Coherent memory */
     void *coh_pool = NULL;
@@ -324,8 +323,7 @@ static void test_copy_vs_coherent_comparison(void)
     for (int i = 0; i < NUM_NODES; i++) {
         coh_nodes[i].value = (uint64_t)(i * 13 + 5);
         if (i < NUM_NODES - 1) {
-            coh_nodes[i].next_offset = base +
-                                       (uint64_t)(i + 1) * sizeof(CohListNode);
+            coh_nodes[i].next_offset = base + (uint64_t)(i + 1) * sizeof(CohListNode);
         } else {
             coh_nodes[i].next_offset = LIST_END;
         }
@@ -343,13 +341,12 @@ static void test_copy_vs_coherent_comparison(void)
         count++;
     }
     clock_gettime(CLOCK_MONOTONIC, &t2);
-    uint64_t coh_ns = (t2.tv_sec - t1.tv_sec) * 1000000000ULL +
-                      (t2.tv_nsec - t1.tv_nsec);
+    uint64_t coh_ns = (t2.tv_sec - t1.tv_sec) * 1000000000ULL + (t2.tv_nsec - t1.tv_nsec);
 
-    printf("\n    Copy-based traversal: %lu ns (%lu ns/node)\n",
-           (unsigned long)copy_ns, (unsigned long)(copy_ns / NUM_NODES));
-    printf("    Coherent traversal:   %lu ns (%lu ns/node)\n",
-           (unsigned long)coh_ns, (unsigned long)(coh_ns / NUM_NODES));
+    printf("\n    Copy-based traversal: %lu ns (%lu ns/node)\n", (unsigned long)copy_ns,
+           (unsigned long)(copy_ns / NUM_NODES));
+    printf("    Coherent traversal:   %lu ns (%lu ns/node)\n", (unsigned long)coh_ns,
+           (unsigned long)(coh_ns / NUM_NODES));
 
     free(host_list);
     cxlCoherentFree(coh_pool);
@@ -358,8 +355,7 @@ static void test_copy_vs_coherent_comparison(void)
     PASS();
 }
 
-int main(void)
-{
+int main(void) {
     printf("=== CXL Pointer Sharing Test ===\n\n");
 
     CUresult err = cuInit(0);
@@ -388,8 +384,7 @@ int main(void)
     test_graph_traversal();
     test_copy_vs_coherent_comparison();
 
-    printf("\n=== Results: %d passed, %d failed ===\n",
-           tests_passed, tests_failed);
+    printf("\n=== Results: %d passed, %d failed ===\n", tests_passed, tests_failed);
 
     return tests_failed > 0 ? 1 : 0;
 }

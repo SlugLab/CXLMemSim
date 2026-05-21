@@ -9,10 +9,10 @@
  */
 
 #include "distributed_server.h"
-#include "shared_memory_manager.h"
 #include "coherency_engine.h"
 #include "cxlcontroller.h"
 #include "hdm_decoder.h"
+#include "shared_memory_manager.h"
 #include <algorithm>
 #include <arpa/inet.h>
 #include <chrono>
@@ -28,19 +28,23 @@
 
 /* TCP Client Request/Response structures (matching QEMU's cxl_type3.c) */
 struct __attribute__((packed)) DistServerRequest {
-    uint8_t op_type;      /* 0=READ, 1=WRITE, 2=GET_SHM_INFO, 3=ATOMIC_FAA, 4=ATOMIC_CAS, 5=FENCE */
+    uint8_t op_type;
+    /* 0=READ, 1=WRITE, 2=GET_SHM_INFO, 3=ATOMIC_FAA, 4=ATOMIC_CAS, 5=FENCE */
     uint64_t addr;
     uint64_t size;
     uint64_t timestamp;
-    uint64_t value;       /* Value for FAA (add value) or CAS (desired value) */
-    uint64_t expected;    /* Expected value for CAS operation */
-    uint8_t data[64];     /* Cacheline data */
+    uint64_t value;
+    /* Value for FAA (add value) or CAS (desired value) */
+    uint64_t expected;
+    /* Expected value for CAS operation */
+    uint8_t data[64];
+    /* Cacheline data */
 };
 
 struct __attribute__((packed)) DistServerResponse {
     uint8_t status;
     uint64_t latency_ns;
-    uint64_t old_value;   /* Previous value returned by atomic operations */
+    uint64_t old_value; /* Previous value returned by atomic operations */
     uint8_t data[64];
 };
 
@@ -58,15 +62,11 @@ static constexpr uint8_t DIST_OP_LSA_WRITE = 7;
  * DistributedMessageManager Implementation
  * ============================================================================ */
 
-DistributedMessageManager::DistributedMessageManager(const std::string& shm_name, uint32_t node_id)
-    : shm_name_(shm_name), shm_fd_(-1), shm_header_(nullptr),
-      local_node_id_(node_id), is_coordinator_(false),
-      next_msg_id_(1), running_(false) {
-}
+DistributedMessageManager::DistributedMessageManager(const std::string &shm_name, uint32_t node_id)
+    : shm_name_(shm_name), shm_fd_(-1), shm_header_(nullptr), local_node_id_(node_id), is_coordinator_(false),
+      next_msg_id_(1), running_(false) {}
 
-DistributedMessageManager::~DistributedMessageManager() {
-    cleanup();
-}
+DistributedMessageManager::~DistributedMessageManager() { cleanup(); }
 
 bool DistributedMessageManager::initialize(bool create_new) {
     if (create_new) {
@@ -99,16 +99,16 @@ bool DistributedMessageManager::initialize(bool create_new) {
     }
 
     // Map shared memory
-    void* mapped = mmap(NULL, DIST_SHM_SIZE, PROT_READ | PROT_WRITE,
-                        MAP_SHARED, shm_fd_, 0);
+    void *mapped = mmap(NULL, DIST_SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_, 0);
     if (mapped == MAP_FAILED) {
         SPDLOG_ERROR("Failed to mmap distributed SHM: {}", strerror(errno));
         close(shm_fd_);
-        if (create_new) shm_unlink(shm_name_.c_str());
+        if (create_new)
+            shm_unlink(shm_name_.c_str());
         return false;
     }
 
-    shm_header_ = static_cast<dist_shm_header_t*>(mapped);
+    shm_header_ = static_cast<dist_shm_header_t *>(mapped);
 
     // Initialize header
     memset(shm_header_, 0, DIST_SHM_SIZE);
@@ -133,7 +133,7 @@ bool DistributedMessageManager::initialize(bool create_new) {
 
     is_coordinator_ = true;
     SPDLOG_INFO("Initialized as coordinator node {}", local_node_id_);
-    
+
     return true;
 }
 
@@ -155,11 +155,13 @@ void DistributedMessageManager::cleanup() {
     }
 }
 
-bool DistributedMessageManager::register_node(const DistNodeInfo& info) {
-    if (!shm_header_) return false;
-    if (info.node_id >= DIST_MAX_NODES) return false;
+bool DistributedMessageManager::register_node(const DistNodeInfo &info) {
+    if (!shm_header_)
+        return false;
+    if (info.node_id >= DIST_MAX_NODES)
+        return false;
 
-    dist_node_status_t* status = &shm_header_->nodes[info.node_id];
+    dist_node_status_t *status = &shm_header_->nodes[info.node_id];
 
     status->node_id = info.node_id;
     status->state = NODE_STATE_READY;
@@ -172,17 +174,17 @@ bool DistributedMessageManager::register_node(const DistNodeInfo& info) {
 
     __atomic_fetch_add(&shm_header_->num_nodes, 1, __ATOMIC_SEQ_CST);
 
-    SPDLOG_INFO("Registered node {}: {} (memory: 0x{:x}-0x{:x})",
-                info.node_id, info.hostname, info.memory_base,
+    SPDLOG_INFO("Registered node {}: {} (memory: 0x{:x}-0x{:x})", info.node_id, info.hostname, info.memory_base,
                 info.memory_base + info.memory_size);
 
     return true;
 }
 
 bool DistributedMessageManager::deregister_node(uint32_t node_id) {
-    if (!shm_header_ || node_id >= DIST_MAX_NODES) return false;
+    if (!shm_header_ || node_id >= DIST_MAX_NODES)
+        return false;
 
-    dist_node_status_t* status = &shm_header_->nodes[node_id];
+    dist_node_status_t *status = &shm_header_->nodes[node_id];
     status->state = NODE_STATE_OFFLINE;
     status->last_heartbeat = 0;
 
@@ -193,14 +195,16 @@ bool DistributedMessageManager::deregister_node(uint32_t node_id) {
 }
 
 bool DistributedMessageManager::is_node_active(uint32_t node_id) const {
-    if (!shm_header_ || node_id >= DIST_MAX_NODES) return false;
+    if (!shm_header_ || node_id >= DIST_MAX_NODES)
+        return false;
     return shm_header_->nodes[node_id].state == NODE_STATE_READY ||
            shm_header_->nodes[node_id].state == NODE_STATE_BUSY;
 }
 
 std::vector<uint32_t> DistributedMessageManager::get_active_nodes() const {
     std::vector<uint32_t> active;
-    if (!shm_header_) return active;
+    if (!shm_header_)
+        return active;
 
     for (uint32_t i = 0; i < DIST_MAX_NODES; i++) {
         if (is_node_active(i)) {
@@ -210,11 +214,12 @@ std::vector<uint32_t> DistributedMessageManager::get_active_nodes() const {
     return active;
 }
 
-bool DistributedMessageManager::enqueue_message(uint32_t dst_node, const dist_message_t& msg) {
-    if (!shm_header_ || dst_node >= DIST_MAX_NODES) return false;
+bool DistributedMessageManager::enqueue_message(uint32_t dst_node, const dist_message_t &msg) {
+    if (!shm_header_ || dst_node >= DIST_MAX_NODES)
+        return false;
 
     uint32_t queue_idx = local_node_id_ * DIST_MAX_NODES + dst_node;
-    dist_node_queue_t* queue = &shm_header_->queues[queue_idx];
+    dist_node_queue_t *queue = &shm_header_->queues[queue_idx];
 
     // Check if queue is full
     uint32_t head = __atomic_load_n(&queue->head, __ATOMIC_ACQUIRE);
@@ -240,11 +245,12 @@ bool DistributedMessageManager::enqueue_message(uint32_t dst_node, const dist_me
     return true;
 }
 
-bool DistributedMessageManager::dequeue_message(uint32_t src_node, dist_message_t& msg) {
-    if (!shm_header_ || src_node >= DIST_MAX_NODES) return false;
+bool DistributedMessageManager::dequeue_message(uint32_t src_node, dist_message_t &msg) {
+    if (!shm_header_ || src_node >= DIST_MAX_NODES)
+        return false;
 
     uint32_t queue_idx = src_node * DIST_MAX_NODES + local_node_id_;
-    dist_node_queue_t* queue = &shm_header_->queues[queue_idx];
+    dist_node_queue_t *queue = &shm_header_->queues[queue_idx];
 
     uint32_t head = __atomic_load_n(&queue->head, __ATOMIC_ACQUIRE);
     uint32_t tail = __atomic_load_n(&queue->tail, __ATOMIC_ACQUIRE);
@@ -267,14 +273,12 @@ bool DistributedMessageManager::dequeue_message(uint32_t src_node, dist_message_
     return true;
 }
 
-bool DistributedMessageManager::send_message(uint32_t dst_node, const dist_message_t& msg) {
+bool DistributedMessageManager::send_message(uint32_t dst_node, const dist_message_t &msg) {
     return enqueue_message(dst_node, msg);
 }
 
-bool DistributedMessageManager::send_message_wait_response(uint32_t dst_node,
-                                                            const dist_message_t& req,
-                                                            dist_message_t& resp,
-                                                            int timeout_ms) {
+bool DistributedMessageManager::send_message_wait_response(uint32_t dst_node, const dist_message_t &req,
+                                                           dist_message_t &resp, int timeout_ms) {
     // Create pending request entry
     auto pending = std::make_shared<PendingRequest>();
     pending->msg_id = req.header.msg_id;
@@ -297,7 +301,7 @@ bool DistributedMessageManager::send_message_wait_response(uint32_t dst_node,
     {
         std::unique_lock<std::mutex> lock(pending->mutex);
         if (!pending->cv.wait_for(lock, std::chrono::milliseconds(timeout_ms),
-                                   [&pending]() { return pending->completed; })) {
+                                  [&pending]() { return pending->completed; })) {
             // Timeout
             std::lock_guard<std::mutex> pending_lock(pending_mutex_);
             pending_requests_.erase(req.header.msg_id);
@@ -315,7 +319,7 @@ bool DistributedMessageManager::send_message_wait_response(uint32_t dst_node,
     return true;
 }
 
-bool DistributedMessageManager::broadcast_message(const dist_message_t& msg) {
+bool DistributedMessageManager::broadcast_message(const dist_message_t &msg) {
     bool all_success = true;
     auto active_nodes = get_active_nodes();
 
@@ -340,7 +344,7 @@ void DistributedMessageManager::unregister_handler(dist_msg_type_t type) {
     handlers_.erase(type);
 }
 
-void DistributedMessageManager::process_message(const dist_message_t& msg) {
+void DistributedMessageManager::process_message(const dist_message_t &msg) {
     // Check if this is a response to a pending request
     {
         std::lock_guard<std::mutex> lock(pending_mutex_);
@@ -401,8 +405,10 @@ int DistributedMessageManager::poll_messages(int max_messages) {
 
     // Poll messages from all nodes
     for (uint32_t src_node = 0; src_node < DIST_MAX_NODES && processed < max_messages; src_node++) {
-        if (src_node == local_node_id_) continue;
-        if (!is_node_active(src_node)) continue;
+        if (src_node == local_node_id_)
+            continue;
+        if (!is_node_active(src_node))
+            continue;
 
         dist_message_t msg;
         while (processed < max_messages && dequeue_message(src_node, msg)) {
@@ -415,10 +421,11 @@ int DistributedMessageManager::poll_messages(int max_messages) {
 }
 
 void DistributedMessageManager::send_heartbeat() {
-    if (!shm_header_) return;
+    if (!shm_header_)
+        return;
 
     // Update local node status
-    dist_node_status_t* status = &shm_header_->nodes[local_node_id_];
+    dist_node_status_t *status = &shm_header_->nodes[local_node_id_];
     status->last_heartbeat = std::chrono::steady_clock::now().time_since_epoch().count();
 
     // Send heartbeat message to all active nodes
@@ -438,7 +445,8 @@ void DistributedMessageManager::send_heartbeat() {
 }
 
 void DistributedMessageManager::start_processing() {
-    if (running_) return;
+    if (running_)
+        return;
 
     running_ = true;
 
@@ -454,7 +462,7 @@ void DistributedMessageManager::start_processing() {
 void DistributedMessageManager::stop_processing() {
     running_ = false;
 
-    for (auto& worker : workers_) {
+    for (auto &worker : workers_) {
         if (worker.joinable()) {
             worker.join();
         }
@@ -465,7 +473,8 @@ void DistributedMessageManager::stop_processing() {
 DistributedMessageManager::Stats DistributedMessageManager::get_stats() const {
     Stats stats = {0, 0, 0, 0};
 
-    if (!shm_header_) return stats;
+    if (!shm_header_)
+        return stats;
 
     // Sum stats from all queues
     for (int i = 0; i < DIST_MAX_NODES * DIST_MAX_NODES; i++) {
@@ -489,28 +498,20 @@ DistributedMessageManager::Stats DistributedMessageManager::get_stats() const {
  * DistributedMemoryServer Implementation
  * ============================================================================ */
 
-DistributedMemoryServer::DistributedMemoryServer(uint32_t node_id, const std::string& shm_name,
-                                                   int tcp_port, size_t capacity_mb,
-                                                   CXLController* controller,
-                                                   DistTransportMode transport_mode,
-                                                   const std::string& tcp_addr,
-                                                   uint16_t tcp_transport_port)
-    : node_id_(node_id), shm_name_(shm_name), tcp_port_(tcp_port),
-      memory_capacity_mb_(capacity_mb), transport_mode_(transport_mode),
-      tcp_addr_(tcp_addr), tcp_transport_port_(tcp_transport_port),
-      controller_(controller),
-      lsa_size_(256 * 1024),  /* 256KB default LSA size per CXL spec */
-      tcp_server_fd_(-1), next_client_id_(0),
-      running_(false), state_(NODE_STATE_UNKNOWN),
-      local_reads_(0), local_writes_(0), remote_reads_(0), remote_writes_(0),
-      forwarded_requests_(0), coherency_messages_(0) {
+DistributedMemoryServer::DistributedMemoryServer(uint32_t node_id, const std::string &shm_name, int tcp_port,
+                                                 size_t capacity_mb, CXLController *controller,
+                                                 DistTransportMode transport_mode, const std::string &tcp_addr,
+                                                 uint16_t tcp_transport_port)
+    : node_id_(node_id), shm_name_(shm_name), tcp_port_(tcp_port), memory_capacity_mb_(capacity_mb),
+      transport_mode_(transport_mode), tcp_addr_(tcp_addr), tcp_transport_port_(tcp_transport_port),
+      controller_(controller), lsa_size_(256 * 1024), /* 256KB default LSA size per CXL spec */
+      tcp_server_fd_(-1), next_client_id_(0), running_(false), state_(NODE_STATE_UNKNOWN), local_reads_(0),
+      local_writes_(0), remote_reads_(0), remote_writes_(0), forwarded_requests_(0), coherency_messages_(0) {
     lsa_data_.resize(lsa_size_, 0);
     SPDLOG_INFO("Node {} LSA initialized: {} bytes", node_id_, lsa_size_);
 }
 
-DistributedMemoryServer::~DistributedMemoryServer() {
-    stop();
-}
+DistributedMemoryServer::~DistributedMemoryServer() { stop(); }
 
 bool DistributedMemoryServer::initialize() {
     state_ = NODE_STATE_INITIALIZING;
@@ -557,19 +558,17 @@ bool DistributedMemoryServer::initialize() {
     // Configure LogP model on the controller for distributed latency
     auto active_nodes = msg_manager_->get_active_nodes();
     uint32_t num_nodes = std::max(static_cast<uint32_t>(active_nodes.size()), 2u);
-    LogPConfig logp_cfg(
-        150.0,   // L: 150ns network latency (typical CXL switch hop)
-        20.0,    // o_s: 20ns sender overhead
-        20.0,    // o_r: 20ns receiver overhead
-        4.0,     // g: 4ns gap (250MHz message rate)
-        num_nodes
-    );
+    LogPConfig logp_cfg(150.0, // L: 150ns network latency (typical CXL switch hop)
+                        20.0, // o_s: 20ns sender overhead
+                        20.0, // o_r: 20ns receiver overhead
+                        4.0, // g: 4ns gap (250MHz message rate)
+                        num_nodes);
     controller_->configure_logp(logp_cfg);
 
     // Configure controller for distributed mode with HDM decoder + CoherencyEngine
     // Use HYBRID mode for TCP: tries range-based first (from add_range), then interleaved
-    HDMDecoderMode hdm_mode = (transport_mode_ == DistTransportMode::TCP)
-        ? HDMDecoderMode::HYBRID : HDMDecoderMode::RANGE_BASED;
+    HDMDecoderMode hdm_mode =
+        (transport_mode_ == DistTransportMode::TCP) ? HDMDecoderMode::HYBRID : HDMDecoderMode::RANGE_BASED;
     controller_->configure_distributed(node_id_, hdm_mode);
 
     // Add local range to HDM decoder
@@ -603,18 +602,19 @@ bool DistributedMemoryServer::initialize() {
     }
 
     state_ = NODE_STATE_READY;
-    SPDLOG_INFO("Distributed node {} initialized: memory 0x{:x}-0x{:x} ({} MB), transport={}",
-                node_id_, shm_info.base_addr, shm_info.base_addr + shm_info.size,
-                memory_capacity_mb_,
-                transport_mode_ == DistTransportMode::TCP ? "TCP" :
-                transport_mode_ == DistTransportMode::RDMA ? "RDMA" :
-                transport_mode_ == DistTransportMode::HYBRID ? "HYBRID" : "SHM");
+    SPDLOG_INFO("Distributed node {} initialized: memory 0x{:x}-0x{:x} ({} MB), transport={}", node_id_,
+                shm_info.base_addr, shm_info.base_addr + shm_info.size, memory_capacity_mb_,
+                transport_mode_ == DistTransportMode::TCP      ? "TCP"
+                : transport_mode_ == DistTransportMode::RDMA   ? "RDMA"
+                : transport_mode_ == DistTransportMode::HYBRID ? "HYBRID"
+                                                               : "SHM");
 
     return true;
 }
 
 bool DistributedMemoryServer::start() {
-    if (running_) return true;
+    if (running_)
+        return true;
     if (state_ != NODE_STATE_READY) {
         SPDLOG_ERROR("Cannot start: node not ready");
         return false;
@@ -642,7 +642,8 @@ bool DistributedMemoryServer::start() {
 }
 
 void DistributedMemoryServer::stop() {
-    if (!running_) return;
+    if (!running_)
+        return;
 
     running_ = false;
     state_ = NODE_STATE_DRAINING;
@@ -666,8 +667,9 @@ void DistributedMemoryServer::stop() {
     }
     {
         std::lock_guard<std::mutex> lock(client_threads_mutex_);
-        for (auto& t : client_threads_) {
-            if (t.joinable()) t.join();
+        for (auto &t : client_threads_) {
+            if (t.joinable())
+                t.join();
         }
         client_threads_.clear();
     }
@@ -682,7 +684,7 @@ void DistributedMemoryServer::stop() {
     SPDLOG_INFO("Distributed node {} stopped", node_id_);
 }
 
-bool DistributedMemoryServer::join_cluster(const std::string& coordinator_shm) {
+bool DistributedMemoryServer::join_cluster(const std::string &coordinator_shm) {
     // For joining an existing cluster
     // Re-initialize message manager with the coordinator's shared memory
     msg_manager_ = std::make_unique<DistributedMessageManager>(coordinator_shm, node_id_);
@@ -712,17 +714,14 @@ bool DistributedMemoryServer::join_cluster(const std::string& coordinator_shm) {
     reg_msg.header.src_node_id = node_id_;
     reg_msg.header.dst_node_id = 0; // Coordinator
     reg_msg.header.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    reg_msg.payload.node = {
-        .node_id = info.node_id,
-        .node_state = static_cast<uint32_t>(info.state),
-        .memory_base = info.memory_base,
-        .memory_size = info.memory_size,
-        .num_cachelines = info.memory_size / DIST_CACHELINE_SIZE,
-        .port = static_cast<uint32_t>(tcp_port_),
-        .flags = 0
-    };
-    strncpy(reg_msg.payload.node.hostname, info.hostname.c_str(),
-            sizeof(reg_msg.payload.node.hostname) - 1);
+    reg_msg.payload.node = {.node_id = info.node_id,
+                            .node_state = static_cast<uint32_t>(info.state),
+                            .memory_base = info.memory_base,
+                            .memory_size = info.memory_size,
+                            .num_cachelines = info.memory_size / DIST_CACHELINE_SIZE,
+                            .port = static_cast<uint32_t>(tcp_port_),
+                            .flags = 0};
+    strncpy(reg_msg.payload.node.hostname, info.hostname.c_str(), sizeof(reg_msg.payload.node.hostname) - 1);
 
     msg_manager_->send_message(0, reg_msg);
 
@@ -750,61 +749,51 @@ bool DistributedMemoryServer::leave_cluster() {
 
 void DistributedMemoryServer::setup_message_handlers() {
     // Read request handler
-    msg_manager_->register_handler(DIST_MSG_READ_REQ,
-        [this](const dist_message_t& req, dist_message_t& resp) {
-            handle_read_request(req, resp);
-        });
+    msg_manager_->register_handler(
+        DIST_MSG_READ_REQ, [this](const dist_message_t &req, dist_message_t &resp) { handle_read_request(req, resp); });
 
     // Write request handler
-    msg_manager_->register_handler(DIST_MSG_WRITE_REQ,
-        [this](const dist_message_t& req, dist_message_t& resp) {
-            handle_write_request(req, resp);
-        });
+    msg_manager_->register_handler(DIST_MSG_WRITE_REQ, [this](const dist_message_t &req, dist_message_t &resp) {
+        handle_write_request(req, resp);
+    });
 
     // Atomic FAA handler
-    msg_manager_->register_handler(DIST_MSG_ATOMIC_FAA_REQ,
-        [this](const dist_message_t& req, dist_message_t& resp) {
-            handle_atomic_request(req, resp);
-        });
+    msg_manager_->register_handler(DIST_MSG_ATOMIC_FAA_REQ, [this](const dist_message_t &req, dist_message_t &resp) {
+        handle_atomic_request(req, resp);
+    });
 
     // Atomic CAS handler
-    msg_manager_->register_handler(DIST_MSG_ATOMIC_CAS_REQ,
-        [this](const dist_message_t& req, dist_message_t& resp) {
-            handle_atomic_request(req, resp);
-        });
+    msg_manager_->register_handler(DIST_MSG_ATOMIC_CAS_REQ, [this](const dist_message_t &req, dist_message_t &resp) {
+        handle_atomic_request(req, resp);
+    });
 
     // Coherency handlers
-    msg_manager_->register_handler(DIST_MSG_INVALIDATE,
-        [this](const dist_message_t& req, dist_message_t& resp) {
-            handle_coherency_request(req, resp);
-        });
+    msg_manager_->register_handler(DIST_MSG_INVALIDATE, [this](const dist_message_t &req, dist_message_t &resp) {
+        handle_coherency_request(req, resp);
+    });
 
-    msg_manager_->register_handler(DIST_MSG_DOWNGRADE,
-        [this](const dist_message_t& req, dist_message_t& resp) {
-            handle_coherency_request(req, resp);
-        });
+    msg_manager_->register_handler(DIST_MSG_DOWNGRADE, [this](const dist_message_t &req, dist_message_t &resp) {
+        handle_coherency_request(req, resp);
+    });
 
     // Node management handlers
-    msg_manager_->register_handler(DIST_MSG_NODE_REGISTER,
-        [this](const dist_message_t& req, dist_message_t& resp) {
-            handle_node_message(req, resp);
-        });
+    msg_manager_->register_handler(DIST_MSG_NODE_REGISTER, [this](const dist_message_t &req, dist_message_t &resp) {
+        handle_node_message(req, resp);
+    });
 
-    msg_manager_->register_handler(DIST_MSG_NODE_HEARTBEAT,
-        [this](const dist_message_t& req, dist_message_t& resp) {
-            handle_node_message(req, resp);
-        });
+    msg_manager_->register_handler(DIST_MSG_NODE_HEARTBEAT, [this](const dist_message_t &req, dist_message_t &resp) {
+        handle_node_message(req, resp);
+    });
 
     // Directory query handler (now handled by CoherencyEngine, reply with ACK)
-    msg_manager_->register_handler(DIST_MSG_DIR_QUERY,
-        [this](const dist_message_t& req, dist_message_t& resp) {
-            resp.header.msg_type = DIST_MSG_DIR_RESPONSE;
-            resp.payload.coherency.cacheline_addr = req.payload.coherency.cacheline_addr;
-            // CoherencyEngine processes coherency internally; just acknowledge
-        });
+    msg_manager_->register_handler(DIST_MSG_DIR_QUERY, [this](const dist_message_t &req, dist_message_t &resp) {
+        resp.header.msg_type = DIST_MSG_DIR_RESPONSE;
+        resp.payload.coherency.cacheline_addr = req.payload.coherency.cacheline_addr;
+        // CoherencyEngine processes coherency internally; just acknowledge
+    });
 }
 
-void DistributedMemoryServer::handle_read_request(const dist_message_t& req, dist_message_t& resp) {
+void DistributedMemoryServer::handle_read_request(const dist_message_t &req, dist_message_t &resp) {
     resp.header.msg_type = DIST_MSG_READ_RESP;
 
     uint64_t addr = req.payload.mem.addr;
@@ -830,7 +819,7 @@ void DistributedMemoryServer::handle_read_request(const dist_message_t& req, dis
     }
 }
 
-void DistributedMemoryServer::handle_write_request(const dist_message_t& req, dist_message_t& resp) {
+void DistributedMemoryServer::handle_write_request(const dist_message_t &req, dist_message_t &resp) {
     resp.header.msg_type = DIST_MSG_WRITE_RESP;
 
     uint64_t addr = req.payload.mem.addr;
@@ -854,14 +843,14 @@ void DistributedMemoryServer::handle_write_request(const dist_message_t& req, di
     }
 }
 
-void DistributedMemoryServer::handle_atomic_request(const dist_message_t& req, dist_message_t& resp) {
+void DistributedMemoryServer::handle_atomic_request(const dist_message_t &req, dist_message_t &resp) {
     uint64_t addr = req.payload.mem.addr;
 
     // Ensure exclusive access
     ensure_coherency_for_write(addr, req.header.src_node_id);
 
     // Get pointer to data
-    uint8_t* data_ptr = local_memory_->get_cacheline_data(addr & ~(DIST_CACHELINE_SIZE - 1));
+    uint8_t *data_ptr = local_memory_->get_cacheline_data(addr & ~(DIST_CACHELINE_SIZE - 1));
     if (!data_ptr) {
         if (req.header.msg_type == DIST_MSG_ATOMIC_FAA_REQ) {
             resp.header.msg_type = DIST_MSG_ATOMIC_FAA_RESP;
@@ -873,7 +862,7 @@ void DistributedMemoryServer::handle_atomic_request(const dist_message_t& req, d
     }
 
     uint64_t offset = addr % DIST_CACHELINE_SIZE;
-    uint64_t* ptr = reinterpret_cast<uint64_t*>(data_ptr + offset);
+    uint64_t *ptr = reinterpret_cast<uint64_t *>(data_ptr + offset);
 
     if (req.header.msg_type == DIST_MSG_ATOMIC_FAA_REQ) {
         resp.header.msg_type = DIST_MSG_ATOMIC_FAA_RESP;
@@ -883,8 +872,7 @@ void DistributedMemoryServer::handle_atomic_request(const dist_message_t& req, d
     } else { // CAS
         resp.header.msg_type = DIST_MSG_ATOMIC_CAS_RESP;
         uint64_t expected = req.payload.mem.expected;
-        __atomic_compare_exchange_n(ptr, &expected, req.payload.mem.value,
-                                    false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+        __atomic_compare_exchange_n(ptr, &expected, req.payload.mem.value, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
         memcpy(&resp.payload.mem.value, &expected, sizeof(expected));
         resp.payload.mem.status = 0;
     }
@@ -893,7 +881,7 @@ void DistributedMemoryServer::handle_atomic_request(const dist_message_t& req, d
     resp.payload.mem.latency_ns = static_cast<uint64_t>(controller_->dramlatency) + 20;
 }
 
-void DistributedMemoryServer::handle_coherency_request(const dist_message_t& req, dist_message_t& resp) {
+void DistributedMemoryServer::handle_coherency_request(const dist_message_t &req, dist_message_t &resp) {
     coherency_messages_++;
 
     uint64_t cacheline_addr = req.payload.coherency.cacheline_addr;
@@ -903,8 +891,7 @@ void DistributedMemoryServer::handle_coherency_request(const dist_message_t& req
 
         // Delegate to CoherencyEngine
         if (controller_->coherency_) {
-            controller_->coherency_->handle_remote_invalidate(
-                cacheline_addr, req.header.src_node_id);
+            controller_->coherency_->handle_remote_invalidate(cacheline_addr, req.header.src_node_id);
         }
         resp.payload.coherency.cacheline_addr = cacheline_addr;
 
@@ -913,14 +900,13 @@ void DistributedMemoryServer::handle_coherency_request(const dist_message_t& req
 
         // Delegate to CoherencyEngine
         if (controller_->coherency_) {
-            controller_->coherency_->handle_remote_downgrade(
-                cacheline_addr, req.header.src_node_id);
+            controller_->coherency_->handle_remote_downgrade(cacheline_addr, req.header.src_node_id);
         }
         resp.payload.coherency.cacheline_addr = cacheline_addr;
     }
 }
 
-void DistributedMemoryServer::handle_node_message(const dist_message_t& req, dist_message_t& resp) {
+void DistributedMemoryServer::handle_node_message(const dist_message_t &req, dist_message_t &resp) {
     if (req.header.msg_type == DIST_MSG_NODE_REGISTER) {
         // New node joined
         DistNodeInfo info;
@@ -936,8 +922,7 @@ void DistributedMemoryServer::handle_node_message(const dist_message_t& req, dis
         }
 
         resp.header.msg_type = DIST_MSG_NODE_ACK;
-        SPDLOG_INFO("Node {} registered: {} (memory: 0x{:x}-0x{:x})",
-                    info.node_id, info.hostname, info.memory_base,
+        SPDLOG_INFO("Node {} registered: {} (memory: 0x{:x}-0x{:x})", info.node_id, info.hostname, info.memory_base,
                     info.memory_base + info.memory_size);
 
     } else if (req.header.msg_type == DIST_MSG_NODE_HEARTBEAT) {
@@ -963,8 +948,9 @@ void DistributedMemoryServer::heartbeat_loop() {
         auto now = std::chrono::steady_clock::now().time_since_epoch().count();
         {
             std::shared_lock<std::shared_mutex> lock(nodes_mutex_);
-            for (auto& [id, info] : nodes_) {
-                if (id == node_id_) continue;
+            for (auto &[id, info] : nodes_) {
+                if (id == node_id_)
+                    continue;
                 // Mark node as offline if no heartbeat for 10 seconds
                 if (now - info.last_heartbeat > 10000000000ULL) {
                     if (info.state != NODE_STATE_OFFLINE) {
@@ -1000,14 +986,14 @@ bool DistributedMemoryServer::is_local_address(uint64_t addr) const {
     return addr >= shm_info.base_addr && addr < shm_info.base_addr + shm_info.size;
 }
 
-int DistributedMemoryServer::read(uint64_t addr, void* data, size_t size, uint64_t* latency_ns) {
+int DistributedMemoryServer::read(uint64_t addr, void *data, size_t size, uint64_t *latency_ns) {
     uint32_t target_node = get_node_for_address(addr);
 
     if (target_node == node_id_ || is_local_address(addr) || target_node == UINT32_MAX) {
         // Local read (also handles unresolved addresses by falling back to local)
         ensure_coherency_for_read(addr, node_id_);
 
-        if (!local_memory_->read_cacheline(addr, static_cast<uint8_t*>(data), size)) {
+        if (!local_memory_->read_cacheline(addr, static_cast<uint8_t *>(data), size)) {
             return -1;
         }
 
@@ -1018,25 +1004,24 @@ int DistributedMemoryServer::read(uint64_t addr, void* data, size_t size, uint64
     }
 
     // Remote read - dispatch based on transport mode
-    if (transport_mode_ == DistTransportMode::RDMA &&
-        rdma_transport_ && rdma_transport_->is_connected(target_node)) {
+    if (transport_mode_ == DistTransportMode::RDMA && rdma_transport_ && rdma_transport_->is_connected(target_node)) {
         return forward_read_rdma(target_node, addr, data, size, latency_ns);
     }
-    if ((transport_mode_ == DistTransportMode::TCP || transport_mode_ == DistTransportMode::HYBRID) &&
-        tcp_transport_ && tcp_transport_->is_connected(target_node)) {
+    if ((transport_mode_ == DistTransportMode::TCP || transport_mode_ == DistTransportMode::HYBRID) && tcp_transport_ &&
+        tcp_transport_->is_connected(target_node)) {
         return forward_read_tcp(target_node, addr, data, size, latency_ns);
     }
     return forward_read(target_node, addr, data, size, latency_ns);
 }
 
-int DistributedMemoryServer::write(uint64_t addr, const void* data, size_t size, uint64_t* latency_ns) {
+int DistributedMemoryServer::write(uint64_t addr, const void *data, size_t size, uint64_t *latency_ns) {
     uint32_t target_node = get_node_for_address(addr);
 
     if (target_node == node_id_ || is_local_address(addr) || target_node == UINT32_MAX) {
         // Local write (also handles unresolved addresses by falling back to local)
         ensure_coherency_for_write(addr, node_id_);
 
-        if (!local_memory_->write_cacheline(addr, static_cast<const uint8_t*>(data), size)) {
+        if (!local_memory_->write_cacheline(addr, static_cast<const uint8_t *>(data), size)) {
             return -1;
         }
 
@@ -1047,19 +1032,18 @@ int DistributedMemoryServer::write(uint64_t addr, const void* data, size_t size,
     }
 
     // Remote write - dispatch based on transport mode
-    if (transport_mode_ == DistTransportMode::RDMA &&
-        rdma_transport_ && rdma_transport_->is_connected(target_node)) {
+    if (transport_mode_ == DistTransportMode::RDMA && rdma_transport_ && rdma_transport_->is_connected(target_node)) {
         return forward_write_rdma(target_node, addr, data, size, latency_ns);
     }
-    if ((transport_mode_ == DistTransportMode::TCP || transport_mode_ == DistTransportMode::HYBRID) &&
-        tcp_transport_ && tcp_transport_->is_connected(target_node)) {
+    if ((transport_mode_ == DistTransportMode::TCP || transport_mode_ == DistTransportMode::HYBRID) && tcp_transport_ &&
+        tcp_transport_->is_connected(target_node)) {
         return forward_write_tcp(target_node, addr, data, size, latency_ns);
     }
     return forward_write(target_node, addr, data, size, latency_ns);
 }
 
-int DistributedMemoryServer::forward_read(uint32_t target_node, uint64_t addr, void* data,
-                                          size_t size, uint64_t* latency_ns) {
+int DistributedMemoryServer::forward_read(uint32_t target_node, uint64_t addr, void *data, size_t size,
+                                          uint64_t *latency_ns) {
     forwarded_requests_++;
     remote_reads_++;
 
@@ -1085,15 +1069,14 @@ int DistributedMemoryServer::forward_read(uint32_t target_node, uint64_t addr, v
 
     memcpy(data, resp.payload.mem.data, size);
     // Use LogP model from controller for network latency
-    double logp_lat = controller_->calculate_logp_latency(node_id_, target_node,
-                                                           req.header.timestamp);
+    double logp_lat = controller_->calculate_logp_latency(node_id_, target_node, req.header.timestamp);
     *latency_ns = resp.payload.mem.latency_ns + static_cast<uint64_t>(logp_lat);
 
     return 0;
 }
 
-int DistributedMemoryServer::forward_write(uint32_t target_node, uint64_t addr, const void* data,
-                                           size_t size, uint64_t* latency_ns) {
+int DistributedMemoryServer::forward_write(uint32_t target_node, uint64_t addr, const void *data, size_t size,
+                                           uint64_t *latency_ns) {
     forwarded_requests_++;
     remote_writes_++;
 
@@ -1119,14 +1102,13 @@ int DistributedMemoryServer::forward_write(uint32_t target_node, uint64_t addr, 
     }
 
     // Use LogP model from controller for network latency
-    double logp_lat_w = controller_->calculate_logp_latency(node_id_, target_node,
-                                                             req.header.timestamp);
+    double logp_lat_w = controller_->calculate_logp_latency(node_id_, target_node, req.header.timestamp);
     *latency_ns = resp.payload.mem.latency_ns + static_cast<uint64_t>(logp_lat_w);
 
     return 0;
 }
 
-int DistributedMemoryServer::atomic_faa(uint64_t addr, uint64_t value, uint64_t* old_value) {
+int DistributedMemoryServer::atomic_faa(uint64_t addr, uint64_t value, uint64_t *old_value) {
     uint32_t target_node = get_node_for_address(addr);
 
     dist_message_t req, resp;
@@ -1156,8 +1138,7 @@ int DistributedMemoryServer::atomic_faa(uint64_t addr, uint64_t value, uint64_t*
     return 0;
 }
 
-int DistributedMemoryServer::atomic_cas(uint64_t addr, uint64_t expected, uint64_t desired,
-                                        uint64_t* old_value) {
+int DistributedMemoryServer::atomic_cas(uint64_t addr, uint64_t expected, uint64_t desired, uint64_t *old_value) {
     uint32_t target_node = get_node_for_address(addr);
 
     dist_message_t req, resp;
@@ -1202,18 +1183,18 @@ void DistributedMemoryServer::fence() {
     msg_manager_->broadcast_message(fence_msg);
 }
 
-int DistributedMemoryServer::lsa_read(uint64_t offset, void* data, size_t size) {
+int DistributedMemoryServer::lsa_read(uint64_t offset, void *data, size_t size) {
     std::lock_guard<std::mutex> lock(lsa_mutex_);
     if (offset + size > lsa_size_) {
-        SPDLOG_ERROR("Node {} LSA read out of bounds: offset=0x{:x} size={} lsa_size={}",
-                     node_id_, offset, size, lsa_size_);
+        SPDLOG_ERROR("Node {} LSA read out of bounds: offset=0x{:x} size={} lsa_size={}", node_id_, offset, size,
+                     lsa_size_);
         return -1;
     }
     memcpy(data, lsa_data_.data() + offset, size);
     return 0;
 }
 
-int DistributedMemoryServer::lsa_write(uint64_t offset, const void* data, size_t size) {
+int DistributedMemoryServer::lsa_write(uint64_t offset, const void *data, size_t size) {
     std::lock_guard<std::mutex> lock(lsa_mutex_);
     if (offset + size > lsa_size_) {
         /* Auto-grow LSA if needed */
@@ -1246,7 +1227,7 @@ bool DistributedMemoryServer::ensure_coherency_for_write(uint64_t addr, uint32_t
     return true;
 }
 
-bool DistributedMemoryServer::add_remote_node(const DistNodeInfo& info) {
+bool DistributedMemoryServer::add_remote_node(const DistNodeInfo &info) {
     std::unique_lock<std::shared_mutex> lock(nodes_mutex_);
     nodes_[info.node_id] = info;
     return true;
@@ -1261,35 +1242,30 @@ bool DistributedMemoryServer::remove_remote_node(uint32_t node_id) {
 std::vector<DistNodeInfo> DistributedMemoryServer::get_cluster_nodes() const {
     std::vector<DistNodeInfo> result;
     std::shared_lock<std::shared_mutex> lock(nodes_mutex_);
-    for (const auto& [id, info] : nodes_) {
+    for (const auto &[id, info] : nodes_) {
         result.push_back(info);
     }
     return result;
 }
 
 DistributedMemoryServer::Stats DistributedMemoryServer::get_stats() const {
-    return {
-        local_reads_.load(),
-        local_writes_.load(),
-        remote_reads_.load(),
-        remote_writes_.load(),
-        forwarded_requests_.load(),
-        coherency_messages_.load(),
-        static_cast<uint64_t>(client_threads_.size())
-    };
+    return {local_reads_.load(),
+            local_writes_.load(),
+            remote_reads_.load(),
+            remote_writes_.load(),
+            forwarded_requests_.load(),
+            coherency_messages_.load(),
+            static_cast<uint64_t>(client_threads_.size())};
 }
 
-CoherencyEngine* DistributedMemoryServer::coherency() {
-    return controller_->coherency_.get();
-}
+CoherencyEngine *DistributedMemoryServer::coherency() { return controller_->coherency_.get(); }
 
 /* ============================================================================
  * TCP-based forwarding for DistributedMemoryServer
  * ============================================================================ */
 
 bool DistributedMemoryServer::initialize_tcp_transport() {
-    tcp_transport_ = std::make_unique<DistributedTCPTransport>(
-        node_id_, tcp_addr_, tcp_transport_port_);
+    tcp_transport_ = std::make_unique<DistributedTCPTransport>(node_id_, tcp_addr_, tcp_transport_port_);
 
     if (!tcp_transport_->initialize()) {
         SPDLOG_ERROR("Failed to initialize TCP transport on {}:{}", tcp_addr_, tcp_transport_port_);
@@ -1310,14 +1286,15 @@ bool DistributedMemoryServer::initialize_tcp_transport() {
 }
 
 void DistributedMemoryServer::calibrate_all_tcp_nodes() {
-    if (!tcp_transport_) return;
+    if (!tcp_transport_)
+        return;
 
     auto connected = tcp_transport_->get_connected_nodes();
     for (uint32_t node_id : connected) {
         auto result = tcp_transport_->calibrate_node(node_id);
         if (result.valid) {
-            SPDLOG_INFO("TCP calibration to node {}: L={:.2f}us o_s={:.2f}us o_r={:.2f}us g={:.3f}us",
-                        node_id, result.L, result.o_s, result.o_r, result.g);
+            SPDLOG_INFO("TCP calibration to node {}: L={:.2f}us o_s={:.2f}us o_r={:.2f}us g={:.3f}us", node_id,
+                        result.L, result.o_s, result.o_r, result.g);
         }
     }
 
@@ -1328,7 +1305,7 @@ void DistributedMemoryServer::calibrate_all_tcp_nodes() {
     }
 }
 
-bool DistributedMemoryServer::connect_tcp_node(uint32_t node_id, const std::string& addr, uint16_t port) {
+bool DistributedMemoryServer::connect_tcp_node(uint32_t node_id, const std::string &addr, uint16_t port) {
     if (!tcp_transport_) {
         SPDLOG_ERROR("TCP transport not initialized");
         return false;
@@ -1355,8 +1332,8 @@ bool DistributedMemoryServer::connect_tcp_node(uint32_t node_id, const std::stri
         }
     }
 
-    FabricLinkConfig link_cfg{100.0, 25.0, 32};  // 100ns hop, 25GB/s, 32 credits
-    auto* remote = controller_->add_remote_endpoint(node_id, peer_base_addr, peer_capacity, link_cfg);
+    FabricLinkConfig link_cfg{100.0, 25.0, 32}; // 100ns hop, 25GB/s, 32 credits
+    auto *remote = controller_->add_remote_endpoint(node_id, peer_base_addr, peer_capacity, link_cfg);
     remote->tcp_transport_ = tcp_transport_.get();
     remote->msg_manager_ = msg_manager_.get();
     remote->coherency_engine_ = controller_->coherency_.get();
@@ -1390,8 +1367,8 @@ bool DistributedMemoryServer::calibrate_tcp_logp(uint32_t target_node) {
     return false;
 }
 
-int DistributedMemoryServer::forward_read_tcp(uint32_t target_node, uint64_t addr,
-                                                void* data, size_t size, uint64_t* latency_ns) {
+int DistributedMemoryServer::forward_read_tcp(uint32_t target_node, uint64_t addr, void *data, size_t size,
+                                              uint64_t *latency_ns) {
     forwarded_requests_++;
     remote_reads_++;
 
@@ -1427,8 +1404,7 @@ int DistributedMemoryServer::forward_read_tcp(uint32_t target_node, uint64_t add
     auto calib = tcp_transport_->get_calibration(target_node);
     double network_latency;
     if (calib.valid) {
-        network_latency = controller_->calculate_logp_latency(node_id_, target_node,
-                                                               req.header.timestamp);
+        network_latency = controller_->calculate_logp_latency(node_id_, target_node, req.header.timestamp);
     } else {
         network_latency = measured_ns;
     }
@@ -1441,15 +1417,14 @@ int DistributedMemoryServer::forward_read_tcp(uint32_t target_node, uint64_t add
         coherency_overhead = coh_resp.latency_ns;
     }
 
-    *latency_ns = resp.payload.mem.latency_ns +
-                  static_cast<uint64_t>(network_latency) +
+    *latency_ns = resp.payload.mem.latency_ns + static_cast<uint64_t>(network_latency) +
                   static_cast<uint64_t>(coherency_overhead);
 
     return 0;
 }
 
-int DistributedMemoryServer::forward_write_tcp(uint32_t target_node, uint64_t addr,
-                                                 const void* data, size_t size, uint64_t* latency_ns) {
+int DistributedMemoryServer::forward_write_tcp(uint32_t target_node, uint64_t addr, const void *data, size_t size,
+                                               uint64_t *latency_ns) {
     forwarded_requests_++;
     remote_writes_++;
 
@@ -1482,8 +1457,7 @@ int DistributedMemoryServer::forward_write_tcp(uint32_t target_node, uint64_t ad
     auto calib = tcp_transport_->get_calibration(target_node);
     double network_latency;
     if (calib.valid) {
-        network_latency = controller_->calculate_logp_latency(node_id_, target_node,
-                                                               req.header.timestamp);
+        network_latency = controller_->calculate_logp_latency(node_id_, target_node, req.header.timestamp);
     } else {
         network_latency = measured_ns;
     }
@@ -1496,8 +1470,7 @@ int DistributedMemoryServer::forward_write_tcp(uint32_t target_node, uint64_t ad
         coherency_overhead = coh_resp.latency_ns;
     }
 
-    *latency_ns = resp.payload.mem.latency_ns +
-                  static_cast<uint64_t>(network_latency) +
+    *latency_ns = resp.payload.mem.latency_ns + static_cast<uint64_t>(network_latency) +
                   static_cast<uint64_t>(coherency_overhead);
 
     return 0;
@@ -1507,14 +1480,10 @@ int DistributedMemoryServer::forward_write_tcp(uint32_t target_node, uint64_t ad
  * DistributedTCPTransport Implementation
  * ============================================================================ */
 
-DistributedTCPTransport::DistributedTCPTransport(uint32_t node_id,
-                                                     const std::string& bind_addr, uint16_t port)
-    : local_node_id_(node_id), bind_addr_(bind_addr), port_(port), running_(false) {
-}
+DistributedTCPTransport::DistributedTCPTransport(uint32_t node_id, const std::string &bind_addr, uint16_t port)
+    : local_node_id_(node_id), bind_addr_(bind_addr), port_(port), running_(false) {}
 
-DistributedTCPTransport::~DistributedTCPTransport() {
-    shutdown();
-}
+DistributedTCPTransport::~DistributedTCPTransport() { shutdown(); }
 
 bool DistributedTCPTransport::initialize() {
     // Create TCP server for incoming connections
@@ -1530,8 +1499,7 @@ bool DistributedTCPTransport::initialize() {
     // Start accept thread for incoming connections
     accept_thread_ = std::thread(&DistributedTCPTransport::accept_loop, this);
 
-    SPDLOG_INFO("DistributedTCPTransport initialized: node={} bind={}:{}",
-                local_node_id_, bind_addr_, port_);
+    SPDLOG_INFO("DistributedTCPTransport initialized: node={} bind={}:{}", local_node_id_, bind_addr_, port_);
     return true;
 }
 
@@ -1541,7 +1509,7 @@ void DistributedTCPTransport::shutdown() {
     // Disconnect all nodes
     {
         std::lock_guard<std::mutex> lock(connections_mutex_);
-        for (auto& [node_id, conn] : connections_) {
+        for (auto &[node_id, conn] : connections_) {
             if (conn.client) {
                 conn.client->disconnect();
             }
@@ -1569,16 +1537,14 @@ void DistributedTCPTransport::accept_loop() {
         if (server_->accept_connection() == 0) {
             SPDLOG_INFO("Accepted incoming TCP connection");
             // Handle client in a separate thread
-            std::thread handler([this]() {
-                server_->handle_client();
-            });
+            std::thread handler([this]() { server_->handle_client(); });
             handler.detach();
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
 
-bool DistributedTCPTransport::connect_to_node(uint32_t node_id, const std::string& addr, uint16_t port) {
+bool DistributedTCPTransport::connect_to_node(uint32_t node_id, const std::string &addr, uint16_t port) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
 
     // Check if already connected
@@ -1589,7 +1555,7 @@ bool DistributedTCPTransport::connect_to_node(uint32_t node_id, const std::strin
     }
 
     // Create new client connection
-    auto& conn = connections_[node_id];
+    auto &conn = connections_[node_id];
     conn.client = std::make_unique<TCPClient>(addr, port);
 
     if (conn.client->connect() != 0) {
@@ -1618,15 +1584,15 @@ void DistributedTCPTransport::disconnect_node(uint32_t node_id) {
 }
 
 bool DistributedTCPTransport::is_connected(uint32_t node_id) const {
-    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(connections_mutex_));
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(connections_mutex_));
     auto it = connections_.find(node_id);
     return it != connections_.end() && it->second.connected;
 }
 
 std::vector<uint32_t> DistributedTCPTransport::get_connected_nodes() const {
     std::vector<uint32_t> nodes;
-    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(connections_mutex_));
-    for (const auto& [id, conn] : connections_) {
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(connections_mutex_));
+    for (const auto &[id, conn] : connections_) {
         if (conn.connected) {
             nodes.push_back(id);
         }
@@ -1634,7 +1600,7 @@ std::vector<uint32_t> DistributedTCPTransport::get_connected_nodes() const {
     return nodes;
 }
 
-bool DistributedTCPTransport::send_message(uint32_t dst_node, const dist_message_t& msg) {
+bool DistributedTCPTransport::send_message(uint32_t dst_node, const dist_message_t &msg) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
     auto it = connections_.find(dst_node);
     if (it == connections_.end() || !it->second.connected || !it->second.client) {
@@ -1663,10 +1629,8 @@ bool DistributedTCPTransport::send_message(uint32_t dst_node, const dist_message
     return true;
 }
 
-bool DistributedTCPTransport::send_message_wait_response(uint32_t dst_node,
-                                                            const dist_message_t& req,
-                                                            dist_message_t& resp,
-                                                            int timeout_ms) {
+bool DistributedTCPTransport::send_message_wait_response(uint32_t dst_node, const dist_message_t &req,
+                                                         dist_message_t &resp, int timeout_ms) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
     auto it = connections_.find(dst_node);
     if (it == connections_.end() || !it->second.connected || !it->second.client) {
@@ -1684,8 +1648,7 @@ bool DistributedTCPTransport::send_message_wait_response(uint32_t dst_node,
 
     // Copy data for write requests
     if (tcp_req.op_type == TCP_OP_WRITE) {
-        memcpy(tcp_req.data, req.payload.mem.data,
-               std::min(sizeof(tcp_req.data), sizeof(req.payload.mem.data)));
+        memcpy(tcp_req.data, req.payload.mem.data, std::min(sizeof(tcp_req.data), sizeof(req.payload.mem.data)));
     }
 
     TCPResponse tcp_resp;
@@ -1696,8 +1659,7 @@ bool DistributedTCPTransport::send_message_wait_response(uint32_t dst_node,
 
     // Convert TCP response back to dist_message_t
     memset(&resp, 0, sizeof(resp));
-    resp.header.msg_type = (req.header.msg_type == DIST_MSG_READ_REQ) ?
-                           DIST_MSG_READ_RESP : DIST_MSG_WRITE_RESP;
+    resp.header.msg_type = (req.header.msg_type == DIST_MSG_READ_REQ) ? DIST_MSG_READ_RESP : DIST_MSG_WRITE_RESP;
     resp.header.msg_id = req.header.msg_id;
     resp.header.src_node_id = dst_node;
     resp.header.dst_node_id = local_node_id_;
@@ -1705,14 +1667,12 @@ bool DistributedTCPTransport::send_message_wait_response(uint32_t dst_node,
     resp.payload.mem.status = tcp_resp.status;
     resp.payload.mem.latency_ns = tcp_resp.latency_ns;
     resp.payload.mem.cache_state = tcp_resp.cache_state;
-    memcpy(resp.payload.mem.data, tcp_resp.data,
-           std::min(sizeof(resp.payload.mem.data), sizeof(tcp_resp.data)));
+    memcpy(resp.payload.mem.data, tcp_resp.data, std::min(sizeof(resp.payload.mem.data), sizeof(tcp_resp.data)));
 
     return true;
 }
 
-bool DistributedTCPTransport::tcp_read(uint32_t dst_node, uint64_t remote_offset,
-                                          void* local_buf, size_t size) {
+bool DistributedTCPTransport::tcp_read(uint32_t dst_node, uint64_t remote_offset, void *local_buf, size_t size) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
     auto it = connections_.find(dst_node);
     if (it == connections_.end() || !it->second.connected || !it->second.client) {
@@ -1740,8 +1700,7 @@ bool DistributedTCPTransport::tcp_read(uint32_t dst_node, uint64_t remote_offset
     return true;
 }
 
-bool DistributedTCPTransport::tcp_write(uint32_t dst_node, uint64_t remote_offset,
-                                           const void* local_buf, size_t size) {
+bool DistributedTCPTransport::tcp_write(uint32_t dst_node, uint64_t remote_offset, const void *local_buf, size_t size) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
     auto it = connections_.find(dst_node);
     if (it == connections_.end() || !it->second.connected || !it->second.client) {
@@ -1826,8 +1785,7 @@ TCPCalibrationResult DistributedTCPTransport::calibrate_node(uint32_t dst_node, 
 
         if (success) {
             double rtt_us = std::chrono::duration<double, std::micro>(recv_end - send_start).count();
-            double send_overhead_us = std::chrono::duration<double, std::micro>(
-                send_start - prev_send_time).count();
+            double send_overhead_us = std::chrono::duration<double, std::micro>(send_start - prev_send_time).count();
 
             rtts.push_back(rtt_us);
 
@@ -1859,7 +1817,7 @@ TCPCalibrationResult DistributedTCPTransport::calibrate_node(uint32_t dst_node, 
     // L = (median_rtt - p10_rtt) / 2 (latency is half the excess RTT)
     // g = median gap between consecutive sends
     double overhead_total = p10_rtt;
-    result.o_s = overhead_total * 0.5;  // Split evenly between send/recv
+    result.o_s = overhead_total * 0.5; // Split evenly between send/recv
     result.o_r = overhead_total * 0.5;
     result.L = std::max(0.0, (median_rtt - overhead_total) / 2.0);
     result.g = median_gap;
@@ -1874,14 +1832,13 @@ TCPCalibrationResult DistributedTCPTransport::calibrate_node(uint32_t dst_node, 
 
     SPDLOG_INFO("TCP calibration to node {} ({} samples): "
                 "L={:.3f}us o_s={:.3f}us o_r={:.3f}us g={:.3f}us median_rtt={:.3f}us",
-                dst_node, result.samples, result.L, result.o_s, result.o_r,
-                result.g, median_rtt);
+                dst_node, result.samples, result.L, result.o_s, result.o_r, result.g, median_rtt);
 
     return result;
 }
 
 TCPCalibrationResult DistributedTCPTransport::get_calibration(uint32_t node_id) const {
-    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(calibration_mutex_));
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(calibration_mutex_));
     auto it = calibration_results_.find(node_id);
     if (it != calibration_results_.end()) {
         return it->second;
@@ -1890,7 +1847,7 @@ TCPCalibrationResult DistributedTCPTransport::get_calibration(uint32_t node_id) 
 }
 
 TCPCalibrationResult DistributedTCPTransport::get_aggregate_calibration() const {
-    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(calibration_mutex_));
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(calibration_mutex_));
 
     if (calibration_results_.empty()) {
         return TCPCalibrationResult();
@@ -1901,8 +1858,9 @@ TCPCalibrationResult DistributedTCPTransport::get_aggregate_calibration() const 
     aggregate.valid = true;
     aggregate.samples = 0;
 
-    for (const auto& [node_id, calib] : calibration_results_) {
-        if (!calib.valid) continue;
+    for (const auto &[node_id, calib] : calibration_results_) {
+        if (!calib.valid)
+            continue;
         aggregate.L += calib.L;
         aggregate.o_s += calib.o_s;
         aggregate.o_r += calib.o_r;
@@ -1925,14 +1883,10 @@ TCPCalibrationResult DistributedTCPTransport::get_aggregate_calibration() const 
  * DistributedRDMATransport Implementation
  * ============================================================================ */
 
-DistributedRDMATransport::DistributedRDMATransport(uint32_t node_id,
-                                                     const std::string& bind_addr, uint16_t port)
-    : local_node_id_(node_id), bind_addr_(bind_addr), port_(port), running_(false) {
-}
+DistributedRDMATransport::DistributedRDMATransport(uint32_t node_id, const std::string &bind_addr, uint16_t port)
+    : local_node_id_(node_id), bind_addr_(bind_addr), port_(port), running_(false) {}
 
-DistributedRDMATransport::~DistributedRDMATransport() {
-    shutdown();
-}
+DistributedRDMATransport::~DistributedRDMATransport() { shutdown(); }
 
 bool DistributedRDMATransport::initialize() {
     if (!RDMATransport::is_rdma_available()) {
@@ -1968,7 +1922,7 @@ void DistributedRDMATransport::shutdown() {
     }
 
     std::lock_guard<std::mutex> lock(connections_mutex_);
-    for (auto& [node_id, conn] : connections_) {
+    for (auto &[node_id, conn] : connections_) {
         if (conn.client) {
             conn.client->disconnect();
         }
@@ -1977,7 +1931,7 @@ void DistributedRDMATransport::shutdown() {
     connections_.clear();
 }
 
-bool DistributedRDMATransport::connect_to_node(uint32_t node_id, const std::string& addr, uint16_t port) {
+bool DistributedRDMATransport::connect_to_node(uint32_t node_id, const std::string &addr, uint16_t port) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
 
     auto it = connections_.find(node_id);
@@ -2012,15 +1966,15 @@ void DistributedRDMATransport::disconnect_node(uint32_t node_id) {
 }
 
 bool DistributedRDMATransport::is_connected(uint32_t node_id) const {
-    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(connections_mutex_));
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(connections_mutex_));
     auto it = connections_.find(node_id);
     return it != connections_.end() && it->second.connected;
 }
 
 std::vector<uint32_t> DistributedRDMATransport::get_connected_nodes() const {
-    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(connections_mutex_));
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(connections_mutex_));
     std::vector<uint32_t> nodes;
-    for (const auto& [node_id, conn] : connections_) {
+    for (const auto &[node_id, conn] : connections_) {
         if (conn.connected) {
             nodes.push_back(node_id);
         }
@@ -2028,7 +1982,7 @@ std::vector<uint32_t> DistributedRDMATransport::get_connected_nodes() const {
     return nodes;
 }
 
-bool DistributedRDMATransport::send_message(uint32_t dst_node, const dist_message_t& msg) {
+bool DistributedRDMATransport::send_message(uint32_t dst_node, const dist_message_t &msg) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
     auto it = connections_.find(dst_node);
     if (it == connections_.end() || !it->second.connected || !it->second.client) {
@@ -2049,10 +2003,8 @@ bool DistributedRDMATransport::send_message(uint32_t dst_node, const dist_messag
     return it->second.client->send_request(req, resp) == 0;
 }
 
-bool DistributedRDMATransport::send_message_wait_response(uint32_t dst_node,
-                                                            const dist_message_t& req,
-                                                            dist_message_t& resp,
-                                                            int timeout_ms) {
+bool DistributedRDMATransport::send_message_wait_response(uint32_t dst_node, const dist_message_t &req,
+                                                          dist_message_t &resp, int timeout_ms) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
     auto it = connections_.find(dst_node);
     if (it == connections_.end() || !it->second.connected || !it->second.client) {
@@ -2069,8 +2021,7 @@ bool DistributedRDMATransport::send_message_wait_response(uint32_t dst_node,
     rdma_req.size = req.payload.mem.size;
     rdma_req.timestamp = req.header.timestamp;
     rdma_req.host_id = static_cast<uint8_t>(req.header.src_node_id);
-    memcpy(rdma_req.data, req.payload.mem.data,
-           std::min(sizeof(rdma_req.data), sizeof(req.payload.mem.data)));
+    memcpy(rdma_req.data, req.payload.mem.data, std::min(sizeof(rdma_req.data), sizeof(req.payload.mem.data)));
 
     RDMAResponse rdma_resp;
     if (it->second.client->send_request(rdma_req, rdma_resp) != 0) {
@@ -2079,21 +2030,18 @@ bool DistributedRDMATransport::send_message_wait_response(uint32_t dst_node,
 
     // Unpack response
     memset(&resp, 0, sizeof(resp));
-    resp.header.msg_type = (req.header.msg_type == DIST_MSG_READ_REQ)
-                            ? DIST_MSG_READ_RESP : DIST_MSG_WRITE_RESP;
+    resp.header.msg_type = (req.header.msg_type == DIST_MSG_READ_REQ) ? DIST_MSG_READ_RESP : DIST_MSG_WRITE_RESP;
     resp.header.src_node_id = dst_node;
     resp.header.dst_node_id = req.header.src_node_id;
     resp.payload.mem.status = rdma_resp.status;
     resp.payload.mem.latency_ns = rdma_resp.latency_ns;
     resp.payload.mem.cache_state = rdma_resp.cache_state;
-    memcpy(resp.payload.mem.data, rdma_resp.data,
-           std::min(sizeof(resp.payload.mem.data), sizeof(rdma_resp.data)));
+    memcpy(resp.payload.mem.data, rdma_resp.data, std::min(sizeof(resp.payload.mem.data), sizeof(rdma_resp.data)));
 
     return true;
 }
 
-bool DistributedRDMATransport::rdma_read(uint32_t dst_node, uint64_t remote_offset,
-                                          void* local_buf, size_t size) {
+bool DistributedRDMATransport::rdma_read(uint32_t dst_node, uint64_t remote_offset, void *local_buf, size_t size) {
     RDMARequest req;
     memset(&req, 0, sizeof(req));
     req.op_type = RDMA_OP_READ;
@@ -2112,13 +2060,14 @@ bool DistributedRDMATransport::rdma_read(uint32_t dst_node, uint64_t remote_offs
         }
     }
 
-    if (resp.status != 0) return false;
+    if (resp.status != 0)
+        return false;
     memcpy(local_buf, resp.data, std::min(size, sizeof(resp.data)));
     return true;
 }
 
-bool DistributedRDMATransport::rdma_write(uint32_t dst_node, uint64_t remote_offset,
-                                           const void* local_buf, size_t size) {
+bool DistributedRDMATransport::rdma_write(uint32_t dst_node, uint64_t remote_offset, const void *local_buf,
+                                          size_t size) {
     RDMARequest req;
     memset(&req, 0, sizeof(req));
     req.op_type = RDMA_OP_WRITE;
@@ -2209,14 +2158,13 @@ RDMACalibrationResult DistributedRDMATransport::calibrate_node(uint32_t dst_node
 
     SPDLOG_INFO("RDMA calibration to node {} ({} samples): "
                 "L={:.3f}us o_s={:.3f}us o_r={:.3f}us g={:.3f}us median_rtt={:.3f}us",
-                dst_node, result.samples, result.L, result.o_s, result.o_r,
-                result.g, median_rtt);
+                dst_node, result.samples, result.L, result.o_s, result.o_r, result.g, median_rtt);
 
     return result;
 }
 
 RDMACalibrationResult DistributedRDMATransport::get_calibration(uint32_t node_id) const {
-    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(calibration_mutex_));
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(calibration_mutex_));
     auto it = calibration_results_.find(node_id);
     if (it != calibration_results_.end()) {
         return it->second;
@@ -2225,7 +2173,7 @@ RDMACalibrationResult DistributedRDMATransport::get_calibration(uint32_t node_id
 }
 
 RDMACalibrationResult DistributedRDMATransport::get_aggregate_calibration() const {
-    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(calibration_mutex_));
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(calibration_mutex_));
 
     if (calibration_results_.empty()) {
         return RDMACalibrationResult();
@@ -2235,8 +2183,9 @@ RDMACalibrationResult DistributedRDMATransport::get_aggregate_calibration() cons
     aggregate.valid = true;
     aggregate.samples = 0;
 
-    for (const auto& [node_id, calib] : calibration_results_) {
-        if (!calib.valid) continue;
+    for (const auto &[node_id, calib] : calibration_results_) {
+        if (!calib.valid)
+            continue;
         aggregate.L += calib.L;
         aggregate.o_s += calib.o_s;
         aggregate.o_r += calib.o_r;
@@ -2274,12 +2223,10 @@ bool DistributedMemoryServer::initialize_rdma_transport() {
         return false;
     }
 
-    rdma_transport_ = std::make_unique<DistributedRDMATransport>(
-        node_id_, tcp_addr_, tcp_transport_port_ + 1000);
+    rdma_transport_ = std::make_unique<DistributedRDMATransport>(node_id_, tcp_addr_, tcp_transport_port_ + 1000);
 
     if (!rdma_transport_->initialize()) {
-        SPDLOG_ERROR("Failed to initialize RDMA transport on {}:{}",
-                     tcp_addr_, tcp_transport_port_ + 1000);
+        SPDLOG_ERROR("Failed to initialize RDMA transport on {}:{}", tcp_addr_, tcp_transport_port_ + 1000);
         rdma_transport_.reset();
         return false;
     }
@@ -2298,14 +2245,15 @@ bool DistributedMemoryServer::initialize_rdma_transport() {
 }
 
 void DistributedMemoryServer::calibrate_all_rdma_nodes() {
-    if (!rdma_transport_) return;
+    if (!rdma_transport_)
+        return;
 
     auto connected = rdma_transport_->get_connected_nodes();
     for (uint32_t node_id : connected) {
         auto result = rdma_transport_->calibrate_node(node_id);
         if (result.valid) {
-            SPDLOG_INFO("RDMA calibration to node {}: L={:.2f}us o_s={:.2f}us o_r={:.2f}us g={:.3f}us",
-                        node_id, result.L, result.o_s, result.o_r, result.g);
+            SPDLOG_INFO("RDMA calibration to node {}: L={:.2f}us o_s={:.2f}us o_r={:.2f}us g={:.3f}us", node_id,
+                        result.L, result.o_s, result.o_r, result.g);
         }
     }
 
@@ -2316,7 +2264,7 @@ void DistributedMemoryServer::calibrate_all_rdma_nodes() {
     }
 }
 
-bool DistributedMemoryServer::connect_rdma_node(uint32_t node_id, const std::string& addr, uint16_t port) {
+bool DistributedMemoryServer::connect_rdma_node(uint32_t node_id, const std::string &addr, uint16_t port) {
     if (!rdma_transport_) {
         SPDLOG_ERROR("RDMA transport not initialized");
         return false;
@@ -2342,8 +2290,8 @@ bool DistributedMemoryServer::connect_rdma_node(uint32_t node_id, const std::str
         }
     }
 
-    FabricLinkConfig link_cfg{50.0, 50.0, 64};  // 50ns hop, 50GB/s, 64 credits (RDMA advantage)
-    auto* remote = controller_->add_remote_endpoint(node_id, peer_base_addr, peer_capacity, link_cfg);
+    FabricLinkConfig link_cfg{50.0, 50.0, 64}; // 50ns hop, 50GB/s, 64 credits (RDMA advantage)
+    auto *remote = controller_->add_remote_endpoint(node_id, peer_base_addr, peer_capacity, link_cfg);
     remote->msg_manager_ = msg_manager_.get();
     remote->coherency_engine_ = controller_->coherency_.get();
 
@@ -2372,8 +2320,8 @@ bool DistributedMemoryServer::calibrate_rdma_logp(uint32_t target_node) {
     return false;
 }
 
-int DistributedMemoryServer::forward_read_rdma(uint32_t target_node, uint64_t addr,
-                                                void* data, size_t size, uint64_t* latency_ns) {
+int DistributedMemoryServer::forward_read_rdma(uint32_t target_node, uint64_t addr, void *data, size_t size,
+                                               uint64_t *latency_ns) {
     forwarded_requests_++;
     remote_reads_++;
 
@@ -2407,8 +2355,7 @@ int DistributedMemoryServer::forward_read_rdma(uint32_t target_node, uint64_t ad
     auto calib = rdma_transport_->get_calibration(target_node);
     double network_latency;
     if (calib.valid) {
-        network_latency = controller_->calculate_logp_latency(node_id_, target_node,
-                                                               req.header.timestamp);
+        network_latency = controller_->calculate_logp_latency(node_id_, target_node, req.header.timestamp);
     } else {
         network_latency = measured_ns;
     }
@@ -2420,15 +2367,14 @@ int DistributedMemoryServer::forward_read_rdma(uint32_t target_node, uint64_t ad
         coherency_overhead = coh_resp.latency_ns;
     }
 
-    *latency_ns = resp.payload.mem.latency_ns +
-                  static_cast<uint64_t>(network_latency) +
+    *latency_ns = resp.payload.mem.latency_ns + static_cast<uint64_t>(network_latency) +
                   static_cast<uint64_t>(coherency_overhead);
 
     return 0;
 }
 
-int DistributedMemoryServer::forward_write_rdma(uint32_t target_node, uint64_t addr,
-                                                  const void* data, size_t size, uint64_t* latency_ns) {
+int DistributedMemoryServer::forward_write_rdma(uint32_t target_node, uint64_t addr, const void *data, size_t size,
+                                                uint64_t *latency_ns) {
     forwarded_requests_++;
     remote_writes_++;
 
@@ -2461,8 +2407,7 @@ int DistributedMemoryServer::forward_write_rdma(uint32_t target_node, uint64_t a
     auto calib = rdma_transport_->get_calibration(target_node);
     double network_latency;
     if (calib.valid) {
-        network_latency = controller_->calculate_logp_latency(node_id_, target_node,
-                                                               req.header.timestamp);
+        network_latency = controller_->calculate_logp_latency(node_id_, target_node, req.header.timestamp);
     } else {
         network_latency = measured_ns;
     }
@@ -2474,8 +2419,7 @@ int DistributedMemoryServer::forward_write_rdma(uint32_t target_node, uint64_t a
         coherency_overhead = coh_resp.latency_ns;
     }
 
-    *latency_ns = resp.payload.mem.latency_ns +
-                  static_cast<uint64_t>(network_latency) +
+    *latency_ns = resp.payload.mem.latency_ns + static_cast<uint64_t>(network_latency) +
                   static_cast<uint64_t>(coherency_overhead);
 
     return 0;
@@ -2485,7 +2429,7 @@ int DistributedMemoryServer::forward_write_rdma(uint32_t target_node, uint64_t a
  * DistributedMHSLDManager removed - replaced by CoherencyEngine.
  * ============================================================================ */
 
-#if 0  // DistributedMHSLDManager removed
+#if 0 // DistributedMHSLDManager removed
 DistributedMHSLDManager_removed::DistributedMHSLDManager(CXLController* ctrl,
                                                    DistributedTCPTransport* tcp,
                                                    DistributedMessageManager* msg_mgr,
@@ -2733,7 +2677,7 @@ DistributedMHSLDManager::Stats DistributedMHSLDManager::get_stats() const {
         cache_hits_.load()
     };
 }
-#endif  // DistributedMHSLDManager removed
+#endif // DistributedMHSLDManager removed
 
 /* ============================================================================
  * TCP Server for QEMU Guest Connections
@@ -2758,7 +2702,7 @@ bool DistributedMemoryServer::start_tcp_server() {
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(tcp_port_);
 
-    if (bind(tcp_server_fd_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+    if (bind(tcp_server_fd_, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         SPDLOG_ERROR("Failed to bind TCP server to port {}: {}", tcp_port_, strerror(errno));
         close(tcp_server_fd_);
         tcp_server_fd_ = -1;
@@ -2785,7 +2729,7 @@ void DistributedMemoryServer::tcp_accept_loop() {
         struct sockaddr_in client_addr;
         socklen_t addr_len = sizeof(client_addr);
 
-        int client_fd = accept(tcp_server_fd_, (struct sockaddr*)&client_addr, &addr_len);
+        int client_fd = accept(tcp_server_fd_, (struct sockaddr *)&client_addr, &addr_len);
         if (client_fd < 0) {
             if (running_) {
                 SPDLOG_ERROR("Failed to accept TCP client: {}", strerror(errno));
@@ -2798,14 +2742,13 @@ void DistributedMemoryServer::tcp_accept_loop() {
         inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
 
         int client_id = next_client_id_++;
-        SPDLOG_INFO("Node {} accepted TCP client {} from {}:{}",
-                    node_id_, client_id, client_ip, ntohs(client_addr.sin_port));
+        SPDLOG_INFO("Node {} accepted TCP client {} from {}:{}", node_id_, client_id, client_ip,
+                    ntohs(client_addr.sin_port));
 
         // Start client handler thread
         {
             std::lock_guard<std::mutex> lock(client_threads_mutex_);
-            client_threads_.emplace_back(&DistributedMemoryServer::handle_tcp_client,
-                                          this, client_fd, client_id);
+            client_threads_.emplace_back(&DistributedMemoryServer::handle_tcp_client, this, client_fd, client_id);
             client_threads_.back().detach();
         }
     }
@@ -2831,12 +2774,11 @@ void DistributedMemoryServer::handle_tcp_client(int client_fd, int client_id) {
                 if (err == ECONNRESET) {
                     SPDLOG_INFO("Node {} client {}: Connection reset", node_id_, client_id);
                 } else if (err != EAGAIN && err != EWOULDBLOCK) {
-                    SPDLOG_ERROR("Node {} client {}: recv failed: {} ({})",
-                                node_id_, client_id, strerror(err), err);
+                    SPDLOG_ERROR("Node {} client {}: recv failed: {} ({})", node_id_, client_id, strerror(err), err);
                 }
             } else {
-                SPDLOG_ERROR("Node {} client {}: Incomplete request - got {} bytes, expected {}",
-                            node_id_, client_id, received, sizeof(req));
+                SPDLOG_ERROR("Node {} client {}: Incomplete request - got {} bytes, expected {}", node_id_, client_id,
+                             received, sizeof(req));
             }
             break;
         }
@@ -2846,88 +2788,86 @@ void DistributedMemoryServer::handle_tcp_client(int client_fd, int client_id) {
 
         // Handle the request using distributed read/write (with proper forwarding)
         switch (req.op_type) {
-            case DIST_OP_READ: {
-                uint8_t buffer[64];
-                uint64_t latency_ns = 0;
-                uint64_t clamped_size = std::min(req.size, (uint64_t)64);
-                int ret = read(req.addr, buffer, clamped_size, &latency_ns);
-                if (ret == 0) {
-                    resp.status = 0;
-                    resp.latency_ns = latency_ns;
-                    memcpy(resp.data, buffer, clamped_size);
-                } else {
-                    resp.status = 1;
-                }
-                break;
-            }
-
-            case DIST_OP_WRITE: {
-                uint64_t latency_ns = 0;
-                uint64_t clamped_size = std::min(req.size, (uint64_t)64);
-                int ret = write(req.addr, req.data, clamped_size, &latency_ns);
-                resp.status = (ret == 0) ? 0 : 1;
+        case DIST_OP_READ: {
+            uint8_t buffer[64];
+            uint64_t latency_ns = 0;
+            uint64_t clamped_size = std::min(req.size, (uint64_t)64);
+            int ret = read(req.addr, buffer, clamped_size, &latency_ns);
+            if (ret == 0) {
+                resp.status = 0;
                 resp.latency_ns = latency_ns;
-                break;
-            }
-
-            case DIST_OP_ATOMIC_FAA: {
-                uint64_t old_value = 0;
-                int ret = atomic_faa(req.addr, req.value, &old_value);
-                resp.status = (ret == 0) ? 0 : 1;
-                resp.old_value = old_value;
-                break;
-            }
-
-            case DIST_OP_ATOMIC_CAS: {
-                uint64_t old_value = 0;
-                int ret = atomic_cas(req.addr, req.expected, req.value, &old_value);
-                resp.status = (ret == 0 && old_value == req.expected) ? 0 : 1;
-                resp.old_value = old_value;
-                break;
-            }
-
-            case DIST_OP_FENCE: {
-                fence();
-                resp.status = 0;
-                break;
-            }
-
-            case DIST_OP_LSA_READ: {
-                uint64_t clamped_size = std::min(req.size, (uint64_t)64);
-                int ret = lsa_read(req.addr, resp.data, clamped_size);
-                resp.status = (ret == 0) ? 0 : 1;
-                break;
-            }
-
-            case DIST_OP_LSA_WRITE: {
-                uint64_t clamped_size = std::min(req.size, (uint64_t)64);
-                int ret = lsa_write(req.addr, req.data, clamped_size);
-                resp.status = (ret == 0) ? 0 : 1;
-                break;
-            }
-
-            case DIST_OP_GET_SHM_INFO: {
-                // Return shared memory info
-                auto shm_info = local_memory_->get_shm_info();
-                uint64_t* data_ptr = reinterpret_cast<uint64_t*>(resp.data);
-                data_ptr[0] = shm_info.base_addr;
-                data_ptr[1] = shm_info.size;
-                data_ptr[2] = shm_info.num_cachelines;
-                resp.status = 0;
-                break;
-            }
-
-            default:
-                SPDLOG_WARN("Node {} client {}: Unknown operation type {}",
-                            node_id_, client_id, req.op_type);
+                memcpy(resp.data, buffer, clamped_size);
+            } else {
                 resp.status = 1;
-                break;
+            }
+            break;
+        }
+
+        case DIST_OP_WRITE: {
+            uint64_t latency_ns = 0;
+            uint64_t clamped_size = std::min(req.size, (uint64_t)64);
+            int ret = write(req.addr, req.data, clamped_size, &latency_ns);
+            resp.status = (ret == 0) ? 0 : 1;
+            resp.latency_ns = latency_ns;
+            break;
+        }
+
+        case DIST_OP_ATOMIC_FAA: {
+            uint64_t old_value = 0;
+            int ret = atomic_faa(req.addr, req.value, &old_value);
+            resp.status = (ret == 0) ? 0 : 1;
+            resp.old_value = old_value;
+            break;
+        }
+
+        case DIST_OP_ATOMIC_CAS: {
+            uint64_t old_value = 0;
+            int ret = atomic_cas(req.addr, req.expected, req.value, &old_value);
+            resp.status = (ret == 0 && old_value == req.expected) ? 0 : 1;
+            resp.old_value = old_value;
+            break;
+        }
+
+        case DIST_OP_FENCE: {
+            fence();
+            resp.status = 0;
+            break;
+        }
+
+        case DIST_OP_LSA_READ: {
+            uint64_t clamped_size = std::min(req.size, (uint64_t)64);
+            int ret = lsa_read(req.addr, resp.data, clamped_size);
+            resp.status = (ret == 0) ? 0 : 1;
+            break;
+        }
+
+        case DIST_OP_LSA_WRITE: {
+            uint64_t clamped_size = std::min(req.size, (uint64_t)64);
+            int ret = lsa_write(req.addr, req.data, clamped_size);
+            resp.status = (ret == 0) ? 0 : 1;
+            break;
+        }
+
+        case DIST_OP_GET_SHM_INFO: {
+            // Return shared memory info
+            auto shm_info = local_memory_->get_shm_info();
+            uint64_t *data_ptr = reinterpret_cast<uint64_t *>(resp.data);
+            data_ptr[0] = shm_info.base_addr;
+            data_ptr[1] = shm_info.size;
+            data_ptr[2] = shm_info.num_cachelines;
+            resp.status = 0;
+            break;
+        }
+
+        default:
+            SPDLOG_WARN("Node {} client {}: Unknown operation type {}", node_id_, client_id, req.op_type);
+            resp.status = 1;
+            break;
         }
 
         // Send response
         if (send(client_fd, &resp, sizeof(resp), MSG_NOSIGNAL) != sizeof(resp)) {
-            SPDLOG_ERROR("Node {} client {}: Failed to send response: {}",
-                        node_id_, client_id, strerror(errno));
+            SPDLOG_ERROR("Node {} client {}: Failed to send response: {}", node_id_, client_id, strerror(errno));
             break;
         }
     }

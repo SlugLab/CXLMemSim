@@ -12,44 +12,44 @@
  */
 
 #define _GNU_SOURCE
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
-#include <fcntl.h>
-#include <unistd.h>
+#include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <dirent.h>
-#include <errno.h>
-#include <sys/file.h>
+#include <unistd.h>
 
 #include "cxl_gpu_cmd.h"
 
 /* CUDA types */
 typedef int CUresult;
 typedef int CUdevice;
-typedef void* CUcontext;
-typedef void* CUmodule;
-typedef void* CUfunction;
-typedef void* CUstream;
-typedef void* CUevent;
+typedef void *CUcontext;
+typedef void *CUmodule;
+typedef void *CUfunction;
+typedef void *CUstream;
+typedef void *CUevent;
 typedef uint64_t CUdeviceptr;
 
 /* CUDA error codes */
-#define CUDA_SUCCESS                    0
-#define CUDA_ERROR_INVALID_VALUE        1
-#define CUDA_ERROR_OUT_OF_MEMORY        2
-#define CUDA_ERROR_NOT_INITIALIZED      3
-#define CUDA_ERROR_DEINITIALIZED        4
-#define CUDA_ERROR_NO_DEVICE            100
-#define CUDA_ERROR_INVALID_DEVICE       101
-#define CUDA_ERROR_INVALID_CONTEXT      201
-#define CUDA_ERROR_INVALID_HANDLE       400
-#define CUDA_ERROR_NOT_FOUND            500
-#define CUDA_ERROR_NOT_READY            600
-#define CUDA_ERROR_LAUNCH_FAILED        700
-#define CUDA_ERROR_UNKNOWN              999
+#define CUDA_SUCCESS 0
+#define CUDA_ERROR_INVALID_VALUE 1
+#define CUDA_ERROR_OUT_OF_MEMORY 2
+#define CUDA_ERROR_NOT_INITIALIZED 3
+#define CUDA_ERROR_DEINITIALIZED 4
+#define CUDA_ERROR_NO_DEVICE 100
+#define CUDA_ERROR_INVALID_DEVICE 101
+#define CUDA_ERROR_INVALID_CONTEXT 201
+#define CUDA_ERROR_INVALID_HANDLE 400
+#define CUDA_ERROR_NOT_FOUND 500
+#define CUDA_ERROR_NOT_READY 600
+#define CUDA_ERROR_LAUNCH_FAILED 700
+#define CUDA_ERROR_UNKNOWN 999
 
 /* CUDA device attributes */
 #define CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK 1
@@ -79,36 +79,31 @@ static CUcontext g_context = NULL;
 
 /* Debug logging */
 static int g_debug = 0;
-#define DLOG(...) do { if (g_debug) fprintf(stderr, "[CXL-CUDA] " __VA_ARGS__); } while(0)
+#define DLOG(...)                                                                                                      \
+    do {                                                                                                               \
+        if (g_debug)                                                                                                   \
+            fprintf(stderr, "[CXL-CUDA] " __VA_ARGS__);                                                                \
+    } while (0)
 
 static inline uint64_t maybe_bar4_offset(uint64_t value);
 static inline uint64_t bar4_offset_of(void *host_ptr);
 
 /* Register access helpers */
-static inline uint32_t reg_read32(uint32_t offset)
-{
-    return *(volatile uint32_t *)((uint8_t *)g_regs + offset);
-}
+static inline uint32_t reg_read32(uint32_t offset) { return *(volatile uint32_t *)((uint8_t *)g_regs + offset); }
 
-static inline uint64_t reg_read64(uint32_t offset)
-{
-    return *(volatile uint64_t *)((uint8_t *)g_regs + offset);
-}
+static inline uint64_t reg_read64(uint32_t offset) { return *(volatile uint64_t *)((uint8_t *)g_regs + offset); }
 
-static inline void reg_write32(uint32_t offset, uint32_t value)
-{
+static inline void reg_write32(uint32_t offset, uint32_t value) {
     *(volatile uint32_t *)((uint8_t *)g_regs + offset) = value;
     __sync_synchronize();
 }
 
-static inline void reg_write64(uint32_t offset, uint64_t value)
-{
+static inline void reg_write64(uint32_t offset, uint64_t value) {
     *(volatile uint64_t *)((uint8_t *)g_regs + offset) = value;
     __sync_synchronize();
 }
 
-static inline void data_write(size_t offset, const void *src, size_t len)
-{
+static inline void data_write(size_t offset, const void *src, size_t len) {
     if (offset + len <= CXL_GPU_DATA_SIZE) {
         const uint8_t *s = (const uint8_t *)src;
         volatile uint8_t *d = g_data + offset;
@@ -120,8 +115,7 @@ static inline void data_write(size_t offset, const void *src, size_t len)
     }
 }
 
-static inline void data_read(size_t offset, void *dst, size_t len)
-{
+static inline void data_read(size_t offset, void *dst, size_t len) {
     if (offset + len <= CXL_GPU_DATA_SIZE) {
         __sync_synchronize();
         uint8_t *d = (uint8_t *)dst;
@@ -135,24 +129,21 @@ static inline void data_read(size_t offset, void *dst, size_t len)
 
 /* Cross-process lock for command serialization.
  * Multiple processes sharing the same BAR2 MMIO registers must serialize
- * their full command sequences (write params → write cmd → poll status → read result).
+ * their full command sequences (write params  write cmd  poll status  read result).
  * Callers that write params before execute_cmd must call cmd_lock()/cmd_unlock(). */
-static void cmd_lock(void)
-{
+static void cmd_lock(void) {
     if (g_pci_fd >= 0)
         flock(g_pci_fd, LOCK_EX);
 }
 
-static void cmd_unlock(void)
-{
+static void cmd_unlock(void) {
     if (g_pci_fd >= 0)
         flock(g_pci_fd, LOCK_UN);
 }
 
 /* Execute command and wait for completion.
  * Caller MUST hold cmd_lock() if params were written before this call. */
-static CUresult execute_cmd(uint32_t cmd)
-{
+static CUresult execute_cmd(uint32_t cmd) {
     reg_write32(CXL_GPU_REG_CMD, cmd);
 
     /* Wait for completion */
@@ -171,10 +162,8 @@ static CUresult execute_cmd(uint32_t cmd)
     return CUDA_ERROR_UNKNOWN;
 }
 
-
 /* Find and map CXL Type 2 device */
-static int find_and_map_device(void)
-{
+static int find_and_map_device(void) {
     DIR *dir;
     struct dirent *entry;
     char path[256];
@@ -189,12 +178,14 @@ static int find_and_map_device(void)
     }
 
     while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_name[0] == '.') continue;
+        if (entry->d_name[0] == '.')
+            continue;
 
         /* Check vendor ID */
         snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/vendor", entry->d_name);
         fd = open(path, O_RDONLY);
-        if (fd < 0) continue;
+        if (fd < 0)
+            continue;
         if (read(fd, buf, sizeof(buf)) <= 0) {
             close(fd);
             continue;
@@ -205,7 +196,8 @@ static int find_and_map_device(void)
         /* Check device ID */
         snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/device", entry->d_name);
         fd = open(path, O_RDONLY);
-        if (fd < 0) continue;
+        if (fd < 0)
+            continue;
         if (read(fd, buf, sizeof(buf)) <= 0) {
             close(fd);
             continue;
@@ -256,8 +248,7 @@ static int find_and_map_device(void)
                 g_bar_size = CXL_GPU_CMD_REG_SIZE;
             }
 
-            void *map = mmap(NULL, g_bar_size, PROT_READ | PROT_WRITE,
-                            MAP_SHARED, g_pci_fd, 0);
+            void *map = mmap(NULL, g_bar_size, PROT_READ | PROT_WRITE, MAP_SHARED, g_pci_fd, 0);
             if (map == MAP_FAILED) {
                 DLOG("Cannot mmap BAR2: %s\n", strerror(errno));
                 close(g_pci_fd);
@@ -281,8 +272,7 @@ static int find_and_map_device(void)
                 return -1;
             }
 
-            DLOG("Device mapped successfully, magic=0x%x version=0x%x\n",
-                 magic, reg_read32(CXL_GPU_REG_VERSION));
+            DLOG("Device mapped successfully, magic=0x%x version=0x%x\n", magic, reg_read32(CXL_GPU_REG_VERSION));
 
             /* Check device ready */
             uint32_t status = reg_read32(CXL_GPU_REG_STATUS);
@@ -292,7 +282,7 @@ static int find_and_map_device(void)
                 close(g_pci_fd);
                 g_pci_fd = -1;
                 g_regs = NULL;
-                continue;  /* try next device */
+                continue; /* try next device */
             }
 
             closedir(dir);
@@ -309,8 +299,7 @@ static int find_and_map_device(void)
  * CUDA Driver API Implementation
  * ======================================================================== */
 
-CUresult cuInit(unsigned int flags)
-{
+CUresult cuInit(unsigned int flags) {
     (void)flags;
 
     g_debug = (getenv("CXL_CUDA_DEBUG") != NULL);
@@ -336,19 +325,20 @@ CUresult cuInit(unsigned int flags)
     return CUDA_SUCCESS;
 }
 
-CUresult cuDriverGetVersion(int *version)
-{
+CUresult cuDriverGetVersion(int *version) {
     DLOG("cuDriverGetVersion\n");
-    if (!version) return CUDA_ERROR_INVALID_VALUE;
+    if (!version)
+        return CUDA_ERROR_INVALID_VALUE;
     *version = 12000; /* CUDA 12.0 */
     return CUDA_SUCCESS;
 }
 
-CUresult cuDeviceGetCount(int *count)
-{
+CUresult cuDeviceGetCount(int *count) {
     DLOG("cuDeviceGetCount\n");
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (!count) return CUDA_ERROR_INVALID_VALUE;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (!count)
+        return CUDA_ERROR_INVALID_VALUE;
 
     cmd_lock();
     CUresult err = execute_cmd(CXL_GPU_CMD_GET_DEVICE_COUNT);
@@ -360,12 +350,14 @@ CUresult cuDeviceGetCount(int *count)
     return err;
 }
 
-CUresult cuDeviceGet(CUdevice *device, int ordinal)
-{
+CUresult cuDeviceGet(CUdevice *device, int ordinal) {
     DLOG("cuDeviceGet(ordinal=%d)\n", ordinal);
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (!device) return CUDA_ERROR_INVALID_VALUE;
-    if (ordinal != 0) return CUDA_ERROR_INVALID_DEVICE;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (!device)
+        return CUDA_ERROR_INVALID_VALUE;
+    if (ordinal != 0)
+        return CUDA_ERROR_INVALID_DEVICE;
 
     cmd_lock();
     reg_write64(CXL_GPU_REG_PARAM0, ordinal);
@@ -377,11 +369,12 @@ CUresult cuDeviceGet(CUdevice *device, int ordinal)
     return err;
 }
 
-CUresult cuDeviceGetName(char *name, int len, CUdevice dev)
-{
+CUresult cuDeviceGetName(char *name, int len, CUdevice dev) {
     DLOG("cuDeviceGetName(dev=%d)\n", dev);
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (!name || len <= 0) return CUDA_ERROR_INVALID_VALUE;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (!name || len <= 0)
+        return CUDA_ERROR_INVALID_VALUE;
 
     /* Read device name from registers */
     size_t to_read = (len < 64) ? len : 64;
@@ -394,22 +387,24 @@ CUresult cuDeviceGetName(char *name, int len, CUdevice dev)
     return CUDA_SUCCESS;
 }
 
-CUresult cuDeviceTotalMem_v2(size_t *bytes, CUdevice dev)
-{
+CUresult cuDeviceTotalMem_v2(size_t *bytes, CUdevice dev) {
     DLOG("cuDeviceTotalMem(dev=%d)\n", dev);
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (!bytes) return CUDA_ERROR_INVALID_VALUE;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (!bytes)
+        return CUDA_ERROR_INVALID_VALUE;
 
     *bytes = reg_read64(CXL_GPU_REG_TOTAL_MEM);
     DLOG("  bytes=%zu\n", *bytes);
     return CUDA_SUCCESS;
 }
 
-CUresult cuDeviceGetAttribute(int *value, int attrib, CUdevice dev)
-{
+CUresult cuDeviceGetAttribute(int *value, int attrib, CUdevice dev) {
     DLOG("cuDeviceGetAttribute(attrib=%d, dev=%d)\n", attrib, dev);
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (!value) return CUDA_ERROR_INVALID_VALUE;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (!value)
+        return CUDA_ERROR_INVALID_VALUE;
 
     switch (attrib) {
     case CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK:
@@ -447,11 +442,12 @@ CUresult cuDeviceGetAttribute(int *value, int attrib, CUdevice dev)
     return CUDA_SUCCESS;
 }
 
-CUresult cuCtxCreate_v2(CUcontext *ctx, unsigned int flags, CUdevice dev)
-{
+CUresult cuCtxCreate_v2(CUcontext *ctx, unsigned int flags, CUdevice dev) {
     DLOG("cuCtxCreate(flags=%u, dev=%d)\n", flags, dev);
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (!ctx) return CUDA_ERROR_INVALID_VALUE;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (!ctx)
+        return CUDA_ERROR_INVALID_VALUE;
 
     cmd_lock();
     CUresult err = execute_cmd(CXL_GPU_CMD_CTX_CREATE);
@@ -464,10 +460,10 @@ CUresult cuCtxCreate_v2(CUcontext *ctx, unsigned int flags, CUdevice dev)
     return err;
 }
 
-CUresult cuCtxDestroy_v2(CUcontext ctx)
-{
+CUresult cuCtxDestroy_v2(CUcontext ctx) {
     DLOG("cuCtxDestroy(ctx=%p)\n", ctx);
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
 
     cmd_lock();
     CUresult err = execute_cmd(CXL_GPU_CMD_CTX_DESTROY);
@@ -478,21 +474,22 @@ CUresult cuCtxDestroy_v2(CUcontext ctx)
     return err;
 }
 
-CUresult cuCtxSynchronize(void)
-{
+CUresult cuCtxSynchronize(void) {
     DLOG("cuCtxSynchronize\n");
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
     cmd_lock();
     CUresult err = execute_cmd(CXL_GPU_CMD_CTX_SYNC);
     cmd_unlock();
     return err;
 }
 
-CUresult cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize)
-{
+CUresult cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize) {
     DLOG("cuMemAlloc(size=%zu)\n", bytesize);
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (!dptr) return CUDA_ERROR_INVALID_VALUE;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (!dptr)
+        return CUDA_ERROR_INVALID_VALUE;
 
     cmd_lock();
     reg_write64(CXL_GPU_REG_PARAM0, bytesize);
@@ -505,10 +502,10 @@ CUresult cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize)
     return err;
 }
 
-CUresult cuMemFree_v2(CUdeviceptr dptr)
-{
+CUresult cuMemFree_v2(CUdeviceptr dptr) {
     DLOG("cuMemFree(dptr=0x%lx)\n", (unsigned long)dptr);
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
 
     cmd_lock();
     reg_write64(CXL_GPU_REG_PARAM0, dptr);
@@ -517,11 +514,12 @@ CUresult cuMemFree_v2(CUdeviceptr dptr)
     return err;
 }
 
-CUresult cuMemcpyHtoD_v2(CUdeviceptr dstDevice, const void *srcHost, size_t byteCount)
-{
+CUresult cuMemcpyHtoD_v2(CUdeviceptr dstDevice, const void *srcHost, size_t byteCount) {
     DLOG("cuMemcpyHtoD(dst=0x%lx, size=%zu)\n", (unsigned long)dstDevice, byteCount);
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (!srcHost) return CUDA_ERROR_INVALID_VALUE;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (!srcHost)
+        return CUDA_ERROR_INVALID_VALUE;
 
     /* Transfer in chunks that fit in data buffer */
     size_t offset = 0;
@@ -547,11 +545,12 @@ CUresult cuMemcpyHtoD_v2(CUdeviceptr dstDevice, const void *srcHost, size_t byte
     return CUDA_SUCCESS;
 }
 
-CUresult cuMemcpyDtoH_v2(void *dstHost, CUdeviceptr srcDevice, size_t byteCount)
-{
+CUresult cuMemcpyDtoH_v2(void *dstHost, CUdeviceptr srcDevice, size_t byteCount) {
     DLOG("cuMemcpyDtoH(src=0x%lx, size=%zu)\n", (unsigned long)srcDevice, byteCount);
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (!dstHost) return CUDA_ERROR_INVALID_VALUE;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (!dstHost)
+        return CUDA_ERROR_INVALID_VALUE;
 
     /* Transfer in chunks */
     size_t offset = 0;
@@ -579,11 +578,12 @@ CUresult cuMemcpyDtoH_v2(void *dstHost, CUdeviceptr srcDevice, size_t byteCount)
     return CUDA_SUCCESS;
 }
 
-CUresult cuModuleLoadData(CUmodule *module, const void *image)
-{
+CUresult cuModuleLoadData(CUmodule *module, const void *image) {
     DLOG("cuModuleLoadData\n");
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (!module || !image) return CUDA_ERROR_INVALID_VALUE;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (!module || !image)
+        return CUDA_ERROR_INVALID_VALUE;
 
     /* Copy PTX to data buffer */
     size_t len = strlen((const char *)image) + 1;
@@ -600,20 +600,20 @@ CUresult cuModuleLoadData(CUmodule *module, const void *image)
     return err;
 }
 
-CUresult cuModuleLoadDataEx(CUmodule *module, const void *image,
-                            unsigned int numOptions, void *options, void **optionValues)
-{
+CUresult cuModuleLoadDataEx(CUmodule *module, const void *image, unsigned int numOptions, void *options,
+                            void **optionValues) {
     (void)numOptions;
     (void)options;
     (void)optionValues;
     return cuModuleLoadData(module, image);
 }
 
-CUresult cuModuleGetFunction(CUfunction *hfunc, CUmodule hmod, const char *name)
-{
+CUresult cuModuleGetFunction(CUfunction *hfunc, CUmodule hmod, const char *name) {
     DLOG("cuModuleGetFunction(mod=%p, name=%s)\n", hmod, name);
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (!hfunc || !name) return CUDA_ERROR_INVALID_VALUE;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (!hfunc || !name)
+        return CUDA_ERROR_INVALID_VALUE;
 
     reg_write64(CXL_GPU_REG_PARAM0, (uintptr_t)hmod);
 
@@ -631,19 +631,17 @@ CUresult cuModuleGetFunction(CUfunction *hfunc, CUmodule hmod, const char *name)
     return err;
 }
 
-CUresult cuLaunchKernel(CUfunction f,
-                        unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
+CUresult cuLaunchKernel(CUfunction f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
                         unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
-                        unsigned int sharedMemBytes, CUstream hStream,
-                        void **kernelParams, void **extra)
-{
+                        unsigned int sharedMemBytes, CUstream hStream, void **kernelParams, void **extra) {
     (void)hStream;
     (void)extra;
 
-    DLOG("cuLaunchKernel(f=%p, grid=(%u,%u,%u), block=(%u,%u,%u), shared=%u)\n",
-         f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes);
+    DLOG("cuLaunchKernel(f=%p, grid=(%u,%u,%u), block=(%u,%u,%u), shared=%u)\n", f, gridDimX, gridDimY, gridDimZ,
+         blockDimX, blockDimY, blockDimZ, sharedMemBytes);
 
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
 
     reg_write64(CXL_GPU_REG_PARAM0, (uintptr_t)f);
     reg_write64(CXL_GPU_REG_PARAM1, ((uint64_t)gridDimY << 32) | gridDimX);
@@ -678,34 +676,33 @@ CUresult cuLaunchKernel(CUfunction f,
     return execute_cmd(CXL_GPU_CMD_LAUNCH_KERNEL);
 }
 
-CUresult cuStreamCreate(CUstream *phStream, unsigned int Flags)
-{
+CUresult cuStreamCreate(CUstream *phStream, unsigned int Flags) {
     DLOG("cuStreamCreate(flags=%u)\n", Flags);
     (void)Flags;
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (!phStream) return CUDA_ERROR_INVALID_VALUE;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (!phStream)
+        return CUDA_ERROR_INVALID_VALUE;
     *phStream = (CUstream)1; /* Dummy stream */
     return CUDA_SUCCESS;
 }
 
-CUresult cuStreamDestroy_v2(CUstream hStream)
-{
+CUresult cuStreamDestroy_v2(CUstream hStream) {
     DLOG("cuStreamDestroy\n");
     (void)hStream;
     return CUDA_SUCCESS;
 }
 
-CUresult cuStreamSynchronize(CUstream hStream)
-{
+CUresult cuStreamSynchronize(CUstream hStream) {
     DLOG("cuStreamSynchronize\n");
     (void)hStream;
     return cuCtxSynchronize();
 }
 
-CUresult cuMemGetInfo_v2(size_t *free, size_t *total)
-{
+CUresult cuMemGetInfo_v2(size_t *free, size_t *total) {
     DLOG("cuMemGetInfo\n");
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
 
     size_t total_mem = reg_read64(CXL_GPU_REG_TOTAL_MEM);
     size_t free_mem = reg_read64(CXL_GPU_REG_FREE_MEM);
@@ -715,104 +712,78 @@ CUresult cuMemGetInfo_v2(size_t *free, size_t *total)
         free_mem = total_mem;
     }
 
-    if (total) *total = total_mem;
-    if (free) *free = free_mem;
+    if (total)
+        *total = total_mem;
+    if (free)
+        *free = free_mem;
 
     return CUDA_SUCCESS;
 }
 
 /* Version compatibility aliases */
-CUresult cuDeviceTotalMem(size_t *bytes, CUdevice dev)
-{
-    return cuDeviceTotalMem_v2(bytes, dev);
-}
+CUresult cuDeviceTotalMem(size_t *bytes, CUdevice dev) { return cuDeviceTotalMem_v2(bytes, dev); }
 
-CUresult cuCtxCreate(CUcontext *ctx, unsigned int flags, CUdevice dev)
-{
-    return cuCtxCreate_v2(ctx, flags, dev);
-}
+CUresult cuCtxCreate(CUcontext *ctx, unsigned int flags, CUdevice dev) { return cuCtxCreate_v2(ctx, flags, dev); }
 
-CUresult cuCtxDestroy(CUcontext ctx)
-{
-    return cuCtxDestroy_v2(ctx);
-}
+CUresult cuCtxDestroy(CUcontext ctx) { return cuCtxDestroy_v2(ctx); }
 
-CUresult cuMemAlloc(CUdeviceptr *dptr, size_t bytesize)
-{
-    return cuMemAlloc_v2(dptr, bytesize);
-}
+CUresult cuMemAlloc(CUdeviceptr *dptr, size_t bytesize) { return cuMemAlloc_v2(dptr, bytesize); }
 
-CUresult cuMemFree(CUdeviceptr dptr)
-{
-    return cuMemFree_v2(dptr);
-}
+CUresult cuMemFree(CUdeviceptr dptr) { return cuMemFree_v2(dptr); }
 
-CUresult cuMemcpyHtoD(CUdeviceptr dst, const void *src, size_t bytes)
-{
-    return cuMemcpyHtoD_v2(dst, src, bytes);
-}
+CUresult cuMemcpyHtoD(CUdeviceptr dst, const void *src, size_t bytes) { return cuMemcpyHtoD_v2(dst, src, bytes); }
 
-CUresult cuMemcpyDtoH(void *dst, CUdeviceptr src, size_t bytes)
-{
-    return cuMemcpyDtoH_v2(dst, src, bytes);
-}
+CUresult cuMemcpyDtoH(void *dst, CUdeviceptr src, size_t bytes) { return cuMemcpyDtoH_v2(dst, src, bytes); }
 
-CUresult cuMemGetInfo(size_t *free, size_t *total)
-{
-    return cuMemGetInfo_v2(free, total);
-}
+CUresult cuMemGetInfo(size_t *free, size_t *total) { return cuMemGetInfo_v2(free, total); }
 
-CUresult cuStreamDestroy(CUstream hStream)
-{
-    return cuStreamDestroy_v2(hStream);
-}
+CUresult cuStreamDestroy(CUstream hStream) { return cuStreamDestroy_v2(hStream); }
 
 /* Additional API functions for comprehensive testing */
 
-CUresult cuCtxGetCurrent(CUcontext *pctx)
-{
+CUresult cuCtxGetCurrent(CUcontext *pctx) {
     DLOG("cuCtxGetCurrent()\n");
-    if (!pctx) return CUDA_ERROR_INVALID_VALUE;
+    if (!pctx)
+        return CUDA_ERROR_INVALID_VALUE;
     *pctx = g_context;
     return CUDA_SUCCESS;
 }
 
-CUresult cuCtxSetCurrent(CUcontext ctx)
-{
+CUresult cuCtxSetCurrent(CUcontext ctx) {
     DLOG("cuCtxSetCurrent(%p)\n", ctx);
     g_context = ctx;
     return CUDA_SUCCESS;
 }
 
-CUresult cuCtxPushCurrent_v2(CUcontext ctx)
-{
+CUresult cuCtxPushCurrent_v2(CUcontext ctx) {
     DLOG("cuCtxPushCurrent_v2(%p)\n", ctx);
     g_context = ctx;
     return CUDA_SUCCESS;
 }
 
-CUresult cuCtxPopCurrent_v2(CUcontext *pctx)
-{
+CUresult cuCtxPopCurrent_v2(CUcontext *pctx) {
     DLOG("cuCtxPopCurrent_v2()\n");
-    if (pctx) *pctx = g_context;
+    if (pctx)
+        *pctx = g_context;
     return CUDA_SUCCESS;
 }
 
-CUresult cuCtxGetDevice(CUdevice *device)
-{
+CUresult cuCtxGetDevice(CUdevice *device) {
     DLOG("cuCtxGetDevice()\n");
-    if (!device) return CUDA_ERROR_INVALID_VALUE;
-    *device = 0;  /* Currently only support device 0 */
+    if (!device)
+        return CUDA_ERROR_INVALID_VALUE;
+    *device = 0; /* Currently only support device 0 */
     return CUDA_SUCCESS;
 }
 
-CUresult cuMemcpyDtoD_v2(CUdeviceptr dstDevice, CUdeviceptr srcDevice, size_t byteCount)
-{
-    DLOG("cuMemcpyDtoD_v2(dst=0x%lx, src=0x%lx, size=%zu)\n",
-         (unsigned long)dstDevice, (unsigned long)srcDevice, byteCount);
+CUresult cuMemcpyDtoD_v2(CUdeviceptr dstDevice, CUdeviceptr srcDevice, size_t byteCount) {
+    DLOG("cuMemcpyDtoD_v2(dst=0x%lx, src=0x%lx, size=%zu)\n", (unsigned long)dstDevice, (unsigned long)srcDevice,
+         byteCount);
 
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (!dstDevice || !srcDevice) return CUDA_ERROR_INVALID_VALUE;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (!dstDevice || !srcDevice)
+        return CUDA_ERROR_INVALID_VALUE;
 
     /* For D2D copy, use intermediate host buffer via data region */
     size_t offset = 0;
@@ -844,17 +815,17 @@ CUresult cuMemcpyDtoD_v2(CUdeviceptr dstDevice, CUdeviceptr srcDevice, size_t by
     return CUDA_SUCCESS;
 }
 
-CUresult cuMemsetD8_v2(CUdeviceptr dstDevice, unsigned char uc, size_t N)
-{
-    DLOG("cuMemsetD8_v2(dst=0x%lx, val=0x%02x, count=%zu)\n",
-         (unsigned long)dstDevice, uc, N);
+CUresult cuMemsetD8_v2(CUdeviceptr dstDevice, unsigned char uc, size_t N) {
+    DLOG("cuMemsetD8_v2(dst=0x%lx, val=0x%02x, count=%zu)\n", (unsigned long)dstDevice, uc, N);
 
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
 
     /* Fill data region with value and copy in chunks */
     size_t chunk_size = N < CXL_GPU_DATA_SIZE ? N : CXL_GPU_DATA_SIZE;
     uint8_t *temp = (uint8_t *)malloc(chunk_size);
-    if (!temp) return CUDA_ERROR_OUT_OF_MEMORY;
+    if (!temp)
+        return CUDA_ERROR_OUT_OF_MEMORY;
     memset(temp, uc, chunk_size);
 
     size_t offset = 0;
@@ -875,18 +846,18 @@ CUresult cuMemsetD8_v2(CUdeviceptr dstDevice, unsigned char uc, size_t N)
     return CUDA_SUCCESS;
 }
 
-CUresult cuMemsetD32_v2(CUdeviceptr dstDevice, unsigned int ui, size_t N)
-{
-    DLOG("cuMemsetD32_v2(dst=0x%lx, val=0x%08x, count=%zu)\n",
-         (unsigned long)dstDevice, ui, N);
+CUresult cuMemsetD32_v2(CUdeviceptr dstDevice, unsigned int ui, size_t N) {
+    DLOG("cuMemsetD32_v2(dst=0x%lx, val=0x%08x, count=%zu)\n", (unsigned long)dstDevice, ui, N);
 
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
 
     /* Fill data region with value and copy in chunks */
     size_t chunk_elements = CXL_GPU_DATA_SIZE / sizeof(unsigned int);
     size_t chunk_size = chunk_elements * sizeof(unsigned int);
     unsigned int *temp = (unsigned int *)malloc(chunk_size);
-    if (!temp) return CUDA_ERROR_OUT_OF_MEMORY;
+    if (!temp)
+        return CUDA_ERROR_OUT_OF_MEMORY;
     for (size_t i = 0; i < chunk_elements; i++) {
         temp[i] = ui;
     }
@@ -909,87 +880,84 @@ CUresult cuMemsetD32_v2(CUdeviceptr dstDevice, unsigned int ui, size_t N)
     return CUDA_SUCCESS;
 }
 
-CUresult cuMemGetAddressRange_v2(CUdeviceptr *pbase, size_t *psize, CUdeviceptr dptr)
-{
+CUresult cuMemGetAddressRange_v2(CUdeviceptr *pbase, size_t *psize, CUdeviceptr dptr) {
     DLOG("cuMemGetAddressRange_v2(dptr=0x%lx)\n", (unsigned long)dptr);
 
     /* Return the pointer itself as base; size is unknown without tracking */
-    if (pbase) *pbase = dptr;
-    if (psize) *psize = 0;  /* Unknown */
+    if (pbase)
+        *pbase = dptr;
+    if (psize)
+        *psize = 0; /* Unknown */
     return CUDA_SUCCESS;
 }
 
-CUresult cuPointerGetAttribute(void *data, int attribute, CUdeviceptr ptr)
-{
+CUresult cuPointerGetAttribute(void *data, int attribute, CUdeviceptr ptr) {
     DLOG("cuPointerGetAttribute(attr=%d, ptr=0x%lx)\n", attribute, (unsigned long)ptr);
 
-    if (!data) return CUDA_ERROR_INVALID_VALUE;
+    if (!data)
+        return CUDA_ERROR_INVALID_VALUE;
 
     /* Minimal implementation */
     switch (attribute) {
-        case 1:  /* CU_POINTER_ATTRIBUTE_CONTEXT */
-            *(CUcontext *)data = g_context;
-            return CUDA_SUCCESS;
-        case 2:  /* CU_POINTER_ATTRIBUTE_MEMORY_TYPE */
-            *(int *)data = 2;  /* Device memory */
-            return CUDA_SUCCESS;
-        default:
-            return CUDA_ERROR_INVALID_VALUE;
+    case 1: /* CU_POINTER_ATTRIBUTE_CONTEXT */
+        *(CUcontext *)data = g_context;
+        return CUDA_SUCCESS;
+    case 2: /* CU_POINTER_ATTRIBUTE_MEMORY_TYPE */
+        *(int *)data = 2; /* Device memory */
+        return CUDA_SUCCESS;
+    default:
+        return CUDA_ERROR_INVALID_VALUE;
     }
 }
 
-CUresult cuModuleUnload(CUmodule hmod)
-{
+CUresult cuModuleUnload(CUmodule hmod) {
     DLOG("cuModuleUnload(%p)\n", hmod);
     /* Modules are managed by hetGPU backend */
     return CUDA_SUCCESS;
 }
 
-CUresult cuEventCreate(CUevent *phEvent, unsigned int Flags)
-{
+CUresult cuEventCreate(CUevent *phEvent, unsigned int Flags) {
     DLOG("cuEventCreate(flags=%u)\n", Flags);
-    if (!phEvent) return CUDA_ERROR_INVALID_VALUE;
+    if (!phEvent)
+        return CUDA_ERROR_INVALID_VALUE;
     /* Create a dummy event handle */
     static int event_counter = 0;
     *phEvent = (CUevent)(uintptr_t)(++event_counter);
     return CUDA_SUCCESS;
 }
 
-CUresult cuEventDestroy_v2(CUevent hEvent)
-{
+CUresult cuEventDestroy_v2(CUevent hEvent) {
     DLOG("cuEventDestroy_v2(%p)\n", hEvent);
     return CUDA_SUCCESS;
 }
 
-CUresult cuEventRecord(CUevent hEvent, CUstream hStream)
-{
+CUresult cuEventRecord(CUevent hEvent, CUstream hStream) {
     DLOG("cuEventRecord(%p, stream=%p)\n", hEvent, hStream);
     return CUDA_SUCCESS;
 }
 
-CUresult cuEventSynchronize(CUevent hEvent)
-{
+CUresult cuEventSynchronize(CUevent hEvent) {
     DLOG("cuEventSynchronize(%p)\n", hEvent);
     return CUDA_SUCCESS;
 }
 
-CUresult cuEventElapsedTime(float *pMilliseconds, CUevent hStart, CUevent hEnd)
-{
+CUresult cuEventElapsedTime(float *pMilliseconds, CUevent hStart, CUevent hEnd) {
     DLOG("cuEventElapsedTime(%p, %p)\n", hStart, hEnd);
-    if (!pMilliseconds) return CUDA_ERROR_INVALID_VALUE;
+    if (!pMilliseconds)
+        return CUDA_ERROR_INVALID_VALUE;
     /* Return a dummy elapsed time since we don't have real timing */
     *pMilliseconds = 0.001f;
     return CUDA_SUCCESS;
 }
 
-CUresult cuDeviceGetUuid(void *uuid, CUdevice dev)
-{
+CUresult cuDeviceGetUuid(void *uuid, CUdevice dev) {
     DLOG("cuDeviceGetUuid(dev=%d)\n", dev);
-    if (!uuid) return CUDA_ERROR_INVALID_VALUE;
+    if (!uuid)
+        return CUDA_ERROR_INVALID_VALUE;
     /* Generate a deterministic UUID based on device number */
     memset(uuid, 0, 16);
-    ((unsigned char *)uuid)[0] = 0xCE;  /* CXL */
-    ((unsigned char *)uuid)[1] = 0x10;  /* Type 2 */
+    ((unsigned char *)uuid)[0] = 0xCE; /* CXL */
+    ((unsigned char *)uuid)[1] = 0x10; /* Type 2 */
     ((unsigned char *)uuid)[15] = (unsigned char)dev;
     return CUDA_SUCCESS;
 }
@@ -1001,17 +969,17 @@ CUresult cuDeviceGetUuid(void *uuid, CUdevice dev)
 /* P2P peer info structure */
 typedef struct {
     uint32_t peer_id;
-    uint32_t peer_type;  /* CXL_P2P_PEER_TYPE2 or CXL_P2P_PEER_TYPE3 */
+    uint32_t peer_type; /* CXL_P2P_PEER_TYPE2 or CXL_P2P_PEER_TYPE3 */
     uint64_t mem_size;
     int coherent;
 } CXLPeerInfo;
 
 /* Discover P2P peer devices on the CXL fabric */
-int cxl_p2p_discover_peers(int *num_peers)
-{
+int cxl_p2p_discover_peers(int *num_peers) {
     DLOG("cxl_p2p_discover_peers()\n");
 
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
 
     CUresult result = execute_cmd(CXL_GPU_CMD_P2P_DISCOVER);
     if (result != CUDA_SUCCESS) {
@@ -1027,12 +995,13 @@ int cxl_p2p_discover_peers(int *num_peers)
 }
 
 /* Get peer device information */
-int cxl_p2p_get_peer_info(uint32_t peer_id, CXLPeerInfo *info)
-{
+int cxl_p2p_get_peer_info(uint32_t peer_id, CXLPeerInfo *info) {
     DLOG("cxl_p2p_get_peer_info(peer=%u)\n", peer_id);
 
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (!info) return CUDA_ERROR_INVALID_VALUE;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (!info)
+        return CUDA_ERROR_INVALID_VALUE;
 
     reg_write64(CXL_GPU_REG_PARAM0, peer_id);
     CUresult result = execute_cmd(CXL_GPU_CMD_P2P_GET_PEER_INFO);
@@ -1045,21 +1014,20 @@ int cxl_p2p_get_peer_info(uint32_t peer_id, CXLPeerInfo *info)
     info->mem_size = reg_read64(CXL_GPU_REG_RESULT1);
     info->coherent = (int)reg_read64(CXL_GPU_REG_RESULT2);
 
-    DLOG("  peer %u: type=%u, size=%lu MB, coherent=%d\n",
-         peer_id, info->peer_type, info->mem_size / (1024*1024), info->coherent);
+    DLOG("  peer %u: type=%u, size=%lu MB, coherent=%d\n", peer_id, info->peer_type, info->mem_size / (1024 * 1024),
+         info->coherent);
     return CUDA_SUCCESS;
 }
 
 /* Transfer data from GPU memory to Type 3 CXL memory */
-int cxl_p2p_gpu_to_mem(uint32_t t3_peer_id, uint64_t gpu_offset,
-                       uint64_t mem_offset, uint64_t size)
-{
-    DLOG("cxl_p2p_gpu_to_mem(peer=%u, gpu_off=0x%lx, mem_off=0x%lx, size=%lu)\n",
-         t3_peer_id, (unsigned long)gpu_offset, (unsigned long)mem_offset,
-         (unsigned long)size);
+int cxl_p2p_gpu_to_mem(uint32_t t3_peer_id, uint64_t gpu_offset, uint64_t mem_offset, uint64_t size) {
+    DLOG("cxl_p2p_gpu_to_mem(peer=%u, gpu_off=0x%lx, mem_off=0x%lx, size=%lu)\n", t3_peer_id, (unsigned long)gpu_offset,
+         (unsigned long)mem_offset, (unsigned long)size);
 
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (size == 0) return CUDA_SUCCESS;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (size == 0)
+        return CUDA_SUCCESS;
 
     reg_write64(CXL_GPU_REG_PARAM0, t3_peer_id);
     reg_write64(CXL_GPU_REG_PARAM1, gpu_offset);
@@ -1074,15 +1042,14 @@ int cxl_p2p_gpu_to_mem(uint32_t t3_peer_id, uint64_t gpu_offset,
 }
 
 /* Transfer data from Type 3 CXL memory to GPU memory */
-int cxl_p2p_mem_to_gpu(uint32_t t3_peer_id, uint64_t mem_offset,
-                       uint64_t gpu_offset, uint64_t size)
-{
-    DLOG("cxl_p2p_mem_to_gpu(peer=%u, mem_off=0x%lx, gpu_off=0x%lx, size=%lu)\n",
-         t3_peer_id, (unsigned long)mem_offset, (unsigned long)gpu_offset,
-         (unsigned long)size);
+int cxl_p2p_mem_to_gpu(uint32_t t3_peer_id, uint64_t mem_offset, uint64_t gpu_offset, uint64_t size) {
+    DLOG("cxl_p2p_mem_to_gpu(peer=%u, mem_off=0x%lx, gpu_off=0x%lx, size=%lu)\n", t3_peer_id, (unsigned long)mem_offset,
+         (unsigned long)gpu_offset, (unsigned long)size);
 
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (size == 0) return CUDA_SUCCESS;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (size == 0)
+        return CUDA_SUCCESS;
 
     reg_write64(CXL_GPU_REG_PARAM0, t3_peer_id);
     reg_write64(CXL_GPU_REG_PARAM1, mem_offset);
@@ -1097,15 +1064,15 @@ int cxl_p2p_mem_to_gpu(uint32_t t3_peer_id, uint64_t mem_offset,
 }
 
 /* Transfer data between two Type 3 CXL memory devices */
-int cxl_p2p_mem_to_mem(uint32_t src_peer_id, uint32_t dst_peer_id,
-                       uint64_t src_offset, uint64_t dst_offset, uint64_t size)
-{
-    DLOG("cxl_p2p_mem_to_mem(src=%u, dst=%u, src_off=0x%lx, dst_off=0x%lx, size=%lu)\n",
-         src_peer_id, dst_peer_id, (unsigned long)src_offset,
-         (unsigned long)dst_offset, (unsigned long)size);
+int cxl_p2p_mem_to_mem(uint32_t src_peer_id, uint32_t dst_peer_id, uint64_t src_offset, uint64_t dst_offset,
+                       uint64_t size) {
+    DLOG("cxl_p2p_mem_to_mem(src=%u, dst=%u, src_off=0x%lx, dst_off=0x%lx, size=%lu)\n", src_peer_id, dst_peer_id,
+         (unsigned long)src_offset, (unsigned long)dst_offset, (unsigned long)size);
 
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
-    if (size == 0) return CUDA_SUCCESS;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
+    if (size == 0)
+        return CUDA_SUCCESS;
 
     reg_write64(CXL_GPU_REG_PARAM0, src_peer_id);
     reg_write64(CXL_GPU_REG_PARAM1, dst_peer_id);
@@ -1121,22 +1088,21 @@ int cxl_p2p_mem_to_mem(uint32_t src_peer_id, uint32_t dst_peer_id,
 }
 
 /* Wait for all pending P2P transfers to complete */
-int cxl_p2p_sync(void)
-{
+int cxl_p2p_sync(void) {
     DLOG("cxl_p2p_sync()\n");
 
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
 
     return execute_cmd(CXL_GPU_CMD_P2P_SYNC);
 }
 
 /* Get P2P engine status and statistics */
-int cxl_p2p_get_status(int *num_peers, uint64_t *transfers_completed,
-                       uint64_t *bytes_transferred)
-{
+int cxl_p2p_get_status(int *num_peers, uint64_t *transfers_completed, uint64_t *bytes_transferred) {
     DLOG("cxl_p2p_get_status()\n");
 
-    if (!g_initialized) return CUDA_ERROR_NOT_INITIALIZED;
+    if (!g_initialized)
+        return CUDA_ERROR_NOT_INITIALIZED;
 
     CUresult result = execute_cmd(CXL_GPU_CMD_P2P_GET_STATUS);
     if (result != CUDA_SUCCESS) {
@@ -1160,71 +1126,109 @@ int cxl_p2p_get_status(int *num_peers, uint64_t *transfers_completed,
  * BAR4 Coherent Memory Support
  * ======================================================================== */
 
-static int         g_bar4_fd   = -1;
-static volatile uint8_t *g_bar4_ptr  = NULL;
-static size_t      g_bar4_size = 0;
-static uint64_t    g_coh_offset = 0;   /* bump allocator offset */
+static int g_bar4_fd = -1;
+static volatile uint8_t *g_bar4_ptr = NULL;
+static size_t g_bar4_size = 0;
+static uint64_t g_coh_offset = 0; /* bump allocator offset */
 
-static volatile uint8_t *ensure_bar4(void)
-{
-    if (g_bar4_ptr) return g_bar4_ptr;
+static volatile uint8_t *ensure_bar4(void) {
+    if (g_bar4_ptr)
+        return g_bar4_ptr;
 
     /* Find BAR4 for the device we already mapped */
     char path[256];
     /* Scan sysfs for the device whose BAR2 we have open */
     DIR *dir = opendir("/sys/bus/pci/devices");
-    if (!dir) return NULL;
+    if (!dir)
+        return NULL;
     struct dirent *ent;
     while ((ent = readdir(dir)) != NULL) {
-        if (ent->d_name[0] == '.') continue;
+        if (ent->d_name[0] == '.')
+            continue;
         snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/resource", ent->d_name);
         FILE *fp = fopen(path, "r");
-        if (!fp) continue;
+        if (!fp)
+            continue;
         uint64_t start, end, flags;
         /* Skip BAR0..BAR3 (4 lines) */
         for (int i = 0; i < 4; i++) {
-            if (fscanf(fp, "0x%lx 0x%lx 0x%lx\n", &start, &end, &flags) != 3) break;
+            if (fscanf(fp, "0x%lx 0x%lx 0x%lx\n", &start, &end, &flags) != 3)
+                break;
         }
         /* Read BAR4 */
         if (fscanf(fp, "0x%lx 0x%lx 0x%lx", &start, &end, &flags) == 3 && end > start) {
             g_bar4_size = end - start + 1;
         }
         fclose(fp);
-        if (g_bar4_size == 0) continue;
+        if (g_bar4_size == 0)
+            continue;
 
         /* Check vendor/device match */
         snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/vendor", ent->d_name);
         int fd = open(path, O_RDONLY);
-        if (fd < 0) continue;
-        char buf[32]; int n = read(fd, buf, sizeof(buf)-1); close(fd);
-        if (n <= 0) continue; buf[n] = '\0';
-        if ((uint16_t)strtol(buf, NULL, 16) != CXL_TYPE2_VENDOR_ID) { g_bar4_size = 0; continue; }
+        if (fd < 0)
+            continue;
+        char buf[32];
+        int n = read(fd, buf, sizeof(buf) - 1);
+        close(fd);
+        if (n <= 0)
+            continue;
+        buf[n] = '\0';
+        if ((uint16_t)strtol(buf, NULL, 16) != CXL_TYPE2_VENDOR_ID) {
+            g_bar4_size = 0;
+            continue;
+        }
 
         snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/device", ent->d_name);
         fd = open(path, O_RDONLY);
-        if (fd < 0) continue;
-        n = read(fd, buf, sizeof(buf)-1); close(fd);
-        if (n <= 0) continue; buf[n] = '\0';
-        if ((uint16_t)strtol(buf, NULL, 16) != CXL_TYPE2_DEVICE_ID) { g_bar4_size = 0; continue; }
+        if (fd < 0)
+            continue;
+        n = read(fd, buf, sizeof(buf) - 1);
+        close(fd);
+        if (n <= 0)
+            continue;
+        buf[n] = '\0';
+        if ((uint16_t)strtol(buf, NULL, 16) != CXL_TYPE2_DEVICE_ID) {
+            g_bar4_size = 0;
+            continue;
+        }
 
         /* Check this is the same device we're using (status must be READY) */
         snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/resource2", ent->d_name);
         int bar2_fd = open(path, O_RDWR | O_SYNC);
-        if (bar2_fd < 0) { g_bar4_size = 0; continue; }
+        if (bar2_fd < 0) {
+            g_bar4_size = 0;
+            continue;
+        }
         void *bar2_map = mmap(NULL, 4096, PROT_READ, MAP_SHARED, bar2_fd, 0);
-        if (bar2_map == MAP_FAILED) { close(bar2_fd); g_bar4_size = 0; continue; }
+        if (bar2_map == MAP_FAILED) {
+            close(bar2_fd);
+            g_bar4_size = 0;
+            continue;
+        }
         uint32_t magic = *(volatile uint32_t *)bar2_map;
         uint32_t status = *(volatile uint32_t *)((uint8_t *)bar2_map + 8);
         munmap(bar2_map, 4096);
         close(bar2_fd);
-        if (magic != CXL_GPU_MAGIC || !(status & CXL_GPU_STATUS_READY)) { g_bar4_size = 0; continue; }
+        if (magic != CXL_GPU_MAGIC || !(status & CXL_GPU_STATUS_READY)) {
+            g_bar4_size = 0;
+            continue;
+        }
 
         /* Map BAR4 */
         snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/resource4", ent->d_name);
         g_bar4_fd = open(path, O_RDWR);
-        if (g_bar4_fd < 0) { g_bar4_size = 0; continue; }
+        if (g_bar4_fd < 0) {
+            g_bar4_size = 0;
+            continue;
+        }
         void *b4 = mmap(NULL, g_bar4_size, PROT_READ | PROT_WRITE, MAP_SHARED, g_bar4_fd, 0);
-        if (b4 == MAP_FAILED) { close(g_bar4_fd); g_bar4_fd = -1; g_bar4_size = 0; continue; }
+        if (b4 == MAP_FAILED) {
+            close(g_bar4_fd);
+            g_bar4_fd = -1;
+            g_bar4_size = 0;
+            continue;
+        }
         g_bar4_ptr = (volatile uint8_t *)b4;
         DLOG("Mapped BAR4 for %s (%zu MB)\n", ent->d_name, g_bar4_size >> 20);
         closedir(dir);
@@ -1234,23 +1238,22 @@ static volatile uint8_t *ensure_bar4(void)
     return NULL;
 }
 
-static inline uint64_t maybe_bar4_offset(uint64_t value)
-{
+static inline uint64_t maybe_bar4_offset(uint64_t value) {
     uintptr_t ptr = (uintptr_t)value;
 
-    if (g_bar4_ptr && ptr >= (uintptr_t)g_bar4_ptr &&
-        ptr < (uintptr_t)g_bar4_ptr + g_bar4_size) {
+    if (g_bar4_ptr && ptr >= (uintptr_t)g_bar4_ptr && ptr < (uintptr_t)g_bar4_ptr + g_bar4_size) {
         return (uint64_t)(ptr - (uintptr_t)g_bar4_ptr);
     }
     return value;
 }
 
-int cxlCoherentAlloc(uint64_t size, void **host_ptr)
-{
+int cxlCoherentAlloc(uint64_t size, void **host_ptr) {
     DLOG("cxlCoherentAlloc(size=%lu)\n", (unsigned long)size);
-    if (!host_ptr || size == 0) return 1;
+    if (!host_ptr || size == 0)
+        return 1;
     volatile uint8_t *bar4 = ensure_bar4();
-    if (!bar4) return 3;
+    if (!bar4)
+        return 3;
 
     if (g_regs) {
         cmd_lock();
@@ -1269,14 +1272,14 @@ int cxlCoherentAlloc(uint64_t size, void **host_ptr)
     }
 
     size = (size + 4095) & ~4095UL;
-    if (g_coh_offset + size > g_bar4_size) return 2;
+    if (g_coh_offset + size > g_bar4_size)
+        return 2;
     *host_ptr = (void *)(bar4 + g_coh_offset);
     g_coh_offset += size;
     return 0;
 }
 
-int cxlCoherentFree(void *host_ptr)
-{
+int cxlCoherentFree(void *host_ptr) {
     if (g_regs && host_ptr) {
         uint64_t offset = bar4_offset_of(host_ptr);
 
@@ -1290,28 +1293,27 @@ int cxlCoherentFree(void *host_ptr)
     return 0;
 }
 
-void *cxlDeviceToHost(uint64_t dev_offset)
-{
+void *cxlDeviceToHost(uint64_t dev_offset) {
     volatile uint8_t *bar4 = ensure_bar4();
-    if (!bar4) return NULL;
+    if (!bar4)
+        return NULL;
     return (void *)(bar4 + dev_offset);
 }
 
-int cxlCoherentFence(void)
-{
+int cxlCoherentFence(void) {
     __sync_synchronize();
     return 0;
 }
 
-static inline uint64_t bar4_offset_of(void *host_ptr)
-{
-    if (!host_ptr || !g_bar4_ptr) return 0;
+static inline uint64_t bar4_offset_of(void *host_ptr) {
+    if (!host_ptr || !g_bar4_ptr)
+        return 0;
     return (uint64_t)((uint8_t *)host_ptr - (uint8_t *)g_bar4_ptr);
 }
 
-int cxlSetBias(void *host_ptr, uint64_t size, int bias_mode)
-{
-    if (!g_regs) return 1;
+int cxlSetBias(void *host_ptr, uint64_t size, int bias_mode) {
+    if (!g_regs)
+        return 1;
     uint64_t addr = bar4_offset_of(host_ptr);
     cmd_lock();
     reg_write64(CXL_GPU_REG_PARAM0, addr);
@@ -1322,9 +1324,9 @@ int cxlSetBias(void *host_ptr, uint64_t size, int bias_mode)
     return r == CUDA_SUCCESS ? 0 : 1;
 }
 
-int cxlGetBias(void *host_ptr, int *bias_mode)
-{
-    if (!g_regs || !bias_mode) return 1;
+int cxlGetBias(void *host_ptr, int *bias_mode) {
+    if (!g_regs || !bias_mode)
+        return 1;
     uint64_t addr = bar4_offset_of(host_ptr);
     cmd_lock();
     reg_write64(CXL_GPU_REG_PARAM0, addr);
@@ -1334,9 +1336,9 @@ int cxlGetBias(void *host_ptr, int *bias_mode)
     return r == CUDA_SUCCESS ? 0 : 1;
 }
 
-int cxlBiasFlip(void *host_ptr, uint64_t size, int new_bias)
-{
-    if (!g_regs) return 1;
+int cxlBiasFlip(void *host_ptr, uint64_t size, int new_bias) {
+    if (!g_regs)
+        return 1;
     uint64_t addr = bar4_offset_of(host_ptr);
     cmd_lock();
     reg_write64(CXL_GPU_REG_PARAM0, addr);
@@ -1348,17 +1350,27 @@ int cxlBiasFlip(void *host_ptr, uint64_t size, int new_bias)
 }
 
 typedef struct {
-    uint64_t snoop_hits; uint64_t snoop_misses;
-    uint64_t coherency_requests; uint64_t back_invalidations;
-    uint64_t writebacks; uint64_t evictions; uint64_t bias_flips;
-    uint64_t device_bias_hits; uint64_t host_bias_hits;
-    uint64_t upgrades; uint64_t downgrades; uint64_t directory_entries;
+    uint64_t snoop_hits;
+    uint64_t snoop_misses;
+    uint64_t coherency_requests;
+    uint64_t back_invalidations;
+    uint64_t writebacks;
+    uint64_t evictions;
+    uint64_t bias_flips;
+    uint64_t device_bias_hits;
+    uint64_t host_bias_hits;
+    uint64_t upgrades;
+    uint64_t downgrades;
+    uint64_t directory_entries;
 } CXLCoherencyStats;
 
-int cxlGetCoherencyStats(CXLCoherencyStats *stats)
-{
-    if (!stats) return 1;
-    if (!g_regs) { memset(stats, 0, sizeof(*stats)); return 2; }
+int cxlGetCoherencyStats(CXLCoherencyStats *stats) {
+    if (!stats)
+        return 1;
+    if (!g_regs) {
+        memset(stats, 0, sizeof(*stats));
+        return 2;
+    }
 
     cmd_lock();
     CUresult r = execute_cmd(CXL_GPU_CMD_COH_GET_STATS);
@@ -1367,53 +1379,48 @@ int cxlGetCoherencyStats(CXLCoherencyStats *stats)
         memset(stats, 0, sizeof(*stats));
         return 3;
     }
-    stats->snoop_hits          = reg_read64(CXL_GPU_REG_RESULT0);
-    stats->snoop_misses        = reg_read64(CXL_GPU_REG_RESULT1);
-    stats->coherency_requests  = reg_read64(CXL_GPU_REG_RESULT2);
-    stats->back_invalidations  = reg_read64(CXL_GPU_REG_RESULT3);
+    stats->snoop_hits = reg_read64(CXL_GPU_REG_RESULT0);
+    stats->snoop_misses = reg_read64(CXL_GPU_REG_RESULT1);
+    stats->coherency_requests = reg_read64(CXL_GPU_REG_RESULT2);
+    stats->back_invalidations = reg_read64(CXL_GPU_REG_RESULT3);
 
     uint64_t ext[8];
     data_read(0, ext, sizeof(ext));
-    stats->writebacks          = ext[0];
-    stats->evictions           = ext[1];
-    stats->bias_flips          = ext[2];
-    stats->device_bias_hits    = ext[3];
-    stats->host_bias_hits      = ext[4];
-    stats->upgrades            = ext[5];
-    stats->downgrades          = ext[6];
-    stats->directory_entries   = ext[7];
+    stats->writebacks = ext[0];
+    stats->evictions = ext[1];
+    stats->bias_flips = ext[2];
+    stats->device_bias_hits = ext[3];
+    stats->host_bias_hits = ext[4];
+    stats->upgrades = ext[5];
+    stats->downgrades = ext[6];
+    stats->directory_entries = ext[7];
     cmd_unlock();
     return 0;
 }
 
-int cxlResetCoherencyStats(void)
-{
-    if (!g_regs) return 1;
+int cxlResetCoherencyStats(void) {
+    if (!g_regs)
+        return 1;
     cmd_lock();
     CUresult r = execute_cmd(CXL_GPU_CMD_COH_RESET_STATS);
     cmd_unlock();
     return r == CUDA_SUCCESS ? 0 : 1;
 }
 
-CUresult cuCxlGetCoherentBase(CUdeviceptr *base, size_t *size, CUdevice dev)
-{
+CUresult cuCxlGetCoherentBase(CUdeviceptr *base, size_t *size, CUdevice dev) {
     (void)dev;
     volatile uint8_t *bar4 = ensure_bar4();
-    if (base) *base = bar4 ? (CUdeviceptr)(uintptr_t)bar4 : 0;
-    if (size) *size = g_bar4_size;
+    if (base)
+        *base = bar4 ? (CUdeviceptr)(uintptr_t)bar4 : 0;
+    if (size)
+        *size = g_bar4_size;
     return 0;
 }
 
 /* Library initialization/cleanup */
-__attribute__((constructor))
-static void libcuda_init(void)
-{
-    DLOG("libcuda.so loaded (CXL Type 2 shim)\n");
-}
+__attribute__((constructor)) static void libcuda_init(void) { DLOG("libcuda.so loaded (CXL Type 2 shim)\n"); }
 
-__attribute__((destructor))
-static void libcuda_cleanup(void)
-{
+__attribute__((destructor)) static void libcuda_cleanup(void) {
     DLOG("libcuda.so unloading\n");
     if (g_bar4_ptr) {
         munmap((void *)g_bar4_ptr, g_bar4_size);

@@ -8,17 +8,17 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 
 /* CUDA types and error codes */
 typedef int CUresult;
 typedef int CUdevice;
-typedef void* CUcontext;
-typedef void* CUmodule;
-typedef void* CUfunction;
+typedef void *CUcontext;
+typedef void *CUmodule;
+typedef void *CUfunction;
 typedef uint64_t CUdeviceptr;
 
 #define CUDA_SUCCESS 0
@@ -47,16 +47,16 @@ extern CUresult cuMemGetInfo_v2(size_t *free, size_t *total);
 #define CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR 75
 #define CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR 76
 
-#define CHECK_CUDA(call) do { \
-    CUresult err = call; \
-    if (err != CUDA_SUCCESS) { \
-        printf("CUDA Error %d at %s:%d\n", err, __FILE__, __LINE__); \
-        return -1; \
-    } \
-} while(0)
+#define CHECK_CUDA(call)                                                                                               \
+    do {                                                                                                               \
+        CUresult err = call;                                                                                           \
+        if (err != CUDA_SUCCESS) {                                                                                     \
+            printf("CUDA Error %d at %s:%d\n", err, __FILE__, __LINE__);                                               \
+            return -1;                                                                                                 \
+        }                                                                                                              \
+    } while (0)
 
-int test_initialization(void)
-{
+int test_initialization(void) {
     int version;
     int count;
 
@@ -79,8 +79,7 @@ int test_initialization(void)
     return 0;
 }
 
-int test_device_info(void)
-{
+int test_device_info(void) {
     CUdevice dev;
     char name[256];
     size_t totalMem;
@@ -115,8 +114,7 @@ int test_device_info(void)
     return 0;
 }
 
-int test_context(void)
-{
+int test_context(void) {
     CUdevice dev;
     CUcontext ctx;
 
@@ -135,8 +133,7 @@ int test_context(void)
     return 0;
 }
 
-int test_memory(void)
-{
+int test_memory(void) {
     CUdevice dev;
     CUcontext ctx;
     CUdeviceptr devPtr;
@@ -149,8 +146,7 @@ int test_memory(void)
     CHECK_CUDA(cuCtxCreate_v2(&ctx, 0, dev));
 
     CHECK_CUDA(cuMemGetInfo_v2(&free_mem, &total_mem));
-    printf("  Memory: %zu MB free / %zu MB total\n",
-           free_mem / (1024*1024), total_mem / (1024*1024));
+    printf("  Memory: %zu MB free / %zu MB total\n", free_mem / (1024 * 1024), total_mem / (1024 * 1024));
 
     CHECK_CUDA(cuMemAlloc_v2(&devPtr, SIZE));
     printf("  Allocated %zu bytes at device address 0x%lx\n", SIZE, (unsigned long)devPtr);
@@ -162,8 +158,7 @@ int test_memory(void)
     return 0;
 }
 
-int test_memcpy(void)
-{
+int test_memcpy(void) {
     CUdevice dev;
     CUcontext ctx;
     CUdeviceptr devPtr;
@@ -203,8 +198,7 @@ int test_memcpy(void)
         if (hostSrc[i] != hostDst[i]) {
             mismatch++;
             if (mismatch <= 5) {
-                printf("  Mismatch at offset %zu: expected 0x%02x, got 0x%02x\n",
-                       i, hostSrc[i], hostDst[i]);
+                printf("  Mismatch at offset %zu: expected 0x%02x, got 0x%02x\n", i, hostSrc[i], hostDst[i]);
             }
         }
     }
@@ -224,8 +218,7 @@ int test_memcpy(void)
     return mismatch ? -1 : 0;
 }
 
-int main(void)
-{
+int main(void) {
     int failed = 0;
 
     printf("CXL Type 2 GPU - CUDA Test Program\n");

@@ -8,18 +8,18 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
-#include <pthread.h>
-#include <unistd.h>
 #include <time.h>
+#include <unistd.h>
 
 /* CUDA types and error codes */
 typedef int CUresult;
 typedef int CUdevice;
-typedef void* CUcontext;
+typedef void *CUcontext;
 typedef uint64_t CUdeviceptr;
 
 #define CUDA_SUCCESS 0
@@ -35,18 +35,19 @@ extern CUresult cuMemFree_v2(CUdeviceptr dptr);
 extern CUresult cuMemcpyHtoD_v2(CUdeviceptr dst, const void *src, size_t bytes);
 extern CUresult cuMemcpyDtoH_v2(void *dst, CUdeviceptr src, size_t bytes);
 
-#define CHECK_CUDA(call) do { \
-    CUresult err = call; \
-    if (err != CUDA_SUCCESS) { \
-        printf("CUDA Error %d at %s:%d\n", err, __FILE__, __LINE__); \
-        return -1; \
-    } \
-} while(0)
+#define CHECK_CUDA(call)                                                                                               \
+    do {                                                                                                               \
+        CUresult err = call;                                                                                           \
+        if (err != CUDA_SUCCESS) {                                                                                     \
+            printf("CUDA Error %d at %s:%d\n", err, __FILE__, __LINE__);                                               \
+            return -1;                                                                                                 \
+        }                                                                                                              \
+    } while (0)
 
 /* Test configuration */
-#define TEST_SIZE       4096
-#define NUM_ITERATIONS  100
-#define NUM_THREADS     4
+#define TEST_SIZE 4096
+#define NUM_ITERATIONS 100
+#define NUM_THREADS 4
 
 /* Shared state for multi-threaded tests */
 static CUdeviceptr g_device_ptr = 0;
@@ -54,8 +55,7 @@ static volatile int g_barrier = 0;
 static volatile int g_errors = 0;
 
 /* Get current time in nanoseconds */
-static uint64_t get_time_ns(void)
-{
+static uint64_t get_time_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
@@ -65,8 +65,7 @@ static uint64_t get_time_ns(void)
  * Test 1: Basic coherency - write from CPU, read from CPU
  * Verifies that basic memory operations work correctly
  */
-int test_basic_coherency(void)
-{
+int test_basic_coherency(void) {
     CUdevice dev;
     CUcontext ctx;
     CUdeviceptr devPtr;
@@ -108,8 +107,7 @@ int test_basic_coherency(void)
         if (hostSrc[i] != hostDst[i]) {
             mismatch++;
             if (mismatch <= 5) {
-                printf("  Mismatch at offset %zu: expected 0x%02x, got 0x%02x\n",
-                       i, hostSrc[i], hostDst[i]);
+                printf("  Mismatch at offset %zu: expected 0x%02x, got 0x%02x\n", i, hostSrc[i], hostDst[i]);
             }
         }
     }
@@ -135,8 +133,7 @@ int test_basic_coherency(void)
  * Test 2: Multiple write-read cycles
  * Tests coherency across multiple iterations
  */
-int test_multiple_cycles(void)
-{
+int test_multiple_cycles(void) {
     CUdevice dev;
     CUcontext ctx;
     CUdeviceptr devPtr;
@@ -185,8 +182,8 @@ int test_multiple_cycles(void)
             if (hostData[i] != expected) {
                 errors++;
                 if (errors <= 5) {
-                    printf("  Iter %d, offset %zu: expected 0x%08x, got 0x%08x\n",
-                           iter, i * sizeof(uint32_t), expected, hostData[i]);
+                    printf("  Iter %d, offset %zu: expected 0x%08x, got 0x%08x\n", iter, i * sizeof(uint32_t), expected,
+                           hostData[i]);
                 }
             }
         }
@@ -212,8 +209,7 @@ int test_multiple_cycles(void)
  * Test 3: Alternating access pattern
  * Tests coherency when CPU and "GPU" alternate access
  */
-int test_alternating_access(void)
-{
+int test_alternating_access(void) {
     CUdevice dev;
     CUcontext ctx;
     CUdeviceptr devPtr;
@@ -245,8 +241,7 @@ int test_alternating_access(void)
 
         /* Write CPU's portion to device */
         for (size_t i = 0; i < num_elements; i += 2) {
-            CHECK_CUDA(cuMemcpyHtoD_v2(devPtr + i * sizeof(uint64_t),
-                                       &hostData[i], sizeof(uint64_t)));
+            CHECK_CUDA(cuMemcpyHtoD_v2(devPtr + i * sizeof(uint64_t), &hostData[i], sizeof(uint64_t)));
         }
 
         /* Synchronize */
@@ -255,8 +250,7 @@ int test_alternating_access(void)
         /* Simulate GPU writing odd elements (via HtoD) */
         for (size_t i = 1; i < num_elements; i += 2) {
             uint64_t gpu_val = ((uint64_t)iter << 32) | (i | 0x80000000);
-            CHECK_CUDA(cuMemcpyHtoD_v2(devPtr + i * sizeof(uint64_t),
-                                       &gpu_val, sizeof(uint64_t)));
+            CHECK_CUDA(cuMemcpyHtoD_v2(devPtr + i * sizeof(uint64_t), &gpu_val, sizeof(uint64_t)));
         }
 
         /* Synchronize */
@@ -277,8 +271,8 @@ int test_alternating_access(void)
             if (readback[i] != expected) {
                 errors++;
                 if (errors <= 5) {
-                    printf("  Iter %d, elem %zu: expected 0x%016lx, got 0x%016lx\n",
-                           iter, i, (unsigned long)expected, (unsigned long)readback[i]);
+                    printf("  Iter %d, elem %zu: expected 0x%016lx, got 0x%016lx\n", iter, i, (unsigned long)expected,
+                           (unsigned long)readback[i]);
                 }
             }
         }
@@ -301,8 +295,7 @@ int test_alternating_access(void)
  * Test 4: Cache line boundary test
  * Tests coherency at cache line (64-byte) boundaries
  */
-int test_cache_line_boundaries(void)
-{
+int test_cache_line_boundaries(void) {
     CUdevice dev;
     CUcontext ctx;
     CUdeviceptr devPtr;
@@ -329,7 +322,8 @@ int test_cache_line_boundaries(void)
         int offset = test_offsets[t];
         int write_size = 8; /* Write 8 bytes at a time */
 
-        if (offset + write_size > (int)buffer_size) continue;
+        if (offset + write_size > (int)buffer_size)
+            continue;
 
         /* Initialize pattern */
         uint64_t pattern = 0xCAFEBABE00000000ULL | (offset << 8) | t;
@@ -350,8 +344,8 @@ int test_cache_line_boundaries(void)
 
         if (readback != pattern) {
             errors++;
-            printf("  Offset %d: expected 0x%016lx, got 0x%016lx\n",
-                   offset, (unsigned long)pattern, (unsigned long)readback);
+            printf("  Offset %d: expected 0x%016lx, got 0x%016lx\n", offset, (unsigned long)pattern,
+                   (unsigned long)readback);
         }
 
         /* Also verify surrounding bytes weren't corrupted */
@@ -382,8 +376,7 @@ int test_cache_line_boundaries(void)
  * Test 5: Large transfer coherency
  * Tests coherency with larger data sizes
  */
-int test_large_transfers(void)
-{
+int test_large_transfers(void) {
     CUdevice dev;
     CUcontext ctx;
     CUdeviceptr devPtr;
@@ -400,7 +393,8 @@ int test_large_transfers(void)
     for (int s = 0; s < num_sizes; s++) {
         size_t size = test_sizes[s];
         uint32_t *hostData = malloc(size);
-        if (!hostData) continue;
+        if (!hostData)
+            continue;
 
         CHECK_CUDA(cuMemAlloc_v2(&devPtr, size));
 
@@ -433,10 +427,7 @@ int test_large_transfers(void)
         }
 
         double bandwidth_mb_s = (double)(size * 2) / ((end - start) / 1000.0);
-        printf("  Size %7zu bytes: %s (%.2f MB/s)\n",
-               size,
-               size_errors == 0 ? "PASS" : "FAIL",
-               bandwidth_mb_s);
+        printf("  Size %7zu bytes: %s (%.2f MB/s)\n", size, size_errors == 0 ? "PASS" : "FAIL", bandwidth_mb_s);
 
         CHECK_CUDA(cuMemFree_v2(devPtr));
         free(hostData);
@@ -457,8 +448,7 @@ int test_large_transfers(void)
  * Test 6: Rapid small writes (stress test)
  * Tests coherency under rapid small write operations
  */
-int test_rapid_small_writes(void)
-{
+int test_rapid_small_writes(void) {
     CUdevice dev;
     CUcontext ctx;
     CUdeviceptr devPtr;
@@ -487,8 +477,7 @@ int test_rapid_small_writes(void)
     /* Perform many small writes */
     for (int i = 0; i < num_writes; i++) {
         uint32_t value = i | 0xA5000000;
-        CHECK_CUDA(cuMemcpyHtoD_v2(devPtr + i * sizeof(uint32_t),
-                                   &value, sizeof(uint32_t)));
+        CHECK_CUDA(cuMemcpyHtoD_v2(devPtr + i * sizeof(uint32_t), &value, sizeof(uint32_t)));
     }
 
     CHECK_CUDA(cuCtxSynchronize());
@@ -504,8 +493,7 @@ int test_rapid_small_writes(void)
         if (hostData[i] != expected) {
             errors++;
             if (errors <= 5) {
-                printf("  Index %d: expected 0x%08x, got 0x%08x\n",
-                       i, expected, hostData[i]);
+                printf("  Index %d: expected 0x%08x, got 0x%08x\n", i, expected, hostData[i]);
             }
         }
     }
@@ -527,8 +515,7 @@ int test_rapid_small_writes(void)
     }
 }
 
-int main(void)
-{
+int main(void) {
     int failed = 0;
 
     printf("CXL Type 2 GPU - CPU-GPU Coherency Test Program\n");

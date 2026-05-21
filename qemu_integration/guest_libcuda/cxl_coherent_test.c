@@ -5,10 +5,10 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 
 #include "cxl_gpu_cmd.h"
 
@@ -36,11 +36,18 @@ static int tests_passed = 0;
 static int tests_failed = 0;
 
 #define TEST(name) printf("  [TEST] %s... ", name)
-#define PASS() do { printf("PASS\n"); tests_passed++; } while(0)
-#define FAIL(msg) do { printf("FAIL: %s\n", msg); tests_failed++; } while(0)
+#define PASS()                                                                                                         \
+    do {                                                                                                               \
+        printf("PASS\n");                                                                                              \
+        tests_passed++;                                                                                                \
+    } while (0)
+#define FAIL(msg)                                                                                                      \
+    do {                                                                                                               \
+        printf("FAIL: %s\n", msg);                                                                                     \
+        tests_failed++;                                                                                                \
+    } while (0)
 
-static void test_basic_alloc_free(void)
-{
+static void test_basic_alloc_free(void) {
     TEST("Basic coherent alloc/free");
 
     void *ptr = NULL;
@@ -63,8 +70,7 @@ static void test_basic_alloc_free(void)
     PASS();
 }
 
-static void test_multiple_allocs(void)
-{
+static void test_multiple_allocs(void) {
     TEST("Multiple coherent allocations");
 
     void *ptrs[8];
@@ -94,8 +100,7 @@ static void test_multiple_allocs(void)
     PASS();
 }
 
-static void test_cpu_write_read(void)
-{
+static void test_cpu_write_read(void) {
     TEST("CPU write and readback through coherent memory");
 
     void *ptr = NULL;
@@ -131,8 +136,7 @@ static void test_cpu_write_read(void)
     }
 }
 
-static void test_pointer_translation(void)
-{
+static void test_pointer_translation(void) {
     TEST("Pointer translation roundtrip");
 
     void *ptr = NULL;
@@ -156,8 +160,7 @@ static void test_pointer_translation(void)
     PASS();
 }
 
-static void test_large_alloc(void)
-{
+static void test_large_alloc(void) {
     TEST("Large coherent allocation (1MB)");
 
     void *ptr = NULL;
@@ -193,8 +196,7 @@ static void test_large_alloc(void)
     }
 }
 
-static void test_double_free_rejected(void)
-{
+static void test_double_free_rejected(void) {
     TEST("Double free rejected");
 
     void *ptr = NULL;
@@ -220,8 +222,7 @@ static void test_double_free_rejected(void)
     PASS();
 }
 
-int main(void)
-{
+int main(void) {
     printf("=== CXL Coherent Shared Memory Test ===\n\n");
 
     CUresult err = cuInit(0);
@@ -252,8 +253,7 @@ int main(void)
     test_large_alloc();
     test_double_free_rejected();
 
-    printf("\n=== Results: %d passed, %d failed ===\n",
-           tests_passed, tests_failed);
+    printf("\n=== Results: %d passed, %d failed ===\n", tests_passed, tests_failed);
 
     return tests_failed > 0 ? 1 : 0;
 }

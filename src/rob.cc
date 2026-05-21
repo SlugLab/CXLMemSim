@@ -13,7 +13,8 @@
 #include "policy.h"
 #include <algorithm> // For std::transform
 #include <atomic>
-#include <cxxopts.hpp>
+#include <cctype>
+#include <condition_variable>
 #include <fstream>
 #include <future>
 #include <iostream>
@@ -22,12 +23,173 @@
 #include <ranges>
 #include <spdlog/cfg/env.h>
 #include <sstream>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
 Helper helper{};
 CXLController *controller;
 Monitors *monitors;
+
+namespace {
+
+struct RobToolOptions {
+    bool help = false;
+    std::string target = "/trace.out";
+    std::string topology = "(1,(2,3))";
+    double dramlatency = 110.0;
+    std::vector<int> capacity{0, 20, 20, 20};
+    std::string mode = "cacheline";
+    double frequency = 4000.0;
+    std::vector<int> latency{100, 100, 100, 100, 100, 100};
+    std::vector<int> bandwidth{50, 50, 50, 50, 50, 50};
+    std::string output = "delayed_trace.out";
+    int interim_save = 0;
+};
+
+std::string trim_copy(const std::string &value) {
+    const auto begin = std::find_if_not(value.begin(), value.end(), [](unsigned char ch) { return std::isspace(ch); });
+    const auto end =
+        std::find_if_not(value.rbegin(), value.rend(), [](unsigned char ch) { return std::isspace(ch); }).base();
+    return begin < end ? std::string(begin, end) : std::string();
+}
+
+std::vector<std::string> split_csv(const std::string &value) {
+    std::vector<std::string> fields;
+    std::istringstream stream(value);
+    std::string field;
+    while (std::getline(stream, field, ',')) {
+        fields.push_back(trim_copy(field));
+    }
+    if (fields.empty() && !value.empty()) {
+        fields.push_back(trim_copy(value));
+    }
+    return fields;
+}
+
+template <typename T> T parse_value(const std::string &value);
+
+template <> int parse_value<int>(const std::string &value) { return std::stoi(value, nullptr, 0); }
+
+template <> double parse_value<double>(const std::string &value) { return std::stod(value); }
+
+template <> std::string parse_value<std::string>(const std::string &value) { return value; }
+
+template <typename T> std::vector<T> parse_csv_vector(const std::string &value) {
+    std::vector<T> parsed;
+    for (const auto &field : split_csv(value)) {
+        if (!field.empty()) {
+            parsed.push_back(parse_value<T>(field));
+        }
+    }
+    return parsed;
+}
+
+bool option_value_follows(int argc, char *argv[], int index) { return index + 1 < argc && argv[index + 1][0] != '-'; }
+
+std::string require_cli_value(int argc, char *argv[], int &index, const std::string &key,
+                              const std::string &inline_value, bool has_inline_value) {
+    if (has_inline_value) {
+        return inline_value;
+    }
+    if (!option_value_follows(argc, argv, index)) {
+        throw std::invalid_argument("Missing value for option " + key);
+    }
+    index++;
+    return argv[index];
+}
+
+void print_rob_help(const char *program) {
+    std::cout << "Usage: " << program << " [options]\n\n"
+              << "Options:\n"
+              << "  -h, --help                    Show this help text\n"
+              << "  -t, --target <trace>          O3PipeView trace input file\n"
+              << "  -o, --topology <tree>         Newick-style CXL topology\n"
+              << "  -d, --dramlatency <ns>        Platform DRAM latency\n"
+              << "  -e, --capacity <list>         Local and expander capacity vector\n"
+              << "  -m, --mode <mode>             page, cacheline, hugepage_2M, or hugepage_1G\n"
+              << "  -f, --frequency <MHz>         CPU frequency used by the model\n"
+              << "  -l, --latency <list>          Read/write latency vector\n"
+              << "  -b, --bandwidth <list>        Read/write bandwidth vector\n"
+              << "      --output <trace>          Delayed trace output file\n"
+              << "      --interim-save <count>    Append interim trace output every N instructions\n";
+}
+
+bool parse_rob_options(int argc, char *argv[], RobToolOptions &opts, std::string &error) {
+    try {
+        for (int i = 1; i < argc; i++) {
+            std::string arg = argv[i];
+            std::string key;
+            std::string value;
+            bool has_inline_value = false;
+
+            if (arg.rfind("--", 0) == 0) {
+                auto eq_pos = arg.find('=');
+                key = arg.substr(2, eq_pos == std::string::npos ? std::string::npos : eq_pos - 2);
+                if (eq_pos != std::string::npos) {
+                    value = arg.substr(eq_pos + 1);
+                    has_inline_value = true;
+                }
+            } else if (arg == "-h") {
+                key = "help";
+            } else if (arg == "-t") {
+                key = "target";
+            } else if (arg == "-o") {
+                key = "topology";
+            } else if (arg == "-d") {
+                key = "dramlatency";
+            } else if (arg == "-e") {
+                key = "capacity";
+            } else if (arg == "-m") {
+                key = "mode";
+            } else if (arg == "-f") {
+                key = "frequency";
+            } else if (arg == "-l") {
+                key = "latency";
+            } else if (arg == "-b") {
+                key = "bandwidth";
+            } else {
+                throw std::invalid_argument("Unknown option: " + arg);
+            }
+
+            auto get_value = [&](const std::string &option_name) {
+                return require_cli_value(argc, argv, i, option_name, value, has_inline_value);
+            };
+
+            if (key == "help") {
+                opts.help = true;
+            } else if (key == "target") {
+                opts.target = get_value(key);
+            } else if (key == "topology") {
+                opts.topology = get_value(key);
+            } else if (key == "dramlatency") {
+                opts.dramlatency = parse_value<double>(get_value(key));
+            } else if (key == "capacity") {
+                opts.capacity = parse_csv_vector<int>(get_value(key));
+            } else if (key == "mode") {
+                opts.mode = get_value(key);
+            } else if (key == "frequency") {
+                opts.frequency = parse_value<double>(get_value(key));
+            } else if (key == "latency") {
+                opts.latency = parse_csv_vector<int>(get_value(key));
+            } else if (key == "bandwidth") {
+                opts.bandwidth = parse_csv_vector<int>(get_value(key));
+            } else if (key == "output") {
+                opts.output = get_value(key);
+            } else if (key == "interim-save") {
+                opts.interim_save = parse_value<int>(get_value(key));
+            } else {
+                throw std::invalid_argument("Unknown option: --" + key);
+            }
+        }
+        return true;
+    } catch (const std::exception &e) {
+        error = e.what();
+        return false;
+    }
+}
+
+} // namespace
 
 // Simple trim function to remove leading/trailing whitespace.
 std::string trim(const std::string &s) {
@@ -148,13 +310,11 @@ void parseInParallel(std::ifstream &file, std::vector<InstructionGroup> &instruc
     std::atomic<bool> done{false};
     std::vector<std::string> groupLines;
 
-    // 创建解析线程池
     // Create parsing thread pool
     const int numThreads = 4;
     std::vector<std::thread> parseThreads;
     std::mutex resultsMutex;
 
-    // 消费者线程函数
     // Consumer thread function
     auto parseWorker = [&]() {
         while (true) {
@@ -176,13 +336,12 @@ void parseInParallel(std::ifstream &file, std::vector<InstructionGroup> &instruc
         }
     };
 
-    // 启动消费者线程
     // Start consumer threads
     for (int i = 0; i < numThreads; ++i) {
         parseThreads.emplace_back(parseWorker);
     }
 
-    // 生产者部分 - 主线程
+    //  -
     // Producer part - main thread
     for (const std::string &line : std::ranges::istream_view<std::string>(file)) {
         if (line.rfind("O3PipeView:fetch:", 0) == 0) {
@@ -200,7 +359,6 @@ void parseInParallel(std::ifstream &file, std::vector<InstructionGroup> &instruc
         }
     }
 
-    // 处理最后一组
     // Process the last group
     if (!groupLines.empty()) {
         {
@@ -210,7 +368,6 @@ void parseInParallel(std::ifstream &file, std::vector<InstructionGroup> &instruc
         cv.notify_one();
     }
 
-    // 通知所有消费者线程完成
     // Notify all consumer threads to complete
     {
         std::lock_guard<std::mutex> lock(queueMutex);
@@ -218,13 +375,11 @@ void parseInParallel(std::ifstream &file, std::vector<InstructionGroup> &instruc
     }
     cv.notify_all();
 
-    // 等待所有线程完成
     // Wait for all threads to complete
     for (auto &thread : parseThreads) {
         thread.join();
     }
 
-    // 排序结果
     // Sort results
     std::sort(instructions.begin(), instructions.end(),
               [](InstructionGroup &a, InstructionGroup &b) { return a.cycleCount < b.cycleCount; });
@@ -290,44 +445,33 @@ void generateDelayedTrace(const std::vector<InstructionGroup> &instructions, Rob
 
 int main(int argc, char *argv[]) {
     spdlog::cfg::load_env_levels();
-    cxxopts::Options options("CXLMemSim", "For simulation of CXL.mem Type 3 on Xeon 6");
-    options.add_options()("t,target", "The script file to execute",
-                          cxxopts::value<std::string>()->default_value("/trace.out"))(
-        "h,help", "Help for CXLMemSimRoB", cxxopts::value<bool>()->default_value("false"))(
-        "o,topology", "The newick tree input for the CXL memory expander topology",
-        cxxopts::value<std::string>()->default_value("(1,(2,3))"))(
-        "d,dramlatency", "The current platform's dram latency", cxxopts::value<double>()->default_value("110"))(
-        "e,capacity", "The capacity vector of the CXL memory expander with the first local",
-        cxxopts::value<std::vector<int>>()->default_value("0,20,20,20"))(
-        "m,mode", "Page mode or cacheline mode", cxxopts::value<std::string>()->default_value("cacheline"))(
-        "f,frequency", "The frequency for the running thread", cxxopts::value<double>()->default_value("4000"))(
-        "l,latency", "The simulated latency by epoch based calculation for injected latency",
-        cxxopts::value<std::vector<int>>()->default_value("100,100,100,100,100,100"))(
-        "b,bandwidth", "The simulated bandwidth by linear regression",
-        cxxopts::value<std::vector<int>>()->default_value("50,50,50,50,50,50"))(
-        "output", "Output trace file with RoB delays",
-        cxxopts::value<std::string>()->default_value("delayed_trace.out"))(
-        "interim-save", "Save interim trace results every N instructions", cxxopts::value<int>()->default_value("0"));
 
-    auto result = options.parse(argc, argv);
-    if (result["help"].as<bool>()) {
-        std::cout << options.help() << std::endl;
-        exit(0);
+    RobToolOptions opts;
+    std::string parse_error;
+    if (!parse_rob_options(argc, argv, opts, parse_error)) {
+        std::cerr << "Failed to parse options: " << parse_error << "\n\n";
+        print_rob_help(argv[0]);
+        return 1;
     }
-    auto target = result["target"].as<std::string>();
-    auto capacity = result["capacity"].as<std::vector<int>>();
-    auto latency = result["latency"].as<std::vector<int>>();
-    auto bandwidth = result["bandwidth"].as<std::vector<int>>();
-    auto topology = result["topology"].as<std::string>();
-    auto dramlatency = result["dramlatency"].as<double>();
-    auto outputTraceFile = result["output"].as<std::string>();
-    auto interimSaveInterval = result["interim-save"].as<int>();
+    if (opts.help) {
+        print_rob_help(argv[0]);
+        return 0;
+    }
+
+    auto target = opts.target;
+    auto capacity = opts.capacity;
+    auto latency = opts.latency;
+    auto bandwidth = opts.bandwidth;
+    auto topology = opts.topology;
+    auto dramlatency = opts.dramlatency;
+    auto outputTraceFile = opts.output;
+    auto interimSaveInterval = opts.interim_save;
     page_type mode;
-    if (result["mode"].as<std::string>() == "hugepage_2M") {
+    if (opts.mode == "hugepage_2M") {
         mode = HUGEPAGE_2M;
-    } else if (result["mode"].as<std::string>() == "hugepage_1G") {
+    } else if (opts.mode == "hugepage_1G") {
         mode = HUGEPAGE_1G;
-    } else if (result["mode"].as<std::string>() == "cacheline") {
+    } else if (opts.mode == "cacheline") {
         mode = CACHELINE;
     } else {
         mode = PAGE;
@@ -382,7 +526,7 @@ int main(int argc, char *argv[]) {
                 rob.tick(); // If unable to issue, advance clock until space is available
             }
         }
-        rob.tick();  // Normal clock advancement
+        rob.tick(); // Normal clock advancement
 
         // Save interim results if requested
         if (interimSaveInterval > 0 && idx > 0 && idx % interimSaveInterval == 0) {
@@ -395,7 +539,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // 清空ROB
+    // ROB
     while (!rob.queue_.empty()) {
         rob.tick();
     }
@@ -420,6 +564,6 @@ int main(int argc, char *argv[]) {
     std::cout << "ROB Events: " << rob.getStallEventCount() << std::endl;
     std::cout << "Generated delayed trace to: " << outputTraceFile << std::endl;
 
-    std::cout << fmt::format("{}", *controller) << std::endl;
+    std::cout << std::format("{}", *controller) << std::endl;
     return 0;
 }

@@ -15,9 +15,8 @@ void HDMDecoder::add_range(uint64_t base, uint64_t size, uint32_t target_id, boo
     ranges_sorted_ = false;
 }
 
-void HDMDecoder::configure_interleave(InterleaveGranularity gran,
-                                       const std::vector<uint32_t>& targets,
-                                       uint64_t base, uint64_t total_size) {
+void HDMDecoder::configure_interleave(InterleaveGranularity gran, const std::vector<uint32_t> &targets, uint64_t base,
+                                      uint64_t total_size) {
     interleave_config_.granularity = gran;
     interleave_config_.target_ids = targets;
     interleave_config_.base_addr = base;
@@ -26,26 +25,24 @@ void HDMDecoder::configure_interleave(InterleaveGranularity gran,
 
 void HDMDecoder::sort_ranges() {
     std::sort(ranges_.begin(), ranges_.end(),
-              [](const HDMRange& a, const HDMRange& b) {
-                  return a.base_addr < b.base_addr;
-              });
+              [](const HDMRange &a, const HDMRange &b) { return a.base_addr < b.base_addr; });
     ranges_sorted_ = true;
 }
 
 HDMDecoder::DecodeResult HDMDecoder::decode(uint64_t addr) const {
     switch (mode_) {
-        case HDMDecoderMode::RANGE_BASED:
-            return decode_range(addr);
-        case HDMDecoderMode::INTERLEAVED:
-            return decode_interleaved(addr);
-        case HDMDecoderMode::HYBRID: {
-            // Try range-based first, fall back to interleaved
-            auto result = decode_range(addr);
-            if (result.target_id != UINT32_MAX) {
-                return result;
-            }
-            return decode_interleaved(addr);
+    case HDMDecoderMode::RANGE_BASED:
+        return decode_range(addr);
+    case HDMDecoderMode::INTERLEAVED:
+        return decode_interleaved(addr);
+    case HDMDecoderMode::HYBRID: {
+        // Try range-based first, fall back to interleaved
+        auto result = decode_range(addr);
+        if (result.target_id != UINT32_MAX) {
+            return result;
         }
+        return decode_interleaved(addr);
+    }
     }
     return {UINT32_MAX, 0, false, 0};
 }
@@ -58,7 +55,7 @@ HDMDecoder::DecodeResult HDMDecoder::decode_range(uint64_t addr) const {
 
     // If not sorted, do linear scan (const method can't sort)
     if (!ranges_sorted_) {
-        for (const auto& range : ranges_) {
+        for (const auto &range : ranges_) {
             if (addr >= range.base_addr && addr < range.base_addr + range.size) {
                 uint64_t offset = addr - range.base_addr;
                 uint32_t hops = range.is_remote ? 1 : 0;
@@ -72,7 +69,7 @@ HDMDecoder::DecodeResult HDMDecoder::decode_range(uint64_t addr) const {
     int lo = 0, hi = static_cast<int>(ranges_.size()) - 1;
     while (lo <= hi) {
         int mid = lo + (hi - lo) / 2;
-        const auto& range = ranges_[mid];
+        const auto &range = ranges_[mid];
         if (addr < range.base_addr) {
             hi = mid - 1;
         } else if (addr >= range.base_addr + range.size) {
@@ -93,8 +90,7 @@ HDMDecoder::DecodeResult HDMDecoder::decode_interleaved(uint64_t addr) const {
     }
 
     // Check if address is within the interleave region
-    if (addr < interleave_config_.base_addr ||
-        addr >= interleave_config_.base_addr + interleave_config_.total_size) {
+    if (addr < interleave_config_.base_addr || addr >= interleave_config_.base_addr + interleave_config_.total_size) {
         return {UINT32_MAX, 0, false, 0};
     }
 
@@ -112,7 +108,7 @@ HDMDecoder::DecodeResult HDMDecoder::decode_interleaved(uint64_t addr) const {
 
     // Determine if remote by checking ranges (if configured)
     bool is_remote = false;
-    for (const auto& range : ranges_) {
+    for (const auto &range : ranges_) {
         if (range.target_id == target_id) {
             is_remote = range.is_remote;
             break;

@@ -5,10 +5,10 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <time.h>
 
 #include "cxl_gpu_cmd.h"
@@ -51,18 +51,15 @@ extern int cxlBiasFlip(void *host_ptr, uint64_t size, int new_bias);
 extern int cxlGetCoherencyStats(CXLCoherencyStats *stats);
 extern int cxlResetCoherencyStats(void);
 
-#define REGION_SIZE     (64 * 1024)  /* 64KB test region */
-#define NUM_ITERATIONS  10000
-#define STRIDE          64           /* Cache line stride */
+#define REGION_SIZE (64 * 1024) /* 64KB test region */
+#define NUM_ITERATIONS 10000
+#define STRIDE 64 /* Cache line stride */
 
-static uint64_t time_diff_ns(struct timespec *start, struct timespec *end)
-{
-    return (end->tv_sec - start->tv_sec) * 1000000000ULL +
-           (end->tv_nsec - start->tv_nsec);
+static uint64_t time_diff_ns(struct timespec *start, struct timespec *end) {
+    return (end->tv_sec - start->tv_sec) * 1000000000ULL + (end->tv_nsec - start->tv_nsec);
 }
 
-static void benchmark_cpu_writes(void *region, size_t size, const char *label)
-{
+static void benchmark_cpu_writes(void *region, size_t size, const char *label) {
     struct timespec t1, t2;
     volatile uint64_t *data = (volatile uint64_t *)region;
     size_t count = size / STRIDE;
@@ -77,13 +74,11 @@ static void benchmark_cpu_writes(void *region, size_t size, const char *label)
 
     uint64_t total_ns = time_diff_ns(&t1, &t2);
     uint64_t ops = (uint64_t)NUM_ITERATIONS * count;
-    printf("    %s CPU writes: %lu ns total, %lu ns/op (%lu ops)\n",
-           label, (unsigned long)total_ns,
+    printf("    %s CPU writes: %lu ns total, %lu ns/op (%lu ops)\n", label, (unsigned long)total_ns,
            (unsigned long)(total_ns / ops), (unsigned long)ops);
 }
 
-static void benchmark_cpu_reads(void *region, size_t size, const char *label)
-{
+static void benchmark_cpu_reads(void *region, size_t size, const char *label) {
     struct timespec t1, t2;
     volatile uint64_t *data = (volatile uint64_t *)region;
     size_t count = size / STRIDE;
@@ -101,13 +96,11 @@ static void benchmark_cpu_reads(void *region, size_t size, const char *label)
 
     uint64_t total_ns = time_diff_ns(&t1, &t2);
     uint64_t ops = (uint64_t)NUM_ITERATIONS * count;
-    printf("    %s CPU reads:  %lu ns total, %lu ns/op (%lu ops)\n",
-           label, (unsigned long)total_ns,
+    printf("    %s CPU reads:  %lu ns total, %lu ns/op (%lu ops)\n", label, (unsigned long)total_ns,
            (unsigned long)(total_ns / ops), (unsigned long)ops);
 }
 
-static void test_bias_set_get(void)
-{
+static void test_bias_set_get(void) {
     printf("  [TEST] Bias set/get... ");
 
     void *region = NULL;
@@ -160,8 +153,7 @@ static void test_bias_set_get(void)
     printf("PASS\n");
 }
 
-static void benchmark_host_bias(void)
-{
+static void benchmark_host_bias(void) {
     printf("\n  [BENCH] Host-biased mode:\n");
 
     void *region = NULL;
@@ -184,15 +176,12 @@ static void benchmark_host_bias(void)
     cxlGetCoherencyStats(&stats);
     printf("    Host-bias stats: snoop_hits=%lu, host_bias_hits=%lu, "
            "device_bias_hits=%lu\n",
-           (unsigned long)stats.snoop_hits,
-           (unsigned long)stats.host_bias_hits,
-           (unsigned long)stats.device_bias_hits);
+           (unsigned long)stats.snoop_hits, (unsigned long)stats.host_bias_hits, (unsigned long)stats.device_bias_hits);
 
     cxlCoherentFree(region);
 }
 
-static void benchmark_device_bias(void)
-{
+static void benchmark_device_bias(void) {
     printf("\n  [BENCH] Device-biased mode:\n");
 
     void *region = NULL;
@@ -215,15 +204,12 @@ static void benchmark_device_bias(void)
     cxlGetCoherencyStats(&stats);
     printf("    Device-bias stats: snoop_hits=%lu, host_bias_hits=%lu, "
            "device_bias_hits=%lu\n",
-           (unsigned long)stats.snoop_hits,
-           (unsigned long)stats.host_bias_hits,
-           (unsigned long)stats.device_bias_hits);
+           (unsigned long)stats.snoop_hits, (unsigned long)stats.host_bias_hits, (unsigned long)stats.device_bias_hits);
 
     cxlCoherentFree(region);
 }
 
-static void benchmark_bias_flip_overhead(void)
-{
+static void benchmark_bias_flip_overhead(void) {
     printf("\n  [BENCH] Bias flip overhead:\n");
 
     void *region = NULL;
@@ -239,27 +225,23 @@ static void benchmark_bias_flip_overhead(void)
     cxlResetCoherencyStats();
     clock_gettime(CLOCK_MONOTONIC, &t1);
     for (int i = 0; i < flips; i++) {
-        cxlBiasFlip(region, REGION_SIZE,
-                     (i % 2 == 0) ? CXL_BIAS_DEVICE : CXL_BIAS_HOST);
+        cxlBiasFlip(region, REGION_SIZE, (i % 2 == 0) ? CXL_BIAS_DEVICE : CXL_BIAS_HOST);
     }
     clock_gettime(CLOCK_MONOTONIC, &t2);
 
     uint64_t total_ns = time_diff_ns(&t1, &t2);
-    printf("    %d bias flips: %lu ns total, %lu ns/flip\n",
-           flips, (unsigned long)total_ns,
+    printf("    %d bias flips: %lu ns total, %lu ns/flip\n", flips, (unsigned long)total_ns,
            (unsigned long)(total_ns / flips));
 
     CXLCoherencyStats stats;
     cxlGetCoherencyStats(&stats);
-    printf("    Flip stats: bias_flips=%lu, writebacks=%lu\n",
-           (unsigned long)stats.bias_flips,
+    printf("    Flip stats: bias_flips=%lu, writebacks=%lu\n", (unsigned long)stats.bias_flips,
            (unsigned long)stats.writebacks);
 
     cxlCoherentFree(region);
 }
 
-static void benchmark_phase_pattern(void)
-{
+static void benchmark_phase_pattern(void) {
     printf("\n  [BENCH] Phase-based access pattern (CPU-write then GPU-read):\n");
 
     void *region = NULL;
@@ -324,23 +306,19 @@ static void benchmark_phase_pattern(void)
     CXLCoherencyStats stats_bias;
     cxlGetCoherencyStats(&stats_bias);
 
-    printf("    Without bias control: %lu ns (%lu ns/phase)\n",
-           (unsigned long)no_bias_ns, (unsigned long)(no_bias_ns / phases));
-    printf("      coherency_reqs=%lu, back_inv=%lu\n",
-           (unsigned long)stats_no_bias.coherency_requests,
+    printf("    Without bias control: %lu ns (%lu ns/phase)\n", (unsigned long)no_bias_ns,
+           (unsigned long)(no_bias_ns / phases));
+    printf("      coherency_reqs=%lu, back_inv=%lu\n", (unsigned long)stats_no_bias.coherency_requests,
            (unsigned long)stats_no_bias.back_invalidations);
-    printf("    With bias control:    %lu ns (%lu ns/phase)\n",
-           (unsigned long)bias_ns, (unsigned long)(bias_ns / phases));
-    printf("      coherency_reqs=%lu, back_inv=%lu, bias_flips=%lu\n",
-           (unsigned long)stats_bias.coherency_requests,
-           (unsigned long)stats_bias.back_invalidations,
-           (unsigned long)stats_bias.bias_flips);
+    printf("    With bias control:    %lu ns (%lu ns/phase)\n", (unsigned long)bias_ns,
+           (unsigned long)(bias_ns / phases));
+    printf("      coherency_reqs=%lu, back_inv=%lu, bias_flips=%lu\n", (unsigned long)stats_bias.coherency_requests,
+           (unsigned long)stats_bias.back_invalidations, (unsigned long)stats_bias.bias_flips);
 
     cxlCoherentFree(region);
 }
 
-int main(void)
-{
+int main(void) {
     printf("=== CXL Bias Mode Benchmark ===\n\n");
 
     CUresult err = cuInit(0);

@@ -8,21 +8,21 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <time.h>
-#include <math.h>
 
 /* CUDA types and error codes */
 typedef int CUresult;
 typedef int CUdevice;
-typedef void* CUcontext;
-typedef void* CUmodule;
-typedef void* CUfunction;
-typedef void* CUstream;
-typedef void* CUevent;
+typedef void *CUcontext;
+typedef void *CUmodule;
+typedef void *CUfunction;
+typedef void *CUstream;
+typedef void *CUevent;
 typedef uint64_t CUdeviceptr;
 
 #define CUDA_SUCCESS 0
@@ -61,11 +61,9 @@ extern CUresult cuMemGetAddressRange_v2(CUdeviceptr *base, size_t *size, CUdevic
 extern CUresult cuModuleLoadData(CUmodule *module, const void *image);
 extern CUresult cuModuleUnload(CUmodule module);
 extern CUresult cuModuleGetFunction(CUfunction *func, CUmodule module, const char *name);
-extern CUresult cuLaunchKernel(CUfunction f,
-                               unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
+extern CUresult cuLaunchKernel(CUfunction f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
                                unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
-                               unsigned int sharedMemBytes, CUstream stream,
-                               void **kernelParams, void **extra);
+                               unsigned int sharedMemBytes, CUstream stream, void **kernelParams, void **extra);
 extern CUresult cuStreamCreate(CUstream *stream, unsigned int flags);
 extern CUresult cuStreamDestroy_v2(CUstream stream);
 extern CUresult cuStreamSynchronize(CUstream stream);
@@ -107,39 +105,43 @@ static int tests_run = 0;
 static int tests_passed = 0;
 static int tests_failed = 0;
 
-#define TEST_START(name) do { \
-    printf("\n--- Test: %s ---\n", name); \
-    tests_run++; \
-} while(0)
+#define TEST_START(name)                                                                                               \
+    do {                                                                                                               \
+        printf("\n--- Test: %s ---\n", name);                                                                          \
+        tests_run++;                                                                                                   \
+    } while (0)
 
-#define TEST_PASS() do { \
-    printf("  PASSED\n"); \
-    tests_passed++; \
-} while(0)
+#define TEST_PASS()                                                                                                    \
+    do {                                                                                                               \
+        printf("  PASSED\n");                                                                                          \
+        tests_passed++;                                                                                                \
+    } while (0)
 
-#define TEST_FAIL(msg) do { \
-    printf("  FAILED: %s\n", msg); \
-    tests_failed++; \
-} while(0)
+#define TEST_FAIL(msg)                                                                                                 \
+    do {                                                                                                               \
+        printf("  FAILED: %s\n", msg);                                                                                 \
+        tests_failed++;                                                                                                \
+    } while (0)
 
-#define CHECK_CUDA(call) do { \
-    CUresult err = call; \
-    if (err != CUDA_SUCCESS) { \
-        printf("  CUDA Error %d at %s:%d: %s\n", err, __FILE__, __LINE__, #call); \
-        return -1; \
-    } \
-} while(0)
+#define CHECK_CUDA(call)                                                                                               \
+    do {                                                                                                               \
+        CUresult err = call;                                                                                           \
+        if (err != CUDA_SUCCESS) {                                                                                     \
+            printf("  CUDA Error %d at %s:%d: %s\n", err, __FILE__, __LINE__, #call);                                  \
+            return -1;                                                                                                 \
+        }                                                                                                              \
+    } while (0)
 
-#define CHECK_CUDA_EXPECT_FAIL(call, expected) do { \
-    CUresult err = call; \
-    if (err != expected) { \
-        printf("  Expected error %d but got %d\n", expected, err); \
-        return -1; \
-    } \
-} while(0)
+#define CHECK_CUDA_EXPECT_FAIL(call, expected)                                                                         \
+    do {                                                                                                               \
+        CUresult err = call;                                                                                           \
+        if (err != expected) {                                                                                         \
+            printf("  Expected error %d but got %d\n", expected, err);                                                 \
+            return -1;                                                                                                 \
+        }                                                                                                              \
+    } while (0)
 
-static double get_time_ms(void)
-{
+static double get_time_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec * 1000.0 + ts.tv_nsec / 1000000.0;
@@ -148,8 +150,7 @@ static double get_time_ms(void)
 /*
  * Test 1: Multiple device queries
  */
-int test_device_queries(void)
-{
+int test_device_queries(void) {
     CUdevice dev;
     int value;
     char name[256];
@@ -162,27 +163,27 @@ int test_device_queries(void)
     printf("  Device: %s\n", name);
 
     CHECK_CUDA(cuDeviceTotalMem_v2(&totalMem, dev));
-    printf("  Total Memory: %zu MB\n", totalMem / (1024*1024));
+    printf("  Total Memory: %zu MB\n", totalMem / (1024 * 1024));
 
     /* Query all important attributes */
     struct {
         int attr;
         const char *name;
     } attrs[] = {
-        { CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK, "Max threads/block" },
-        { CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X, "Max block dim X" },
-        { CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y, "Max block dim Y" },
-        { CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z, "Max block dim Z" },
-        { CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X, "Max grid dim X" },
-        { CU_DEVICE_ATTRIBUTE_WARP_SIZE, "Warp size" },
-        { CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, "SM count" },
-        { CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, "Compute major" },
-        { CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, "Compute minor" },
-        { CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE, "L2 cache size" },
-        { CU_DEVICE_ATTRIBUTE_CLOCK_RATE, "Clock rate (kHz)" },
+        {CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK, "Max threads/block"},
+        {CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X, "Max block dim X"},
+        {CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y, "Max block dim Y"},
+        {CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z, "Max block dim Z"},
+        {CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X, "Max grid dim X"},
+        {CU_DEVICE_ATTRIBUTE_WARP_SIZE, "Warp size"},
+        {CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, "SM count"},
+        {CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, "Compute major"},
+        {CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, "Compute minor"},
+        {CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE, "L2 cache size"},
+        {CU_DEVICE_ATTRIBUTE_CLOCK_RATE, "Clock rate (kHz)"},
     };
 
-    for (int i = 0; i < sizeof(attrs)/sizeof(attrs[0]); i++) {
+    for (int i = 0; i < sizeof(attrs) / sizeof(attrs[0]); i++) {
         CUresult err = cuDeviceGetAttribute(&value, attrs[i].attr, dev);
         if (err == CUDA_SUCCESS) {
             printf("  %s: %d\n", attrs[i].name, value);
@@ -198,8 +199,7 @@ int test_device_queries(void)
 /*
  * Test 2: Context stack operations
  */
-int test_context_stack(void)
-{
+int test_context_stack(void) {
     CUdevice dev;
     CUcontext ctx1, ctx2, current;
     CUdevice ctx_dev;
@@ -253,12 +253,11 @@ int test_context_stack(void)
 /*
  * Test 3: Multiple memory allocations
  */
-int test_multiple_allocations(void)
-{
+int test_multiple_allocations(void) {
     CUdevice dev;
     CUcontext ctx;
     CUdeviceptr ptrs[16];
-    size_t sizes[] = { 1024, 4096, 64*1024, 1024*1024, 16*1024*1024 };
+    size_t sizes[] = {1024, 4096, 64 * 1024, 1024 * 1024, 16 * 1024 * 1024};
     int num_sizes = sizeof(sizes) / sizeof(sizes[0]);
     int num_allocs = 0;
 
@@ -281,8 +280,7 @@ int test_multiple_allocations(void)
     /* Test memory info */
     size_t free_mem, total_mem;
     CHECK_CUDA(cuMemGetInfo_v2(&free_mem, &total_mem));
-    printf("  Memory: %zu MB free / %zu MB total\n",
-           free_mem / (1024*1024), total_mem / (1024*1024));
+    printf("  Memory: %zu MB free / %zu MB total\n", free_mem / (1024 * 1024), total_mem / (1024 * 1024));
 
     /* Free all allocations */
     for (int i = 0; i < num_allocs; i++) {
@@ -299,8 +297,7 @@ int test_multiple_allocations(void)
 /*
  * Test 4: Memory set operations
  */
-int test_memset(void)
-{
+int test_memset(void) {
     CUdevice dev;
     CUcontext ctx;
     CUdeviceptr dptr;
@@ -311,7 +308,8 @@ int test_memset(void)
     TEST_START("Memory Set Operations");
 
     host_buf = malloc(SIZE);
-    if (!host_buf) return -1;
+    if (!host_buf)
+        return -1;
 
     CHECK_CUDA(cuDeviceGet(&dev, 0));
     CHECK_CUDA(cuCtxCreate_v2(&ctx, 0, dev));
@@ -365,8 +363,7 @@ int test_memset(void)
 /*
  * Test 5: Device-to-device copy
  */
-int test_d2d_copy(void)
-{
+int test_d2d_copy(void) {
     CUdevice dev;
     CUcontext ctx;
     CUdeviceptr src, dst;
@@ -378,7 +375,8 @@ int test_d2d_copy(void)
 
     host_src = malloc(SIZE);
     host_dst = malloc(SIZE);
-    if (!host_src || !host_dst) return -1;
+    if (!host_src || !host_dst)
+        return -1;
 
     /* Initialize source pattern */
     for (size_t i = 0; i < SIZE; i++) {
@@ -410,8 +408,7 @@ int test_d2d_copy(void)
         if (host_src[i] != host_dst[i]) {
             errors++;
             if (errors <= 5) {
-                printf("    Mismatch at %zu: expected 0x%02x, got 0x%02x\n",
-                       i, host_src[i], host_dst[i]);
+                printf("    Mismatch at %zu: expected 0x%02x, got 0x%02x\n", i, host_src[i], host_dst[i]);
             }
         }
     }
@@ -436,8 +433,7 @@ int test_d2d_copy(void)
  * Test 6: Large memory transfer
  * Note: CXL transfers are slow (60KB chunks), so use smaller size by default
  */
-int test_large_transfer(void)
-{
+int test_large_transfer(void) {
     CUdevice dev;
     CUcontext ctx;
     CUdeviceptr dptr;
@@ -448,8 +444,7 @@ int test_large_transfer(void)
 
     TEST_START("Large Memory Transfer (16 MB)");
 
-    printf("  Note: CXL transfers use 60KB chunks, expect ~%.0f chunks per direction\n",
-           (double)SIZE / (60 * 1024));
+    printf("  Note: CXL transfers use 60KB chunks, expect ~%.0f chunks per direction\n", (double)SIZE / (60 * 1024));
 
     host_src = malloc(SIZE);
     host_dst = malloc(SIZE);
@@ -479,31 +474,30 @@ int test_large_transfer(void)
         TEST_PASS();
         return 0;
     }
-    printf("  Allocated %zu MB at 0x%lx\n", SIZE / (1024*1024), (unsigned long)dptr);
+    printf("  Allocated %zu MB at 0x%lx\n", SIZE / (1024 * 1024), (unsigned long)dptr);
 
     /* Time HtoD transfer */
     start = get_time_ms();
     CHECK_CUDA(cuMemcpyHtoD_v2(dptr, host_src, SIZE));
     end = get_time_ms();
-    printf("  HtoD: %.2f GB/s (%.1f ms)\n",
-           (SIZE / (1024.0*1024*1024)) / ((end-start) / 1000), end-start);
+    printf("  HtoD: %.2f GB/s (%.1f ms)\n", (SIZE / (1024.0 * 1024 * 1024)) / ((end - start) / 1000), end - start);
 
     /* Time DtoH transfer */
     start = get_time_ms();
     CHECK_CUDA(cuMemcpyDtoH_v2(host_dst, dptr, SIZE));
     end = get_time_ms();
-    printf("  DtoH: %.2f GB/s (%.1f ms)\n",
-           (SIZE / (1024.0*1024*1024)) / ((end-start) / 1000), end-start);
+    printf("  DtoH: %.2f GB/s (%.1f ms)\n", (SIZE / (1024.0 * 1024 * 1024)) / ((end - start) / 1000), end - start);
 
     /* Verify first and last MB */
-    for (size_t i = 0; i < 1024*1024; i++) {
-        if (host_src[i] != host_dst[i]) errors++;
+    for (size_t i = 0; i < 1024 * 1024; i++) {
+        if (host_src[i] != host_dst[i])
+            errors++;
     }
-    for (size_t i = SIZE - 1024*1024; i < SIZE; i++) {
-        if (host_src[i] != host_dst[i]) errors++;
+    for (size_t i = SIZE - 1024 * 1024; i < SIZE; i++) {
+        if (host_src[i] != host_dst[i])
+            errors++;
     }
-    printf("  Verification (first/last MB): %s (%d errors)\n",
-           errors == 0 ? "PASSED" : "FAILED", errors);
+    printf("  Verification (first/last MB): %s (%d errors)\n", errors == 0 ? "PASSED" : "FAILED", errors);
 
     CHECK_CUDA(cuMemFree_v2(dptr));
     CHECK_CUDA(cuCtxDestroy_v2(ctx));
@@ -522,8 +516,7 @@ int test_large_transfer(void)
 /*
  * Test 7: Pointer attributes
  */
-int test_pointer_attributes(void)
-{
+int test_pointer_attributes(void) {
     CUdevice dev;
     CUcontext ctx;
     CUdeviceptr dptr;
@@ -550,8 +543,7 @@ int test_pointer_attributes(void)
     CUdeviceptr offset_ptr = dptr + 4096;
     err = cuMemGetAddressRange_v2(&base, &size, offset_ptr);
     if (err == CUDA_SUCCESS) {
-        printf("  Offset ptr (dptr+4096) range: base=0x%lx, size=%zu\n",
-               (unsigned long)base, size);
+        printf("  Offset ptr (dptr+4096) range: base=0x%lx, size=%zu\n", (unsigned long)base, size);
     } else {
         printf("  cuMemGetAddressRange (offset): error %d\n", err);
     }
@@ -566,8 +558,7 @@ int test_pointer_attributes(void)
 /*
  * Test 8: Stress test - rapid alloc/free cycles
  */
-int test_alloc_free_stress(void)
-{
+int test_alloc_free_stress(void) {
     CUdevice dev;
     CUcontext ctx;
     const int ITERATIONS = 100;
@@ -601,23 +592,21 @@ int test_alloc_free_stress(void)
 /*
  * Test 9: Module loading (PTX)
  */
-int test_module_loading(void)
-{
+int test_module_loading(void) {
     CUdevice dev;
     CUcontext ctx;
     CUmodule module;
     CUfunction func;
 
     /* Simple PTX that just returns - PTX 8.0 required for sm_90 (H100) */
-    const char *simple_ptx =
-        ".version 8.0\n"
-        ".target sm_90\n"
-        ".address_size 64\n"
-        "\n"
-        ".visible .entry simple_kernel()\n"
-        "{\n"
-        "    ret;\n"
-        "}\n";
+    const char *simple_ptx = ".version 8.0\n"
+                             ".target sm_90\n"
+                             ".address_size 64\n"
+                             "\n"
+                             ".visible .entry simple_kernel()\n"
+                             "{\n"
+                             "    ret;\n"
+                             "}\n";
 
     TEST_START("Module Loading (PTX)");
 
@@ -653,8 +642,7 @@ int test_module_loading(void)
 /*
  * Test 10: Kernel launch
  */
-int test_kernel_launch(void)
-{
+int test_kernel_launch(void) {
     CUdevice dev;
     CUcontext ctx;
     CUmodule module;
@@ -666,43 +654,43 @@ int test_kernel_launch(void)
     int errors = 0;
 
     /* PTX that sets all elements to 42.0 - PTX 8.0 required for sm_90 (H100) */
-    const char *set_kernel_ptx =
-        ".version 8.0\n"
-        ".target sm_90\n"
-        ".address_size 64\n"
-        "\n"
-        ".visible .entry set_value(\n"
-        "    .param .u64 data,\n"
-        "    .param .u32 n\n"
-        ")\n"
-        "{\n"
-        "    .reg .pred %p<2>;\n"
-        "    .reg .f32 %f<2>;\n"
-        "    .reg .b32 %r<4>;\n"
-        "    .reg .b64 %rd<4>;\n"
-        "\n"
-        "    ld.param.u64 %rd1, [data];\n"
-        "    ld.param.u32 %r1, [n];\n"
-        "    mov.u32 %r2, %ctaid.x;\n"
-        "    mov.u32 %r3, %ntid.x;\n"
-        "    mad.lo.s32 %r2, %r3, %r2, %tid.x;\n"
-        "    setp.ge.s32 %p1, %r2, %r1;\n"
-        "    @%p1 bra $L_end;\n"
-        "\n"
-        "    cvta.to.global.u64 %rd2, %rd1;\n"
-        "    mul.wide.s32 %rd3, %r2, 4;\n"
-        "    add.s64 %rd2, %rd2, %rd3;\n"
-        "    mov.f32 %f1, 0f42280000;\n"  /* 42.0 in IEEE 754 */
-        "    st.global.f32 [%rd2], %f1;\n"
-        "\n"
-        "$L_end:\n"
-        "    ret;\n"
-        "}\n";
+    const char *set_kernel_ptx = ".version 8.0\n"
+                                 ".target sm_90\n"
+                                 ".address_size 64\n"
+                                 "\n"
+                                 ".visible .entry set_value(\n"
+                                 "    .param .u64 data,\n"
+                                 "    .param .u32 n\n"
+                                 ")\n"
+                                 "{\n"
+                                 "    .reg .pred %p<2>;\n"
+                                 "    .reg .f32 %f<2>;\n"
+                                 "    .reg .b32 %r<4>;\n"
+                                 "    .reg .b64 %rd<4>;\n"
+                                 "\n"
+                                 "    ld.param.u64 %rd1, [data];\n"
+                                 "    ld.param.u32 %r1, [n];\n"
+                                 "    mov.u32 %r2, %ctaid.x;\n"
+                                 "    mov.u32 %r3, %ntid.x;\n"
+                                 "    mad.lo.s32 %r2, %r3, %r2, %tid.x;\n"
+                                 "    setp.ge.s32 %p1, %r2, %r1;\n"
+                                 "    @%p1 bra $L_end;\n"
+                                 "\n"
+                                 "    cvta.to.global.u64 %rd2, %rd1;\n"
+                                 "    mul.wide.s32 %rd3, %r2, 4;\n"
+                                 "    add.s64 %rd2, %rd2, %rd3;\n"
+                                 "    mov.f32 %f1, 0f42280000;\n" /* 42.0 in IEEE 754 */
+                                 "    st.global.f32 [%rd2], %f1;\n"
+                                 "\n"
+                                 "$L_end:\n"
+                                 "    ret;\n"
+                                 "}\n";
 
     TEST_START("Kernel Launch");
 
     h_data = (float *)malloc(size);
-    if (!h_data) return -1;
+    if (!h_data)
+        return -1;
     memset(h_data, 0, size);
 
     CHECK_CUDA(cuDeviceGet(&dev, 0));
@@ -735,7 +723,7 @@ int test_kernel_launch(void)
     /* Launch kernel */
     int threads = 256;
     int blocks = (N + threads - 1) / threads;
-    void *args[] = { &d_data, &N };
+    void *args[] = {&d_data, &N};
 
     printf("  Launching kernel: %d blocks x %d threads\n", blocks, threads);
     err = cuLaunchKernel(func, blocks, 1, 1, threads, 1, 1, 0, NULL, args, NULL);
@@ -778,8 +766,7 @@ int test_kernel_launch(void)
 /*
  * Test 11: Stream operations
  */
-int test_streams(void)
-{
+int test_streams(void) {
     CUdevice dev;
     CUcontext ctx;
     CUstream stream;
@@ -831,8 +818,7 @@ int test_streams(void)
 /*
  * Test 12: Event timing
  */
-int test_events(void)
-{
+int test_events(void) {
     CUdevice dev;
     CUcontext ctx;
     CUevent start, end;
@@ -844,7 +830,8 @@ int test_events(void)
     TEST_START("Event Timing");
 
     host = malloc(SIZE);
-    if (!host) return -1;
+    if (!host)
+        return -1;
     memset(host, 0xAB, SIZE);
 
     CHECK_CUDA(cuDeviceGet(&dev, 0));
@@ -893,8 +880,7 @@ int test_events(void)
     err = cuEventElapsedTime(&elapsed, start, end);
     if (err == CUDA_SUCCESS) {
         printf("  Transfer time: %.3f ms\n", elapsed);
-        printf("  Bandwidth: %.2f GB/s\n",
-               (SIZE / (1024.0*1024*1024)) / (elapsed / 1000));
+        printf("  Bandwidth: %.2f GB/s\n", (SIZE / (1024.0 * 1024 * 1024)) / (elapsed / 1000));
     } else {
         printf("  cuEventElapsedTime failed: %d\n", err);
     }
@@ -909,8 +895,7 @@ int test_events(void)
     return 0;
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     int selected_test = -1;
 
     printf("==============================================\n");
@@ -946,18 +931,18 @@ int main(int argc, char **argv)
         const char *name;
         test_func func;
     } tests[] = {
-        { 1, "Device Queries", test_device_queries },
-        { 2, "Context Stack", test_context_stack },
-        { 3, "Multiple Allocations", test_multiple_allocations },
-        { 4, "Memory Set", test_memset },
-        { 5, "D2D Copy", test_d2d_copy },
-        { 6, "Large Transfer", test_large_transfer },
-        { 7, "Pointer Attributes", test_pointer_attributes },
-        { 8, "Alloc/Free Stress", test_alloc_free_stress },
-        { 9, "Module Loading", test_module_loading },
-        { 10, "Kernel Launch", test_kernel_launch },
-        { 11, "Streams", test_streams },
-        { 12, "Events", test_events },
+        {1, "Device Queries", test_device_queries},
+        {2, "Context Stack", test_context_stack},
+        {3, "Multiple Allocations", test_multiple_allocations},
+        {4, "Memory Set", test_memset},
+        {5, "D2D Copy", test_d2d_copy},
+        {6, "Large Transfer", test_large_transfer},
+        {7, "Pointer Attributes", test_pointer_attributes},
+        {8, "Alloc/Free Stress", test_alloc_free_stress},
+        {9, "Module Loading", test_module_loading},
+        {10, "Kernel Launch", test_kernel_launch},
+        {11, "Streams", test_streams},
+        {12, "Events", test_events},
     };
 
     int num_tests = sizeof(tests) / sizeof(tests[0]);
@@ -971,8 +956,7 @@ int main(int argc, char **argv)
 
     /* Summary */
     printf("\n==============================================\n");
-    printf("Test Summary: %d run, %d passed, %d failed\n",
-           tests_run, tests_passed, tests_failed);
+    printf("Test Summary: %d run, %d passed, %d failed\n", tests_run, tests_passed, tests_failed);
     printf("==============================================\n");
 
     return tests_failed > 0 ? 1 : 0;

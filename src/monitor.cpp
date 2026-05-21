@@ -11,17 +11,17 @@
 
 #include "monitor.h"
 #include <csignal>
+#include <cstring>
 #include <ctime>
+#include <dirent.h>
 #include <iostream>
 #include <vector>
-#include <dirent.h>
-#include <cstring>
 timespec Monitor::last_delay = {0, 0};
 
 std::vector<pid_t> get_thread_ids(pid_t pid) {
     std::vector<pid_t> thread_ids;
 
-    // 构建task目录路径
+    // task
     std::string task_dir = "/proc/" + std::to_string(pid) + "/task";
 
     DIR *dir = opendir(task_dir.c_str());
@@ -32,12 +32,12 @@ std::vector<pid_t> get_thread_ids(pid_t pid) {
 
     struct dirent *entry;
     while ((entry = readdir(dir)) != nullptr) {
-        // 跳过 . 和 ..
+        //  .  ..
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
 
-        // 将线程ID添加到结果中
+        // ID
         pid_t tid = std::stoi(entry->d_name);
         thread_ids.push_back(tid);
     }
@@ -46,7 +46,7 @@ std::vector<pid_t> get_thread_ids(pid_t pid) {
     return thread_ids;
 }
 
-// 为特定线程设置CPU亲和性
+// CPU
 bool set_thread_affinity(pid_t tid, int cpu_id) {
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
@@ -55,7 +55,7 @@ bool set_thread_affinity(pid_t tid, int cpu_id) {
     int result = sched_setaffinity(tid, sizeof(cpu_set_t), &cpuset);
 
     if (result != 0) {
-        std::cerr << "设置线程 " << tid << " 的CPU亲和性失败: " << strerror(errno) << std::endl;
+        std::cerr << " " << tid << " CPU: " << strerror(errno) << std::endl;
         return false;
     }
 
@@ -68,7 +68,7 @@ Monitors::Monitors(int cpu_count, cpu_set_t *use_cpuset) : print_flag(true) {
     for (int i = 0; i < cpu_count; i++) {
         disable(i);
 
-        // 直接分配第i个可用的CPU
+        // iCPU
         int available_cpu = -1;
         int count = 0;
 

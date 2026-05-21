@@ -135,7 +135,7 @@ void Helper::suspend_handler(int) {
 #endif
 }
 void Helper::detach_children() {
-    struct sigaction sa {};
+    struct sigaction sa{};
 
     sa.sa_handler = noop_handler;
     sigemptyset(&sa.sa_mask);

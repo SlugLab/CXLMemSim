@@ -13,82 +13,274 @@
 #include "helper.h"
 #include "monitor.h"
 #include "policy.h"
+#include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
-#include <cxxopts.hpp>
 #include <iostream>
+#include <numeric>
 #include <spdlog/cfg/env.h>
+#include <sstream>
+#include <stdexcept>
+#include <string>
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <vector>
 Helper helper{};
 CXLController *controller;
 Monitors *monitors;
 auto cha_mapping = std::vector{0, 1, 2, 3, 4, 5, 6, 7, 8};
+
+namespace {
+
+struct CXLMemSimOptions {
+    bool help = false;
+    std::string target = "./microbench/malloc";
+    std::vector<int> cpuset{0, 1, 2, 3};
+    double dramlatency = 110.0;
+    int pebsperiod = 10;
+    std::string mode = "p";
+    std::string topology = "(1,(2,3))";
+    std::vector<int> capacity{0, 20, 20, 20};
+    double frequency = 4000.0;
+    std::vector<int> latency{200, 250, 200, 250, 200, 250};
+    std::vector<int> bandwidth{50, 50, 50, 50, 50, 50};
+    std::vector<std::string> pmu_name{"prefetch",  "l2hit",        "l2miss",      "cpus_dram_rds",
+                                      "llcl_hits", "snoop_fwd_wb", "total_stall", "l2stall"};
+    std::vector<uint64_t> pmu_config1{0x02c0, 0x0134, 0x7e35, 0x01d3, 0x04d1, 0x01b7, 0x04004a3, 0x0449};
+    std::vector<uint64_t> pmu_config2{0, 0, 0, 0, 0, 0x1a610008, 0, 0};
+    std::vector<double> weight{88, 88, 88, 88, 88, 88, 88};
+    std::vector<double> weight_vec{400, 800, 1200, 1600, 2000, 2400, 3000};
+    std::vector<std::string> policy{"none", "none", "none", "none"};
+    std::vector<std::string> env{"OMP_NUM_THREADS=24"};
+};
+
+std::string trim_copy(const std::string &value) {
+    const auto begin = std::find_if_not(value.begin(), value.end(), [](unsigned char ch) { return std::isspace(ch); });
+    const auto end =
+        std::find_if_not(value.rbegin(), value.rend(), [](unsigned char ch) { return std::isspace(ch); }).base();
+    return begin < end ? std::string(begin, end) : std::string();
+}
+
+std::vector<std::string> split_csv(const std::string &value) {
+    std::vector<std::string> fields;
+    std::istringstream stream(value);
+    std::string field;
+    while (std::getline(stream, field, ',')) {
+        fields.push_back(trim_copy(field));
+    }
+    if (fields.empty() && !value.empty()) {
+        fields.push_back(trim_copy(value));
+    }
+    return fields;
+}
+
+template <typename T> T parse_value(const std::string &value);
+
+template <> int parse_value<int>(const std::string &value) { return std::stoi(value, nullptr, 0); }
+
+template <> uint64_t parse_value<uint64_t>(const std::string &value) { return std::stoull(value, nullptr, 0); }
+
+template <> double parse_value<double>(const std::string &value) { return std::stod(value); }
+
+template <> std::string parse_value<std::string>(const std::string &value) { return value; }
+
+template <typename T> std::vector<T> parse_csv_vector(const std::string &value) {
+    std::vector<T> parsed;
+    for (const auto &field : split_csv(value)) {
+        if (!field.empty()) {
+            parsed.push_back(parse_value<T>(field));
+        }
+    }
+    return parsed;
+}
+
+bool option_value_follows(int argc, char *argv[], int index) { return index + 1 < argc && argv[index + 1][0] != '-'; }
+
+std::string require_cli_value(int argc, char *argv[], int &index, const std::string &key,
+                              const std::string &inline_value, bool has_inline_value) {
+    if (has_inline_value) {
+        return inline_value;
+    }
+    if (!option_value_follows(argc, argv, index)) {
+        throw std::invalid_argument("Missing value for option " + key);
+    }
+    index++;
+    return argv[index];
+}
+
+void print_main_help(const char *program) {
+    std::cout << "Usage: " << program << " [options]\n\n"
+              << "Options:\n"
+              << "  -h, --help                     Show this help text\n"
+              << "  -t, --target <command>         Target executable and arguments\n"
+              << "  -c, --cpuset <list>            CPU list, for example 0,1,2,3\n"
+              << "  -d, --dramlatency <ns>         Platform DRAM latency\n"
+              << "  -p, -i, --pebsperiod <count>   PEBS sample period\n"
+              << "  -m, --mode <mode>              page, cacheline, hugepage_2M, or hugepage_1G\n"
+              << "  -o, --topology <tree>          Newick-style CXL topology\n"
+              << "  -q, --capacity <list>          Local and expander capacity vector\n"
+              << "  -f, --frequency <MHz>          CPU frequency used by the model\n"
+              << "  -l, --latency <list>           Read/write latency vector\n"
+              << "  -b, --bandwidth <list>         Read/write bandwidth vector\n"
+              << "  -x, --pmu_name <list>          PMU event names\n"
+              << "  -y, --pmu_config1 <list>       PMU config values\n"
+              << "  -z, --pmu_config2 <list>       PMU config1 values\n"
+              << "  -w, --weight <list>            Linear-regression weights\n"
+              << "  -v, --weight_vec <list>        Linear-regression weight vector\n"
+              << "  -k, --policy <list>            allocation,migration,paging,caching policies\n"
+              << "  -e, --env <list>               Environment entries for the target\n";
+}
+
+bool parse_main_options(int argc, char *argv[], CXLMemSimOptions &opts, std::string &error) {
+    try {
+        for (int i = 1; i < argc; i++) {
+            std::string arg = argv[i];
+            std::string key;
+            std::string value;
+            bool has_inline_value = false;
+
+            if (arg.rfind("--", 0) == 0) {
+                auto eq_pos = arg.find('=');
+                key = arg.substr(2, eq_pos == std::string::npos ? std::string::npos : eq_pos - 2);
+                if (eq_pos != std::string::npos) {
+                    value = arg.substr(eq_pos + 1);
+                    has_inline_value = true;
+                }
+            } else if (arg == "-h") {
+                key = "help";
+            } else if (arg == "-t") {
+                key = "target";
+            } else if (arg == "-c") {
+                key = "cpuset";
+            } else if (arg == "-d") {
+                key = "dramlatency";
+            } else if (arg == "-p" || arg == "-i") {
+                key = "pebsperiod";
+            } else if (arg == "-m") {
+                key = "mode";
+            } else if (arg == "-o") {
+                key = "topology";
+            } else if (arg == "-q") {
+                key = "capacity";
+            } else if (arg == "-f") {
+                key = "frequency";
+            } else if (arg == "-l") {
+                key = "latency";
+            } else if (arg == "-b") {
+                key = "bandwidth";
+            } else if (arg == "-x") {
+                key = "pmu_name";
+            } else if (arg == "-y") {
+                key = "pmu_config1";
+            } else if (arg == "-z") {
+                key = "pmu_config2";
+            } else if (arg == "-w") {
+                key = "weight";
+            } else if (arg == "-v") {
+                key = "weight_vec";
+            } else if (arg == "-k") {
+                key = "policy";
+            } else if (arg == "-e") {
+                key = "env";
+            } else {
+                throw std::invalid_argument("Unknown option: " + arg);
+            }
+
+            auto get_value = [&](const std::string &option_name) {
+                return require_cli_value(argc, argv, i, option_name, value, has_inline_value);
+            };
+
+            if (key == "help") {
+                opts.help = true;
+            } else if (key == "target") {
+                opts.target = get_value(key);
+            } else if (key == "cpuset") {
+                opts.cpuset = parse_csv_vector<int>(get_value(key));
+            } else if (key == "dramlatency") {
+                opts.dramlatency = parse_value<double>(get_value(key));
+            } else if (key == "pebsperiod") {
+                opts.pebsperiod = parse_value<int>(get_value(key));
+            } else if (key == "mode") {
+                opts.mode = get_value(key);
+            } else if (key == "topology") {
+                opts.topology = get_value(key);
+            } else if (key == "capacity") {
+                opts.capacity = parse_csv_vector<int>(get_value(key));
+            } else if (key == "frequency") {
+                opts.frequency = parse_value<double>(get_value(key));
+            } else if (key == "latency") {
+                opts.latency = parse_csv_vector<int>(get_value(key));
+            } else if (key == "bandwidth") {
+                opts.bandwidth = parse_csv_vector<int>(get_value(key));
+            } else if (key == "pmu_name") {
+                opts.pmu_name = parse_csv_vector<std::string>(get_value(key));
+            } else if (key == "pmu_config1") {
+                opts.pmu_config1 = parse_csv_vector<uint64_t>(get_value(key));
+            } else if (key == "pmu_config2") {
+                opts.pmu_config2 = parse_csv_vector<uint64_t>(get_value(key));
+            } else if (key == "weight") {
+                opts.weight = parse_csv_vector<double>(get_value(key));
+            } else if (key == "weight_vec") {
+                opts.weight_vec = parse_csv_vector<double>(get_value(key));
+            } else if (key == "policy") {
+                opts.policy = parse_csv_vector<std::string>(get_value(key));
+            } else if (key == "env") {
+                opts.env = parse_csv_vector<std::string>(get_value(key));
+            } else {
+                throw std::invalid_argument("Unknown option: --" + key);
+            }
+        }
+
+        while (opts.policy.size() < 4) {
+            opts.policy.emplace_back("none");
+        }
+        return true;
+    } catch (const std::exception &e) {
+        error = e.what();
+        return false;
+    }
+}
+
+} // namespace
+
 int main(int argc, char *argv[]) {
     spdlog::cfg::load_env_levels();
-    cxxopts::Options options("CXLMemSim", "For simulation of CXL.mem Type 3 on Xeon 6");
-    options.add_options()("t,target", "The script file to execute",
-                          cxxopts::value<std::string>()->default_value("./microbench/malloc"))(
-        "h,help", "Help for CXLMemSim", cxxopts::value<bool>()->default_value("false"))(
-        "c,cpuset", "The CPUSET for CPU to set affinity on and only run the target process on those CPUs",
-        cxxopts::value<std::vector<int>>()->default_value("0,1,2,3"))(
-        "d,dramlatency", "The current platform's dram latency", cxxopts::value<double>()->default_value("110"))(
-        "p,pebsperiod", "The pebs sample period", cxxopts::value<int>()->default_value("10"))(
-        "m,mode", "Page mode or cacheline mode", cxxopts::value<std::string>()->default_value("p"))(
-        "o,topology", "The newick tree input for the CXL memory expander topology",
-        cxxopts::value<std::string>()->default_value("(1,(2,3))"))(
-        "q,capacity", "The capacity vector of the CXL memory expander with the first local",
-        cxxopts::value<std::vector<int>>()->default_value("0,20,20,20"))(
-        "f,frequency", "The frequency for the running thread", cxxopts::value<double>()->default_value("4000"))(
-        "l,latency", "The simulated latency by epoch based calculation for injected latency",
-        cxxopts::value<std::vector<int>>()->default_value("200,250,200,250,200,250"))(
-        "b,bandwidth", "The simulated bandwidth by linear regression",
-        cxxopts::value<std::vector<int>>()->default_value("50,50,50,50,50,50"))(
-        "x,pmu_name", "The input for Collected PMU",
-        cxxopts::value<std::vector<std::string>>()->default_value(
-            "prefetch,l2hit,l2miss,cpus_dram_rds,llcl_hits,snoop_fwd_wb,total_stall,l2stall"))(
-        "y,pmu_config1", "The config0 for Collected PMU",
-        cxxopts::value<std::vector<uint64_t>>()->default_value(
-            "0x02c0,0x0134,0x7e35,0x01d3,0x04d1,0x01b7,0x04004a3,0x0449"))(
-        "z,pmu_config2", "The config1 for Collected PMU",
-        cxxopts::value<std::vector<uint64_t>>()->default_value("0,0,0,0,0,0x1a610008,0,0"))(
-        "w,weight", "The weight for Linear Regression",
-        cxxopts::value<std::vector<double>>()->default_value("88, 88, 88, 88, 88, 88, 88"))(
-        "v,weight_vec", "The weight vector for Linear Regression",
-        cxxopts::value<std::vector<double>>()->default_value("400, 800, 1200, 1600, 2000, 2400, 3000"))(
-        "k,policy", "The policy of CXL memory controller",
-        cxxopts::value<std::vector<std::string>>()->default_value("none,none,none,none"))(
-        "e,env", "The environment variable for the CXL memory controller",
-        cxxopts::value<std::vector<std::string>>()->default_value("OMP_NUM_THREADS=24"));
-    ;
 
-    auto result = options.parse(argc, argv);
-    if (result["help"].as<bool>()) {
-        std::cout << options.help() << std::endl;
-        exit(0);
+    CXLMemSimOptions opts;
+    std::string parse_error;
+    if (!parse_main_options(argc, argv, opts, parse_error)) {
+        std::cerr << "Failed to parse options: " << parse_error << "\n\n";
+        print_main_help(argv[0]);
+        return 1;
     }
-    auto target = result["target"].as<std::string>();
-    auto cpuset = result["cpuset"].as<std::vector<int>>();
-    auto pebsperiod = result["pebsperiod"].as<int>();
-    auto latency = result["latency"].as<std::vector<int>>();
-    auto bandwidth = result["bandwidth"].as<std::vector<int>>();
-    auto frequency = result["frequency"].as<double>();
-    auto topology = result["topology"].as<std::string>();
-    auto capacity = result["capacity"].as<std::vector<int>>();
-    auto dramlatency = result["dramlatency"].as<double>();
-    auto pmu_name = result["pmu_name"].as<std::vector<std::string>>();
-    auto pmu_config1 = result["pmu_config1"].as<std::vector<uint64_t>>();
-    auto pmu_config2 = result["pmu_config2"].as<std::vector<uint64_t>>();
-    auto weight = result["weight"].as<std::vector<double>>();
-    auto weight_vec = result["weight_vec"].as<std::vector<double>>();
-    auto page_ = result["mode"].as<std::string>();
-    auto policy = result["policy"].as<std::vector<std::string>>();
-    auto env = result["env"].as<std::vector<std::string>>();
+    if (opts.help) {
+        print_main_help(argv[0]);
+        return 0;
+    }
+
+    auto target = opts.target;
+    auto cpuset = opts.cpuset;
+    auto pebsperiod = opts.pebsperiod;
+    auto latency = opts.latency;
+    auto bandwidth = opts.bandwidth;
+    auto frequency = opts.frequency;
+    auto topology = opts.topology;
+    auto capacity = opts.capacity;
+    auto dramlatency = opts.dramlatency;
+    auto pmu_name = opts.pmu_name;
+    auto pmu_config1 = opts.pmu_config1;
+    auto pmu_config2 = opts.pmu_config2;
+    auto weight = opts.weight;
+    auto weight_vec = opts.weight_vec;
+    auto page_ = opts.mode;
+    auto policy = opts.policy;
+    auto env = opts.env;
 
     page_type mode;
     if (page_ == "hugepage_2M") {
@@ -105,7 +297,6 @@ int main(int argc, char *argv[]) {
     PagingPolicy *policy3;
     CachingPolicy *policy4;
 
-    // 初始化分配策略
     // Initialize allocation policy
     if (policy[0] == "interleave") {
         policy1 = new InterleavePolicy();
@@ -115,7 +306,6 @@ int main(int argc, char *argv[]) {
         policy1 = new AllocationPolicy();
     }
 
-    // 初始化迁移策略
     // Initialize migration policy
     if (policy[1] == "heataware") {
         policy2 = new HeatAwareMigrationPolicy();
@@ -129,7 +319,6 @@ int main(int argc, char *argv[]) {
         policy2 = new LifetimeBasedMigrationPolicy();
     } else if (policy[1] == "hybrid") {
         auto *hybridPolicy = new HybridMigrationPolicy();
-        // 可以添加多个策略到混合策略中
         // Can add multiple policies to the hybrid policy
         hybridPolicy->add_policy(new HeatAwareMigrationPolicy());
         hybridPolicy->add_policy(new FrequencyBasedMigrationPolicy());
@@ -139,7 +328,6 @@ int main(int argc, char *argv[]) {
         policy2 = new MigrationPolicy();
     }
 
-    // 初始化分页策略
     // Initialize paging policy
     if (policy[2] == "hugepage") {
         policy3 = new HugePagePolicy();
@@ -150,7 +338,6 @@ int main(int argc, char *argv[]) {
         policy3 = new PagingPolicy();
     }
 
-    // 初始化缓存策略
     // Initialize caching policy
     if (policy[3] == "fifo") {
         policy4 = new FIFOPolicy();
@@ -276,7 +463,7 @@ int main(int argc, char *argv[]) {
     monitors->print_flag = false;
 
     /* read CHA params */
-    for (const auto &mon : monitors->mon) {
+    for (auto &mon : monitors->mon) {
         for (size_t idx = 0; idx < pmu.chas.size(); idx++) {
             pmu.chas[idx].read_cha_elems(&mon.before->chas[idx]);
         }
@@ -297,7 +484,7 @@ int main(int argc, char *argv[]) {
     while (true) {
         uint64_t calibrated_delay;
         for (size_t i = 0; i < monitors->mon.size(); i++) {
-            const auto &mon = monitors->mon[i];
+            auto &mon = monitors->mon[i];
             // check other process
             auto m_status = mon.status.load();
             if (m_status == MONITOR_DISABLE) {

@@ -24,8 +24,10 @@
  *	{ u64			id;	  } && PERF_SAMPLE_IDENTIFIER
  *	{ u64			ip;	  } && PERF_SAMPLE_IP
  *	{ u32			pid, tid; } && PERF_SAMPLE_TID
- *	{ u64			time;     } && PERF_SAMPLE_TIME
- *	{ u64			addr;     } && PERF_SAMPLE_ADDR
+ *	{ u64			time;
+    } && PERF_SAMPLE_TIME
+ *	{ u64			addr;
+    } && PERF_SAMPLE_ADDR
  *	{ u64			id;	  } && PERF_SAMPLE_ID
  *	{ u64			stream_id;} && PERF_SAMPLE_STREAM_ID
  *	{ u32			cpu, res; } && PERF_SAMPLE_CPU

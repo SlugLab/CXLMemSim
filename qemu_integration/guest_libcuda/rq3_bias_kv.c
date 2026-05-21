@@ -12,13 +12,13 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#include <math.h>
+#include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <time.h>
-#include <math.h>
-#include <pthread.h>
 
 #include "cxl_gpu_cmd.h"
 
@@ -33,7 +33,7 @@ typedef uint64_t CUdeviceptr;
 #define CUDA_SUCCESS 0
 
 #ifndef CXL_BIAS_HOST
-#define CXL_BIAS_HOST   0
+#define CXL_BIAS_HOST 0
 #endif
 #ifndef CXL_BIAS_DEVICE
 #define CXL_BIAS_DEVICE 1
@@ -63,14 +63,14 @@ extern int cxlResetCoherencyStats(void);
 /* ------------------------------------------------------------------ */
 /* Constants                                                          */
 /* ------------------------------------------------------------------ */
-#define CACHE_LINE          64
-#define NUM_TRIALS          10
-#define COUNTER_OPS         100000
-#define NUM_KEYS            10000
-#define KV_OPS_PER_THREAD   50000
-#define RING_SLOTS          1000
-#define RING_RECORDS        100000
-#define NUM_HOT_KEYS        100
+#define CACHE_LINE 64
+#define NUM_TRIALS 10
+#define COUNTER_OPS 100000
+#define NUM_KEYS 10000
+#define KV_OPS_PER_THREAD 50000
+#define RING_SLOTS 1000
+#define RING_RECORDS 100000
+#define NUM_HOT_KEYS 100
 
 /* ------------------------------------------------------------------ */
 /* Key-value entry (fits one cache line)                              */
@@ -79,13 +79,14 @@ typedef struct KVEntry {
     uint64_t key;
     uint64_t value;
     uint64_t version;
-    uint8_t  padding[40];
+    uint8_t padding[40];
 } KVEntry;
 
 /* Ring-buffer slot (one cache line) */
 typedef struct RingSlot {
-    uint64_t seq;          /* sequence number; 0 = empty */
-    uint8_t  payload[56];
+    uint64_t seq;
+    /* sequence number; 0 = empty */
+    uint8_t payload[56];
 } RingSlot;
 
 /* ------------------------------------------------------------------ */
@@ -93,8 +94,7 @@ typedef struct RingSlot {
 /* glibc's optimised memset may use AVX-512 non-temporal stores that  */
 /* fault on device-mapped pages.                                       */
 /* ------------------------------------------------------------------ */
-static void cxl_memset(volatile void *dst, int val, size_t n)
-{
+static void cxl_memset(volatile void *dst, int val, size_t n) {
     volatile unsigned char *d = (volatile unsigned char *)dst;
     for (size_t i = 0; i < n; i++)
         d[i] = (unsigned char)val;
@@ -103,52 +103,40 @@ static void cxl_memset(volatile void *dst, int val, size_t n)
 /* ------------------------------------------------------------------ */
 /* Timing helpers                                                     */
 /* ------------------------------------------------------------------ */
-static inline uint64_t ts_to_ns(const struct timespec *ts)
-{
+static inline uint64_t ts_to_ns(const struct timespec *ts) {
     return (uint64_t)ts->tv_sec * 1000000000ULL + (uint64_t)ts->tv_nsec;
 }
 
-static inline uint64_t elapsed_ns(const struct timespec *t0,
-                                   const struct timespec *t1)
-{
+static inline uint64_t elapsed_ns(const struct timespec *t0, const struct timespec *t1) {
     return ts_to_ns(t1) - ts_to_ns(t0);
 }
 
 /* ------------------------------------------------------------------ */
 /* Sorting / percentile helpers                                       */
 /* ------------------------------------------------------------------ */
-static int cmp_u64(const void *a, const void *b)
-{
+static int cmp_u64(const void *a, const void *b) {
     uint64_t va = *(const uint64_t *)a;
     uint64_t vb = *(const uint64_t *)b;
     return (va > vb) - (va < vb);
 }
 
-static void report_percentiles(const char *label, uint64_t *samples, int n)
-{
+static void report_percentiles(const char *label, uint64_t *samples, int n) {
     qsort(samples, (size_t)n, sizeof(uint64_t), cmp_u64);
     int p25 = n / 4;
     int p50 = n / 2;
     int p75 = (3 * n) / 4;
-    printf("    %-28s  p25=%lu  median=%lu  p75=%lu\n", label,
-           (unsigned long)samples[p25],
-           (unsigned long)samples[p50],
+    printf("    %-28s  p25=%lu  median=%lu  p75=%lu\n", label, (unsigned long)samples[p25], (unsigned long)samples[p50],
            (unsigned long)samples[p75]);
 }
 
-static void print_coherency_stats(const CXLCoherencyStats *s)
-{
+static void print_coherency_stats(const CXLCoherencyStats *s) {
     printf("    coherency: snoop_hits=%lu  snoop_misses=%lu  "
            "bias_flips=%lu  writebacks=%lu\n",
-           (unsigned long)s->snoop_hits,
-           (unsigned long)s->snoop_misses,
-           (unsigned long)s->bias_flips,
+           (unsigned long)s->snoop_hits, (unsigned long)s->snoop_misses, (unsigned long)s->bias_flips,
            (unsigned long)s->writebacks);
     printf("               dev_bias_hits=%lu  host_bias_hits=%lu  "
            "back_inv=%lu  dir_entries=%lu\n",
-           (unsigned long)s->device_bias_hits,
-           (unsigned long)s->host_bias_hits,
-           (unsigned long)s->back_invalidations,
+           (unsigned long)s->device_bias_hits, (unsigned long)s->host_bias_hits, (unsigned long)s->back_invalidations,
            (unsigned long)s->directory_entries);
 }
 
@@ -156,18 +144,19 @@ static void print_coherency_stats(const CXLCoherencyStats *s)
 /* Zipfian distribution generator                                     */
 /* ------------------------------------------------------------------ */
 typedef struct {
-    int     n;           /* number of keys */
-    double  theta;
-    double *cdf;         /* cdf[0..n-1] */
-    unsigned int seed;   /* per-generator PRNG state */
+    int n;
+    /* number of keys */
+    double theta;
+    double *cdf;
+    /* cdf[0..n-1] */
+    unsigned int seed; /* per-generator PRNG state */
 } ZipfGen;
 
-static void zipf_init(ZipfGen *z, int n, double theta, unsigned int seed)
-{
-    z->n     = n;
+static void zipf_init(ZipfGen *z, int n, double theta, unsigned int seed) {
+    z->n = n;
     z->theta = theta;
-    z->seed  = seed;
-    z->cdf   = (double *)malloc(sizeof(double) * (size_t)n);
+    z->seed = seed;
+    z->cdf = (double *)malloc(sizeof(double) * (size_t)n);
     if (!z->cdf) {
         fprintf(stderr, "FATAL: zipf_init malloc failed\n");
         exit(1);
@@ -184,15 +173,13 @@ static void zipf_init(ZipfGen *z, int n, double theta, unsigned int seed)
         z->cdf[k] /= sum;
 }
 
-static void zipf_free(ZipfGen *z)
-{
+static void zipf_free(ZipfGen *z) {
     free(z->cdf);
     z->cdf = NULL;
 }
 
 /* Return a Zipfian-distributed key in [0, n) via binary search on CDF. */
-static int zipf_next(ZipfGen *z)
-{
+static int zipf_next(ZipfGen *z) {
     double u = (double)rand_r(&z->seed) / (double)RAND_MAX;
     /* Binary search for smallest k where cdf[k] >= u */
     int lo = 0, hi = z->n - 1;
@@ -212,12 +199,11 @@ static int zipf_next(ZipfGen *z)
 
 typedef struct {
     volatile uint64_t *counter;
-    int                ops;
+    int ops;
     pthread_barrier_t *barrier;
 } CounterArg;
 
-static void *counter_thread(void *arg)
-{
+static void *counter_thread(void *arg) {
     CounterArg *ca = (CounterArg *)arg;
     pthread_barrier_wait(ca->barrier);
     for (int i = 0; i < ca->ops; i++)
@@ -225,8 +211,7 @@ static void *counter_thread(void *arg)
     return NULL;
 }
 
-static uint64_t run_counter_single(volatile uint64_t *counter, int ops)
-{
+static uint64_t run_counter_single(volatile uint64_t *counter, int ops) {
     *counter = 0;
     cxlCoherentFence();
 
@@ -239,8 +224,7 @@ static uint64_t run_counter_single(volatile uint64_t *counter, int ops)
     return elapsed_ns(&t0, &t1);
 }
 
-static uint64_t run_counter_dual(volatile uint64_t *counter, int ops_per_thread)
-{
+static uint64_t run_counter_dual(volatile uint64_t *counter, int ops_per_thread) {
     *counter = 0;
     cxlCoherentFence();
 
@@ -248,8 +232,8 @@ static uint64_t run_counter_dual(volatile uint64_t *counter, int ops_per_thread)
     pthread_barrier_init(&barrier, NULL, 2);
 
     CounterArg args[2] = {
-        { counter, ops_per_thread, &barrier },
-        { counter, ops_per_thread, &barrier },
+        {counter, ops_per_thread, &barrier},
+        {counter, ops_per_thread, &barrier},
     };
 
     pthread_t tids[2];
@@ -267,8 +251,7 @@ static uint64_t run_counter_dual(volatile uint64_t *counter, int ops_per_thread)
     return elapsed_ns(&t0, &t1);
 }
 
-static void experiment_shared_counter(void)
-{
+static void experiment_shared_counter(void) {
     printf("\n");
     printf("============================================================\n");
     printf("  EXPERIMENT 1: Shared Counter (extreme contention)\n");
@@ -281,8 +264,8 @@ static void experiment_shared_counter(void)
     }
     volatile uint64_t *counter = (volatile uint64_t *)region;
 
-    const char *modes[] = { "Device-Bias", "Host-Bias" };
-    int biases[]        = { CXL_BIAS_DEVICE, CXL_BIAS_HOST };
+    const char *modes[] = {"Device-Bias", "Host-Bias"};
+    int biases[] = {CXL_BIAS_DEVICE, CXL_BIAS_HOST};
 
     /* --- Single-thread baseline --- */
     for (int m = 0; m < 2; m++) {
@@ -297,7 +280,8 @@ static void experiment_shared_counter(void)
         /* Convert to ops/sec for reporting */
         uint64_t ops_sec[NUM_TRIALS];
         for (int t = 0; t < NUM_TRIALS; t++) {
-            if (samples[t] == 0) samples[t] = 1;
+            if (samples[t] == 0)
+                samples[t] = 1;
             ops_sec[t] = (uint64_t)COUNTER_OPS * 1000000000ULL / samples[t];
         }
         char label[64];
@@ -322,7 +306,8 @@ static void experiment_shared_counter(void)
         uint64_t ops_sec[NUM_TRIALS];
         uint64_t total_ops = (uint64_t)COUNTER_OPS * 2;
         for (int t = 0; t < NUM_TRIALS; t++) {
-            if (samples[t] == 0) samples[t] = 1;
+            if (samples[t] == 0)
+                samples[t] = 1;
             ops_sec[t] = total_ops * 1000000000ULL / samples[t];
         }
         char label[64];
@@ -342,16 +327,15 @@ static void experiment_shared_counter(void)
 /* ================================================================== */
 
 typedef struct {
-    KVEntry           *kv;
-    int                num_keys;
-    int                ops;
-    double             theta;
-    unsigned int       seed;
+    KVEntry *kv;
+    int num_keys;
+    int ops;
+    double theta;
+    unsigned int seed;
     pthread_barrier_t *barrier;
 } KVArg;
 
-static void *kv_thread(void *arg)
-{
+static void *kv_thread(void *arg) {
     KVArg *ka = (KVArg *)arg;
 
     ZipfGen zg;
@@ -363,7 +347,7 @@ static void *kv_thread(void *arg)
         int k = zipf_next(&zg);
         if (i & 1) {
             /* write */
-            ka->kv[k].value   = (uint64_t)i;
+            ka->kv[k].value = (uint64_t)i;
             ka->kv[k].version = __sync_add_and_fetch(&ka->kv[k].version, 1);
         } else {
             /* read */
@@ -376,9 +360,7 @@ static void *kv_thread(void *arg)
     return NULL;
 }
 
-static uint64_t run_kv_trial(KVEntry *kv, int nkeys, double theta,
-                              int ops_per_thread)
-{
+static uint64_t run_kv_trial(KVEntry *kv, int nkeys, double theta, int ops_per_thread) {
     /* Zero entries */
     cxl_memset(kv, 0, sizeof(KVEntry) * (size_t)nkeys);
     for (int k = 0; k < nkeys; k++)
@@ -389,8 +371,8 @@ static uint64_t run_kv_trial(KVEntry *kv, int nkeys, double theta,
     pthread_barrier_init(&barrier, NULL, 2);
 
     KVArg args[2] = {
-        { kv, nkeys, ops_per_thread, theta, 12345, &barrier },
-        { kv, nkeys, ops_per_thread, theta, 67890, &barrier },
+        {kv, nkeys, ops_per_thread, theta, 12345, &barrier},
+        {kv, nkeys, ops_per_thread, theta, 67890, &barrier},
     };
 
     pthread_t tids[2];
@@ -408,8 +390,7 @@ static uint64_t run_kv_trial(KVEntry *kv, int nkeys, double theta,
     return elapsed_ns(&t0, &t1);
 }
 
-static void experiment_kv_zipfian(void)
-{
+static void experiment_kv_zipfian(void) {
     printf("\n");
     printf("============================================================\n");
     printf("  EXPERIMENT 2: KV Store with Zipfian Distribution\n");
@@ -418,8 +399,7 @@ static void experiment_kv_zipfian(void)
     uint64_t alloc_sz = (uint64_t)NUM_KEYS * sizeof(KVEntry);
     void *region = NULL;
     if (cxlCoherentAlloc(alloc_sz, &region) != CUDA_SUCCESS || !region) {
-        fprintf(stderr, "  SKIP: coherent alloc (%lu bytes) failed\n",
-                (unsigned long)alloc_sz);
+        fprintf(stderr, "  SKIP: coherent alloc (%lu bytes) failed\n", (unsigned long)alloc_sz);
         return;
     }
     KVEntry *kv = (KVEntry *)region;
@@ -436,9 +416,9 @@ static void experiment_kv_zipfian(void)
             CXLCoherencyStats last_stats;
             for (int t = 0; t < NUM_TRIALS; t++) {
                 cxlResetCoherencyStats();
-                uint64_t ns = run_kv_trial(kv, NUM_KEYS, theta,
-                                            KV_OPS_PER_THREAD);
-                if (ns == 0) ns = 1;
+                uint64_t ns = run_kv_trial(kv, NUM_KEYS, theta, KV_OPS_PER_THREAD);
+                if (ns == 0)
+                    ns = 1;
                 uint64_t total_ops = (uint64_t)KV_OPS_PER_THREAD * 2;
                 ops_sec[t] = total_ops * 1000000000ULL / ns;
                 cxlGetCoherencyStats(&last_stats);
@@ -455,9 +435,9 @@ static void experiment_kv_zipfian(void)
             CXLCoherencyStats last_stats;
             for (int t = 0; t < NUM_TRIALS; t++) {
                 cxlResetCoherencyStats();
-                uint64_t ns = run_kv_trial(kv, NUM_KEYS, theta,
-                                            KV_OPS_PER_THREAD);
-                if (ns == 0) ns = 1;
+                uint64_t ns = run_kv_trial(kv, NUM_KEYS, theta, KV_OPS_PER_THREAD);
+                if (ns == 0)
+                    ns = 1;
                 uint64_t total_ops = (uint64_t)KV_OPS_PER_THREAD * 2;
                 ops_sec[t] = total_ops * 1000000000ULL / ns;
                 cxlGetCoherencyStats(&last_stats);
@@ -478,9 +458,9 @@ static void experiment_kv_zipfian(void)
             CXLCoherencyStats last_stats;
             for (int t = 0; t < NUM_TRIALS; t++) {
                 cxlResetCoherencyStats();
-                uint64_t ns = run_kv_trial(kv, NUM_KEYS, theta,
-                                            KV_OPS_PER_THREAD);
-                if (ns == 0) ns = 1;
+                uint64_t ns = run_kv_trial(kv, NUM_KEYS, theta, KV_OPS_PER_THREAD);
+                if (ns == 0)
+                    ns = 1;
                 uint64_t total_ops = (uint64_t)KV_OPS_PER_THREAD * 2;
                 ops_sec[t] = total_ops * 1000000000ULL / ns;
                 cxlGetCoherencyStats(&last_stats);
@@ -499,13 +479,12 @@ static void experiment_kv_zipfian(void)
 
 typedef struct {
     volatile RingSlot *ring;
-    int                slots;
-    int                records;
+    int slots;
+    int records;
     pthread_barrier_t *barrier;
 } RingArg;
 
-static void *producer_thread(void *arg)
-{
+static void *producer_thread(void *arg) {
     RingArg *ra = (RingArg *)arg;
     pthread_barrier_wait(ra->barrier);
 
@@ -529,8 +508,7 @@ static void *producer_thread(void *arg)
     return NULL;
 }
 
-static void *consumer_thread(void *arg)
-{
+static void *consumer_thread(void *arg) {
     RingArg *ra = (RingArg *)arg;
     pthread_barrier_wait(ra->barrier);
 
@@ -556,9 +534,7 @@ static void *consumer_thread(void *arg)
     return NULL;
 }
 
-static uint64_t run_ring_trial(volatile RingSlot *ring, int slots,
-                                int records)
-{
+static uint64_t run_ring_trial(volatile RingSlot *ring, int slots, int records) {
     /* Clear all slots */
     cxl_memset((void *)ring, 0, sizeof(RingSlot) * (size_t)slots);
     cxlCoherentFence();
@@ -566,8 +542,8 @@ static uint64_t run_ring_trial(volatile RingSlot *ring, int slots,
     pthread_barrier_t barrier;
     pthread_barrier_init(&barrier, NULL, 2);
 
-    RingArg parg = { ring, slots, records, &barrier };
-    RingArg carg = { ring, slots, records, &barrier };
+    RingArg parg = {ring, slots, records, &barrier};
+    RingArg carg = {ring, slots, records, &barrier};
 
     pthread_t prod, cons;
     struct timespec t0, t1;
@@ -584,8 +560,7 @@ static uint64_t run_ring_trial(volatile RingSlot *ring, int slots,
     return elapsed_ns(&t0, &t1);
 }
 
-static void experiment_producer_consumer(void)
-{
+static void experiment_producer_consumer(void) {
     printf("\n");
     printf("============================================================\n");
     printf("  EXPERIMENT 3: Producer-Consumer Ring Buffer\n");
@@ -594,16 +569,15 @@ static void experiment_producer_consumer(void)
     uint64_t alloc_sz = (uint64_t)RING_SLOTS * sizeof(RingSlot);
     void *region = NULL;
     if (cxlCoherentAlloc(alloc_sz, &region) != CUDA_SUCCESS || !region) {
-        fprintf(stderr, "  SKIP: coherent alloc (%lu bytes) failed\n",
-                (unsigned long)alloc_sz);
+        fprintf(stderr, "  SKIP: coherent alloc (%lu bytes) failed\n", (unsigned long)alloc_sz);
         return;
     }
     volatile RingSlot *ring = (volatile RingSlot *)region;
 
     uint64_t bytes_transferred = (uint64_t)RING_RECORDS * sizeof(RingSlot);
 
-    const char *modes[] = { "Device-Bias", "Host-Bias" };
-    int biases[]        = { CXL_BIAS_DEVICE, CXL_BIAS_HOST };
+    const char *modes[] = {"Device-Bias", "Host-Bias"};
+    int biases[] = {CXL_BIAS_DEVICE, CXL_BIAS_HOST};
 
     for (int m = 0; m < 2; m++) {
         cxlSetBias(region, alloc_sz, biases[m]);
@@ -611,7 +585,7 @@ static void experiment_producer_consumer(void)
 
         printf("\n  --- %s ---\n", modes[m]);
 
-        uint64_t bw_samples[NUM_TRIALS];   /* in bytes/sec */
+        uint64_t bw_samples[NUM_TRIALS]; /* in bytes/sec */
         uint64_t ns_samples[NUM_TRIALS];
         CXLCoherencyStats last_stats;
 
@@ -619,7 +593,8 @@ static void experiment_producer_consumer(void)
             cxlResetCoherencyStats();
             uint64_t ns = run_ring_trial(ring, RING_SLOTS, RING_RECORDS);
             ns_samples[t] = ns;
-            if (ns == 0) ns = 1;
+            if (ns == 0)
+                ns = 1;
             /* bandwidth in bytes/sec */
             bw_samples[t] = bytes_transferred * 1000000000ULL / ns;
             cxlGetCoherencyStats(&last_stats);
@@ -627,10 +602,10 @@ static void experiment_producer_consumer(void)
 
         /* Report bandwidth in GB/s (divide by 1e9) */
         double gbps[NUM_TRIALS];
-        uint64_t gbps_scaled[NUM_TRIALS];   /* milli-GB/s for percentile */
+        uint64_t gbps_scaled[NUM_TRIALS]; /* milli-GB/s for percentile */
         for (int t = 0; t < NUM_TRIALS; t++) {
             gbps[t] = (double)bw_samples[t] / 1e9;
-            gbps_scaled[t] = (uint64_t)(gbps[t] * 1000.0);  /* milli-GB/s */
+            gbps_scaled[t] = (uint64_t)(gbps[t] * 1000.0); /* milli-GB/s */
         }
 
         /* Sort for percentiles */
@@ -638,11 +613,8 @@ static void experiment_producer_consumer(void)
         int p25 = NUM_TRIALS / 4;
         int p50 = NUM_TRIALS / 2;
         int p75 = (3 * NUM_TRIALS) / 4;
-        printf("    %-28s  p25=%.3f  median=%.3f  p75=%.3f GB/s\n",
-               modes[m],
-               (double)gbps_scaled[p25] / 1000.0,
-               (double)gbps_scaled[p50] / 1000.0,
-               (double)gbps_scaled[p75] / 1000.0);
+        printf("    %-28s  p25=%.3f  median=%.3f  p75=%.3f GB/s\n", modes[m], (double)gbps_scaled[p25] / 1000.0,
+               (double)gbps_scaled[p50] / 1000.0, (double)gbps_scaled[p75] / 1000.0);
 
         report_percentiles("  latency (ns)", ns_samples, NUM_TRIALS);
         print_coherency_stats(&last_stats);
@@ -655,8 +627,7 @@ static void experiment_producer_consumer(void)
 /* Main                                                               */
 /* ================================================================== */
 
-int main(void)
-{
+int main(void) {
     printf("============================================================\n");
     printf("  RQ3: Device-Biased vs Host-Biased Directory Performance\n");
     printf("============================================================\n");
@@ -677,7 +648,8 @@ int main(void)
         int found = 0;
         for (int di = 0; di < dev_count && !found; di++) {
             err = cuDeviceGet(&dev, di);
-            if (err != CUDA_SUCCESS) continue;
+            if (err != CUDA_SUCCESS)
+                continue;
             CUcontext try_ctx;
             err = cuCtxCreate_v2(&try_ctx, 0, dev);
             if (err == CUDA_SUCCESS) {

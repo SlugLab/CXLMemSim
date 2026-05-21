@@ -6,15 +6,15 @@
  * Run: ./guest_gpu_test
  */
 
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/mman.h>
 #include <sys/ioctl.h>
-#include <stdint.h>
-#include <dlfcn.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 /* CXL Type 2 device identifiers */
 #define CXL_TYPE2_VENDOR_ID 0x8086
@@ -22,29 +22,28 @@
 
 /* CUDA-like types */
 typedef int CUresult;
-typedef void* CUdevice;
-typedef void* CUcontext;
-typedef void* CUmodule;
-typedef void* CUfunction;
+typedef void *CUdevice;
+typedef void *CUcontext;
+typedef void *CUmodule;
+typedef void *CUfunction;
 typedef uint64_t CUdeviceptr;
 
 #define CUDA_SUCCESS 0
 
 /* Function pointer types */
 typedef CUresult (*cuInit_t)(unsigned int);
-typedef CUresult (*cuDeviceGetCount_t)(int*);
-typedef CUresult (*cuDeviceGet_t)(CUdevice*, int);
-typedef CUresult (*cuDeviceGetName_t)(char*, int, CUdevice);
-typedef CUresult (*cuDeviceTotalMem_t)(size_t*, CUdevice);
-typedef CUresult (*cuCtxCreate_t)(CUcontext*, unsigned int, CUdevice);
-typedef CUresult (*cuMemAlloc_t)(CUdeviceptr*, size_t);
+typedef CUresult (*cuDeviceGetCount_t)(int *);
+typedef CUresult (*cuDeviceGet_t)(CUdevice *, int);
+typedef CUresult (*cuDeviceGetName_t)(char *, int, CUdevice);
+typedef CUresult (*cuDeviceTotalMem_t)(size_t *, CUdevice);
+typedef CUresult (*cuCtxCreate_t)(CUcontext *, unsigned int, CUdevice);
+typedef CUresult (*cuMemAlloc_t)(CUdeviceptr *, size_t);
 typedef CUresult (*cuMemFree_t)(CUdeviceptr);
-typedef CUresult (*cuMemcpyHtoD_t)(CUdeviceptr, const void*, size_t);
-typedef CUresult (*cuMemcpyDtoH_t)(void*, CUdeviceptr, size_t);
+typedef CUresult (*cuMemcpyHtoD_t)(CUdeviceptr, const void *, size_t);
+typedef CUresult (*cuMemcpyDtoH_t)(void *, CUdeviceptr, size_t);
 
 /* Test using direct PCI access */
-int test_pci_device(void)
-{
+int test_pci_device(void) {
     char path[256];
     int fd;
     uint16_t vendor, device;
@@ -54,18 +53,17 @@ int test_pci_device(void)
     /* Try to find the CXL Type 2 device */
     for (int bus = 0; bus < 256; bus++) {
         for (int dev = 0; dev < 32; dev++) {
-            snprintf(path, sizeof(path),
-                     "/sys/bus/pci/devices/0000:%02x:%02x.0/vendor", bus, dev);
+            snprintf(path, sizeof(path), "/sys/bus/pci/devices/0000:%02x:%02x.0/vendor", bus, dev);
             fd = open(path, O_RDONLY);
-            if (fd < 0) continue;
+            if (fd < 0)
+                continue;
 
             char buf[16];
             if (read(fd, buf, sizeof(buf)) > 0) {
                 vendor = strtol(buf, NULL, 16);
                 close(fd);
 
-                snprintf(path, sizeof(path),
-                         "/sys/bus/pci/devices/0000:%02x:%02x.0/device", bus, dev);
+                snprintf(path, sizeof(path), "/sys/bus/pci/devices/0000:%02x:%02x.0/device", bus, dev);
                 fd = open(path, O_RDONLY);
                 if (fd >= 0 && read(fd, buf, sizeof(buf)) > 0) {
                     device = strtol(buf, NULL, 16);
@@ -76,12 +74,11 @@ int test_pci_device(void)
                         printf("  Vendor: 0x%04x, Device: 0x%04x\n", vendor, device);
 
                         /* Read resource info */
-                        snprintf(path, sizeof(path),
-                                 "/sys/bus/pci/devices/0000:%02x:%02x.0/resource", bus, dev);
+                        snprintf(path, sizeof(path), "/sys/bus/pci/devices/0000:%02x:%02x.0/resource", bus, dev);
                         fd = open(path, O_RDONLY);
                         if (fd >= 0) {
                             char resource[1024];
-                            ssize_t n = read(fd, resource, sizeof(resource)-1);
+                            ssize_t n = read(fd, resource, sizeof(resource) - 1);
                             if (n > 0) {
                                 resource[n] = '\0';
                                 printf("  Resources:\n%s", resource);
@@ -101,8 +98,7 @@ int test_pci_device(void)
 }
 
 /* Test using CUDA driver API (if available) */
-int test_cuda_api(void)
-{
+int test_cuda_api(void) {
     void *handle;
     cuInit_t cuInit;
     cuDeviceGetCount_t cuDeviceGetCount;
@@ -192,7 +188,7 @@ int test_cuda_api(void)
             if (cuDeviceTotalMem) {
                 err = cuDeviceTotalMem(&totalMem, dev);
                 if (err == CUDA_SUCCESS) {
-                    printf("Total memory: %zu MB\n", totalMem / (1024*1024));
+                    printf("Total memory: %zu MB\n", totalMem / (1024 * 1024));
                 }
             }
         }
@@ -261,8 +257,7 @@ int test_cuda_api(void)
 }
 
 /* Test CXL memory region directly */
-int test_cxl_memory(void)
-{
+int test_cxl_memory(void) {
     char path[256];
     int fd;
     void *map;
@@ -286,7 +281,7 @@ int test_cxl_memory(void)
             size_t size = end - start + 1;
             printf("BAR0: start=0x%lx end=0x%lx size=%zu\n", start, end, size);
 
-            if (size > 0 && size < 1024*1024*1024) {
+            if (size > 0 && size < 1024 * 1024 * 1024) {
                 map = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
                 if (map != MAP_FAILED) {
                     printf("Mapped BAR0 at %p\n", map);
@@ -311,8 +306,7 @@ int test_cxl_memory(void)
     return 0;
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     printf("CXL Type 2 GPU Test Program\n");
     printf("============================\n\n");
 

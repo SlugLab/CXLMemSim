@@ -38,11 +38,9 @@ extern CUresult cuCtxDestroy_v2(CUcontext ctx);
 extern CUresult cuCtxSynchronize(void);
 extern CUresult cuModuleLoadData(CUmodule *module, const void *image);
 extern CUresult cuModuleGetFunction(CUfunction *hfunc, CUmodule hmod, const char *name);
-extern CUresult cuLaunchKernel(CUfunction f,
-                               unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
+extern CUresult cuLaunchKernel(CUfunction f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
                                unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
-                               unsigned int sharedMemBytes, void *hStream,
-                               void **kernelParams, void **extra);
+                               unsigned int sharedMemBytes, void *hStream, void **kernelParams, void **extra);
 
 extern int cxlCoherentAlloc(uint64_t size, void **host_ptr);
 extern int cxlCoherentFree(void *host_ptr);
@@ -81,63 +79,60 @@ typedef struct {
     int flip_each_iteration;
 } BenchmarkMode;
 
-static const char *hitm_ptx =
-    ".version 8.0\n"
-    ".target sm_90\n"
-    ".address_size 64\n"
-    "\n"
-    ".visible .entry gpu_hitm_touch(\n"
-    "    .param .u64 base,\n"
-    "    .param .u32 lines,\n"
-    "    .param .u32 seq\n"
-    ")\n"
-    "{\n"
-    "    .reg .pred %p<2>;\n"
-    "    .reg .b32 %r<8>;\n"
-    "    .reg .b64 %rd<8>;\n"
-    "\n"
-    "    ld.param.u64 %rd1, [base];\n"
-    "    ld.param.u32 %r1, [lines];\n"
-    "    ld.param.u32 %r2, [seq];\n"
-    "\n"
-    "    mov.u32 %r3, %ctaid.x;\n"
-    "    mov.u32 %r4, %ntid.x;\n"
-    "    mov.u32 %r5, %tid.x;\n"
-    "    mad.lo.u32 %r6, %r3, %r4, %r5;\n"
-    "    setp.ge.u32 %p1, %r6, %r1;\n"
-    "    @%p1 bra DONE;\n"
-    "\n"
-    "    mul.wide.u32 %rd2, %r6, 64;\n"
-    "    add.s64 %rd3, %rd1, %rd2;\n"
-    "    ld.global.u32 %r7, [%rd3];\n"
-    "    add.u32 %r7, %r7, 1;\n"
-    "    st.global.u32 [%rd3], %r7;\n"
-    "    add.s64 %rd4, %rd3, 4;\n"
-    "    st.global.u32 [%rd4], %r2;\n"
-    "    add.s64 %rd5, %rd3, 12;\n"
-    "    xor.b32 %r7, %r7, %r2;\n"
-    "    st.global.u32 [%rd5], %r7;\n"
-    "\n"
-    "DONE:\n"
-    "    ret;\n"
-    "}\n";
+static const char *hitm_ptx = ".version 8.0\n"
+                              ".target sm_90\n"
+                              ".address_size 64\n"
+                              "\n"
+                              ".visible .entry gpu_hitm_touch(\n"
+                              "    .param .u64 base,\n"
+                              "    .param .u32 lines,\n"
+                              "    .param .u32 seq\n"
+                              ")\n"
+                              "{\n"
+                              "    .reg .pred %p<2>;\n"
+                              "    .reg .b32 %r<8>;\n"
+                              "    .reg .b64 %rd<8>;\n"
+                              "\n"
+                              "    ld.param.u64 %rd1, [base];\n"
+                              "    ld.param.u32 %r1, [lines];\n"
+                              "    ld.param.u32 %r2, [seq];\n"
+                              "\n"
+                              "    mov.u32 %r3, %ctaid.x;\n"
+                              "    mov.u32 %r4, %ntid.x;\n"
+                              "    mov.u32 %r5, %tid.x;\n"
+                              "    mad.lo.u32 %r6, %r3, %r4, %r5;\n"
+                              "    setp.ge.u32 %p1, %r6, %r1;\n"
+                              "    @%p1 bra DONE;\n"
+                              "\n"
+                              "    mul.wide.u32 %rd2, %r6, 64;\n"
+                              "    add.s64 %rd3, %rd1, %rd2;\n"
+                              "    ld.global.u32 %r7, [%rd3];\n"
+                              "    add.u32 %r7, %r7, 1;\n"
+                              "    st.global.u32 [%rd3], %r7;\n"
+                              "    add.s64 %rd4, %rd3, 4;\n"
+                              "    st.global.u32 [%rd4], %r2;\n"
+                              "    add.s64 %rd5, %rd3, 12;\n"
+                              "    xor.b32 %r7, %r7, %r2;\n"
+                              "    st.global.u32 [%rd5], %r7;\n"
+                              "\n"
+                              "DONE:\n"
+                              "    ret;\n"
+                              "}\n";
 
 static const BenchmarkMode modes[] = {
-    { "host-bias",   CXL_BIAS_HOST,   0 },
-    { "device-bias", CXL_BIAS_DEVICE, 0 },
-    { "flip-per-iter", CXL_BIAS_HOST, 1 },
+    {"host-bias", CXL_BIAS_HOST, 0},
+    {"device-bias", CXL_BIAS_DEVICE, 0},
+    {"flip-per-iter", CXL_BIAS_HOST, 1},
 };
 
-static uint64_t time_ns(void)
-{
+static uint64_t time_ns(void) {
     struct timespec ts;
 
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
 }
 
-static int parse_int_arg(const char *arg, int fallback)
-{
+static int parse_int_arg(const char *arg, int fallback) {
     char *end = NULL;
     long value;
 
@@ -154,8 +149,7 @@ static int parse_int_arg(const char *arg, int fallback)
     return (int)value;
 }
 
-static uint64_t parse_u64_arg(const char *arg, uint64_t fallback)
-{
+static uint64_t parse_u64_arg(const char *arg, uint64_t fallback) {
     char *end = NULL;
     unsigned long long value;
 
@@ -172,8 +166,7 @@ static uint64_t parse_u64_arg(const char *arg, uint64_t fallback)
     return (uint64_t)value;
 }
 
-static int encoded_bias(int bias_mode, uint64_t granularity)
-{
+static int encoded_bias(int bias_mode, uint64_t granularity) {
     if (granularity == CXL_BIAS_GRAN_FLIT) {
         return bias_mode;
     }
@@ -181,8 +174,7 @@ static int encoded_bias(int bias_mode, uint64_t granularity)
     return (int)CXL_BIAS_ENCODE(bias_mode, granularity);
 }
 
-static int check_cuda(CUresult err, const char *call, int line)
-{
+static int check_cuda(CUresult err, const char *call, int line) {
     if (err != CUDA_SUCCESS) {
         fprintf(stderr, "CUDA error %d at %s:%d (%s)\n", err, __FILE__, line, call);
         return -1;
@@ -190,15 +182,14 @@ static int check_cuda(CUresult err, const char *call, int line)
     return 0;
 }
 
-#define CHECK_CUDA(call) \
-    do { \
-        if (check_cuda((call), #call, __LINE__) != 0) { \
-            return -1; \
-        } \
+#define CHECK_CUDA(call)                                                                                               \
+    do {                                                                                                               \
+        if (check_cuda((call), #call, __LINE__) != 0) {                                                                \
+            return -1;                                                                                                 \
+        }                                                                                                              \
     } while (0)
 
-static void init_lines(SharedLine *lines, int line_count)
-{
+static void init_lines(SharedLine *lines, int line_count) {
     int i;
 
     for (i = 0; i < line_count; i++) {
@@ -210,26 +201,17 @@ static void init_lines(SharedLine *lines, int line_count)
     }
 }
 
-static int verify_lines(const SharedLine *lines, int line_count, uint32_t expected_seq, uint32_t expected_counter)
-{
+static int verify_lines(const SharedLine *lines, int line_count, uint32_t expected_seq, uint32_t expected_counter) {
     int i;
 
     for (i = 0; i < line_count; i++) {
-        if (lines[i].counter != expected_counter ||
-            lines[i].gpu_seq != expected_seq ||
-            lines[i].cpu_seq != expected_seq ||
-            lines[i].checksum != (expected_counter ^ expected_seq)) {
+        if (lines[i].counter != expected_counter || lines[i].gpu_seq != expected_seq ||
+            lines[i].cpu_seq != expected_seq || lines[i].checksum != (expected_counter ^ expected_seq)) {
             fprintf(stderr,
                     "Verification failed on line %d: counter=%u gpu_seq=%u cpu_seq=%u checksum=%u"
                     " expected=(%u,%u,%u)\n",
-                    i,
-                    lines[i].counter,
-                    lines[i].gpu_seq,
-                    lines[i].cpu_seq,
-                    lines[i].checksum,
-                    expected_counter,
-                    expected_seq,
-                    expected_counter ^ expected_seq);
+                    i, lines[i].counter, lines[i].gpu_seq, lines[i].cpu_seq, lines[i].checksum, expected_counter,
+                    expected_seq, expected_counter ^ expected_seq);
             return -1;
         }
     }
@@ -237,21 +219,19 @@ static int verify_lines(const SharedLine *lines, int line_count, uint32_t expect
     return 0;
 }
 
-static int run_kernel(CUfunction func, SharedLine *lines, int line_count, uint32_t seq)
-{
+static int run_kernel(CUfunction func, SharedLine *lines, int line_count, uint32_t seq) {
     CUdeviceptr base = (CUdeviceptr)(uintptr_t)lines;
     unsigned int blocks = (unsigned int)((line_count + 63) / 64);
     unsigned int threads = 64;
-    void *args[] = { &base, &line_count, &seq, NULL };
+    void *args[] = {&base, &line_count, &seq, NULL};
 
     CHECK_CUDA(cuLaunchKernel(func, blocks, 1, 1, threads, 1, 1, 0, NULL, args, NULL));
     CHECK_CUDA(cuCtxSynchronize());
     return 0;
 }
 
-static int run_mode(CUfunction func, SharedLine *lines, int line_count, int iterations,
-                    int warmup, uint64_t bias_granularity, const BenchmarkMode *mode)
-{
+static int run_mode(CUfunction func, SharedLine *lines, int line_count, int iterations, int warmup,
+                    uint64_t bias_granularity, const BenchmarkMode *mode) {
     uint64_t total_ns = 0;
     int iter;
     int measured = 0;
@@ -326,28 +306,19 @@ static int run_mode(CUfunction func, SharedLine *lines, int line_count, int iter
            (measured && line_count > 0) ? (double)total_ns / ((double)measured * (double)line_count) : 0.0);
     printf("  handoffs_per_sec=%.2f\n",
            total_ns ? ((double)measured * (double)line_count * 1.0e9) / (double)total_ns : 0.0);
-    printf("  coherency_requests=%" PRIu64 " back_invalidations=%" PRIu64
-           " writebacks=%" PRIu64 " bias_flips=%" PRIu64 "\n",
-           stats.coherency_requests,
-           stats.back_invalidations,
-           stats.writebacks,
-           stats.bias_flips);
-    printf("  snoop_hits=%" PRIu64 " snoop_misses=%" PRIu64
-           " host_bias_hits=%" PRIu64 " device_bias_hits=%" PRIu64 "\n",
-           stats.snoop_hits,
-           stats.snoop_misses,
-           stats.host_bias_hits,
-           stats.device_bias_hits);
-    printf("  upgrades=%" PRIu64 " downgrades=%" PRIu64 " directory_entries=%" PRIu64 "\n",
-           stats.upgrades,
-           stats.downgrades,
-           stats.directory_entries);
+    printf("  coherency_requests=%" PRIu64 " back_invalidations=%" PRIu64 " writebacks=%" PRIu64 " bias_flips=%" PRIu64
+           "\n",
+           stats.coherency_requests, stats.back_invalidations, stats.writebacks, stats.bias_flips);
+    printf("  snoop_hits=%" PRIu64 " snoop_misses=%" PRIu64 " host_bias_hits=%" PRIu64 " device_bias_hits=%" PRIu64
+           "\n",
+           stats.snoop_hits, stats.snoop_misses, stats.host_bias_hits, stats.device_bias_hits);
+    printf("  upgrades=%" PRIu64 " downgrades=%" PRIu64 " directory_entries=%" PRIu64 "\n", stats.upgrades,
+           stats.downgrades, stats.directory_entries);
 
     return 0;
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     int line_count = parse_int_arg(argc > 1 ? argv[1] : NULL, 64);
     int iterations = parse_int_arg(argc > 2 ? argv[2] : NULL, 1000);
     int warmup = parse_int_arg(argc > 3 ? argv[3] : NULL, 100);

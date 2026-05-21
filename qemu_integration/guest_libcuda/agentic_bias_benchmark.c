@@ -107,36 +107,49 @@ extern int cxlBiasFlip(void *host_ptr, uint64_t size, int new_bias);
 extern int cxlGetCoherencyStats(CXLCoherencyStats *stats);
 extern int cxlResetCoherencyStats(void);
 #else
-static CUresult cuInit(unsigned int flags) { (void)flags; return CUDA_SUCCESS; }
-static CUresult cuDeviceGet(CUdevice *device, int ordinal)
-{
+static CUresult cuInit(unsigned int flags) {
+    (void)flags;
+    return CUDA_SUCCESS;
+}
+static CUresult cuDeviceGet(CUdevice *device, int ordinal) {
     (void)ordinal;
-    if (device) *device = 0;
+    if (device)
+        *device = 0;
     return CUDA_SUCCESS;
 }
-static CUresult cuCtxCreate_v2(CUcontext *ctx, unsigned int flags, CUdevice dev)
-{
-    (void)flags; (void)dev;
-    if (ctx) *ctx = (void *)1;
+static CUresult cuCtxCreate_v2(CUcontext *ctx, unsigned int flags, CUdevice dev) {
+    (void)flags;
+    (void)dev;
+    if (ctx)
+        *ctx = (void *)1;
     return CUDA_SUCCESS;
 }
-static int cxlCoherentAlloc(uint64_t size, void **host_ptr)
-{
+static int cxlCoherentAlloc(uint64_t size, void **host_ptr) {
     return posix_memalign(host_ptr, CACHE_LINE, (size_t)size);
 }
-static int cxlCoherentFree(void *host_ptr) { free(host_ptr); return 0; }
-static int cxlCoherentFence(void) { __sync_synchronize(); return 0; }
-static int cxlSetBias(void *host_ptr, uint64_t size, int bias_mode)
-{
-    (void)host_ptr; (void)size; (void)bias_mode; return 0;
+static int cxlCoherentFree(void *host_ptr) {
+    free(host_ptr);
+    return 0;
 }
-static int cxlBiasFlip(void *host_ptr, uint64_t size, int new_bias)
-{
-    (void)host_ptr; (void)size; (void)new_bias; return 0;
+static int cxlCoherentFence(void) {
+    __sync_synchronize();
+    return 0;
 }
-static int cxlGetCoherencyStats(CXLCoherencyStats *stats)
-{
-    if (stats) memset(stats, 0, sizeof(*stats));
+static int cxlSetBias(void *host_ptr, uint64_t size, int bias_mode) {
+    (void)host_ptr;
+    (void)size;
+    (void)bias_mode;
+    return 0;
+}
+static int cxlBiasFlip(void *host_ptr, uint64_t size, int new_bias) {
+    (void)host_ptr;
+    (void)size;
+    (void)new_bias;
+    return 0;
+}
+static int cxlGetCoherencyStats(CXLCoherencyStats *stats) {
+    if (stats)
+        memset(stats, 0, sizeof(*stats));
     return 0;
 }
 static int cxlResetCoherencyStats(void) { return 0; }
@@ -163,16 +176,15 @@ typedef struct ModeConfig {
 } ModeConfig;
 
 static const ModeConfig modes[] = {
-    { "host-bias", CXL_BIAS_HOST, CXL_BIAS_HOST, CXL_BIAS_HOST, CXL_BIAS_HOST, 0 },
-    { "device-bias", CXL_BIAS_DEVICE, CXL_BIAS_DEVICE, CXL_BIAS_DEVICE, CXL_BIAS_DEVICE, 0 },
-    { "hybrid-agentic", CXL_BIAS_DEVICE, CXL_BIAS_DEVICE, CXL_BIAS_HOST, CXL_BIAS_HOST, 0 },
-    { "phase-flip", CXL_BIAS_HOST, CXL_BIAS_HOST, CXL_BIAS_HOST, CXL_BIAS_HOST, 1 },
+    {"host-bias", CXL_BIAS_HOST, CXL_BIAS_HOST, CXL_BIAS_HOST, CXL_BIAS_HOST, 0},
+    {"device-bias", CXL_BIAS_DEVICE, CXL_BIAS_DEVICE, CXL_BIAS_DEVICE, CXL_BIAS_DEVICE, 0},
+    {"hybrid-agentic", CXL_BIAS_DEVICE, CXL_BIAS_DEVICE, CXL_BIAS_HOST, CXL_BIAS_HOST, 0},
+    {"phase-flip", CXL_BIAS_HOST, CXL_BIAS_HOST, CXL_BIAS_HOST, CXL_BIAS_HOST, 1},
 };
 
 static uint64_t rng_state = 0x9e3779b97f4a7c15ULL;
 
-static uint64_t xorshift64(void)
-{
+static uint64_t xorshift64(void) {
     uint64_t x = rng_state;
     x ^= x << 13;
     x ^= x >> 7;
@@ -181,50 +193,46 @@ static uint64_t xorshift64(void)
     return x;
 }
 
-static uint64_t now_ns(void)
-{
+static uint64_t now_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
 }
 
-static int cmp_u64(const void *a, const void *b)
-{
+static int cmp_u64(const void *a, const void *b) {
     uint64_t av = *(const uint64_t *)a;
     uint64_t bv = *(const uint64_t *)b;
     return (av > bv) - (av < bv);
 }
 
-static uint64_t parse_u64_arg(const char *arg, uint64_t fallback)
-{
+static uint64_t parse_u64_arg(const char *arg, uint64_t fallback) {
     char *end = NULL;
     unsigned long long value;
 
-    if (!arg || !*arg) return fallback;
+    if (!arg || !*arg)
+        return fallback;
     errno = 0;
     value = strtoull(arg, &end, 10);
-    if (errno || end == arg || *end != '\0' || value == 0) return fallback;
+    if (errno || end == arg || *end != '\0' || value == 0)
+        return fallback;
     return (uint64_t)value;
 }
 
-static int encoded_bias(int mode, uint64_t granularity)
-{
+static int encoded_bias(int mode, uint64_t granularity) {
     if (granularity == CXL_BIAS_GRAN_FLIT) {
         return mode;
     }
     return (int)CXL_BIAS_ENCODE(mode, granularity);
 }
 
-static void cxl_zero(volatile void *ptr, size_t size)
-{
+static void cxl_zero(volatile void *ptr, size_t size) {
     volatile unsigned char *p = (volatile unsigned char *)ptr;
     for (size_t i = 0; i < size; i++) {
         p[i] = 0;
     }
 }
 
-static int alloc_region(void **ptr, uint64_t count, size_t elem_size)
-{
+static int alloc_region(void **ptr, uint64_t count, size_t elem_size) {
     uint64_t bytes = count * (uint64_t)elem_size;
     int rc = cxlCoherentAlloc(bytes, ptr);
     if (rc != 0 || !*ptr) {
@@ -234,9 +242,8 @@ static int alloc_region(void **ptr, uint64_t count, size_t elem_size)
     return 0;
 }
 
-static int alloc_regions(AgentRegions *r, uint64_t index_entries, uint64_t kv_entries,
-                         uint64_t queue_entries, uint64_t scratch_entries)
-{
+static int alloc_regions(AgentRegions *r, uint64_t index_entries, uint64_t kv_entries, uint64_t queue_entries,
+                         uint64_t scratch_entries) {
     memset(r, 0, sizeof(*r));
     r->index_entries = index_entries;
     r->kv_entries = kv_entries;
@@ -252,16 +259,18 @@ static int alloc_regions(AgentRegions *r, uint64_t index_entries, uint64_t kv_en
     return 0;
 }
 
-static void free_regions(AgentRegions *r)
-{
-    if (r->index) cxlCoherentFree(r->index);
-    if (r->kv) cxlCoherentFree(r->kv);
-    if (r->queue) cxlCoherentFree(r->queue);
-    if (r->scratch) cxlCoherentFree(r->scratch);
+static void free_regions(AgentRegions *r) {
+    if (r->index)
+        cxlCoherentFree(r->index);
+    if (r->kv)
+        cxlCoherentFree(r->kv);
+    if (r->queue)
+        cxlCoherentFree(r->queue);
+    if (r->scratch)
+        cxlCoherentFree(r->scratch);
 }
 
-static void initialize_regions(AgentRegions *r)
-{
+static void initialize_regions(AgentRegions *r) {
     for (uint64_t i = 0; i < r->index_entries; i++) {
         r->index[i].id = i;
         r->index[i].vector_tag = i * 1315423911ULL;
@@ -276,38 +285,39 @@ static void initialize_regions(AgentRegions *r)
     cxlCoherentFence();
 }
 
-static int apply_mode(const AgentRegions *r, const ModeConfig *mode, uint64_t granularity)
-{
-    if (cxlSetBias(r->index, r->index_entries * sizeof(*r->index),
-                   encoded_bias(mode->index_bias, granularity)) != 0) return -1;
-    if (cxlSetBias(r->kv, r->kv_entries * sizeof(*r->kv),
-                   encoded_bias(mode->kv_bias, granularity)) != 0) return -1;
-    if (cxlSetBias(r->queue, r->queue_entries * sizeof(*r->queue),
-                   encoded_bias(mode->queue_bias, granularity)) != 0) return -1;
+static int apply_mode(const AgentRegions *r, const ModeConfig *mode, uint64_t granularity) {
+    if (cxlSetBias(r->index, r->index_entries * sizeof(*r->index), encoded_bias(mode->index_bias, granularity)) != 0)
+        return -1;
+    if (cxlSetBias(r->kv, r->kv_entries * sizeof(*r->kv), encoded_bias(mode->kv_bias, granularity)) != 0)
+        return -1;
+    if (cxlSetBias(r->queue, r->queue_entries * sizeof(*r->queue), encoded_bias(mode->queue_bias, granularity)) != 0)
+        return -1;
     if (cxlSetBias(r->scratch, r->scratch_entries * sizeof(*r->scratch),
-                   encoded_bias(mode->scratch_bias, granularity)) != 0) return -1;
+                   encoded_bias(mode->scratch_bias, granularity)) != 0)
+        return -1;
     cxlCoherentFence();
     return 0;
 }
 
-static int flip_for_phase(const AgentRegions *r, uint64_t granularity, int retrieval_phase)
-{
+static int flip_for_phase(const AgentRegions *r, uint64_t granularity, int retrieval_phase) {
     int device = encoded_bias(CXL_BIAS_DEVICE, granularity);
     int host = encoded_bias(CXL_BIAS_HOST, granularity);
 
     if (retrieval_phase) {
-        if (cxlBiasFlip(r->index, r->index_entries * sizeof(*r->index), device) != 0) return -1;
-        if (cxlBiasFlip(r->kv, r->kv_entries * sizeof(*r->kv), device) != 0) return -1;
+        if (cxlBiasFlip(r->index, r->index_entries * sizeof(*r->index), device) != 0)
+            return -1;
+        if (cxlBiasFlip(r->kv, r->kv_entries * sizeof(*r->kv), device) != 0)
+            return -1;
     } else {
-        if (cxlBiasFlip(r->queue, r->queue_entries * sizeof(*r->queue), host) != 0) return -1;
-        if (cxlBiasFlip(r->scratch, r->scratch_entries * sizeof(*r->scratch), host) != 0) return -1;
+        if (cxlBiasFlip(r->queue, r->queue_entries * sizeof(*r->queue), host) != 0)
+            return -1;
+        if (cxlBiasFlip(r->scratch, r->scratch_entries * sizeof(*r->scratch), host) != 0)
+            return -1;
     }
     return 0;
 }
 
-static uint64_t run_agent_loop(AgentRegions *r, uint64_t steps, const ModeConfig *mode,
-                               uint64_t granularity)
-{
+static uint64_t run_agent_loop(AgentRegions *r, uint64_t steps, const ModeConfig *mode, uint64_t granularity) {
     uint64_t checksum = 0;
 
     rng_state = 0xfeedface12345678ULL;
@@ -366,20 +376,16 @@ static uint64_t run_agent_loop(AgentRegions *r, uint64_t steps, const ModeConfig
     return checksum;
 }
 
-static void print_stats(const CXLCoherencyStats *s)
-{
-    printf("  coherency_requests=%" PRIu64 " back_invalidations=%" PRIu64
-           " writebacks=%" PRIu64 " bias_flips=%" PRIu64 "\n",
+static void print_stats(const CXLCoherencyStats *s) {
+    printf("  coherency_requests=%" PRIu64 " back_invalidations=%" PRIu64 " writebacks=%" PRIu64 " bias_flips=%" PRIu64
+           "\n",
            s->coherency_requests, s->back_invalidations, s->writebacks, s->bias_flips);
-    printf("  snoop_hits=%" PRIu64 " snoop_misses=%" PRIu64
-           " host_bias_hits=%" PRIu64 " device_bias_hits=%" PRIu64
+    printf("  snoop_hits=%" PRIu64 " snoop_misses=%" PRIu64 " host_bias_hits=%" PRIu64 " device_bias_hits=%" PRIu64
            " directory_entries=%" PRIu64 "\n",
-           s->snoop_hits, s->snoop_misses, s->host_bias_hits,
-           s->device_bias_hits, s->directory_entries);
+           s->snoop_hits, s->snoop_misses, s->host_bias_hits, s->device_bias_hits, s->directory_entries);
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     uint64_t steps = parse_u64_arg(argc > 1 ? argv[1] : NULL, DEFAULT_STEPS);
     uint64_t trials = parse_u64_arg(argc > 2 ? argv[2] : NULL, DEFAULT_TRIALS);
     uint64_t granularity = parse_u64_arg(argc > 3 ? argv[3] : NULL, CXL_BIAS_GRAN_FLIT);
@@ -389,8 +395,8 @@ int main(int argc, char **argv)
     CUdevice dev;
     CUcontext ctx;
 
-    if (sizeof(AgentIndexNode) != CACHE_LINE || sizeof(AgentKVEntry) != CACHE_LINE ||
-        sizeof(AgentTask) != CACHE_LINE || sizeof(AgentScratch) != CACHE_LINE) {
+    if (sizeof(AgentIndexNode) != CACHE_LINE || sizeof(AgentKVEntry) != CACHE_LINE || sizeof(AgentTask) != CACHE_LINE ||
+        sizeof(AgentScratch) != CACHE_LINE) {
         fprintf(stderr, "agent records must be 64-byte cache lines\n");
         return 1;
     }
@@ -401,26 +407,22 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (alloc_regions(&regions, index_entries, kv_entries,
-                      DEFAULT_QUEUE_ENTRIES, DEFAULT_SCRATCH_ENTRIES) != 0) {
+    if (alloc_regions(&regions, index_entries, kv_entries, DEFAULT_QUEUE_ENTRIES, DEFAULT_SCRATCH_ENTRIES) != 0) {
         fprintf(stderr, "failed to allocate agentic regions\n");
         return 1;
     }
     initialize_regions(&regions);
 
     printf("Agentic CXL Type-2 bias benchmark\n");
-    printf("  backend=%s steps=%" PRIu64 " trials=%" PRIu64
-           " bias_granularity=%" PRIu64 " bytes\n",
+    printf("  backend=%s steps=%" PRIu64 " trials=%" PRIu64 " bias_granularity=%" PRIu64 " bytes\n",
 #ifdef CXL_AGENTIC_NATIVE
            "native",
 #else
            "cxl-type2",
 #endif
            steps, trials, granularity);
-    printf("  index_entries=%" PRIu64 " kv_entries=%" PRIu64
-           " queue_entries=%" PRIu64 " scratch_entries=%" PRIu64 "\n",
-           regions.index_entries, regions.kv_entries,
-           regions.queue_entries, regions.scratch_entries);
+    printf("  index_entries=%" PRIu64 " kv_entries=%" PRIu64 " queue_entries=%" PRIu64 " scratch_entries=%" PRIu64 "\n",
+           regions.index_entries, regions.kv_entries, regions.queue_entries, regions.scratch_entries);
 
     for (size_t m = 0; m < sizeof(modes) / sizeof(modes[0]); m++) {
         uint64_t samples[32];
@@ -449,10 +451,9 @@ int main(int argc, char **argv)
         double agent_steps_per_s = median_ns ? (double)steps * 1.0e9 / (double)median_ns : 0.0;
 
         printf("\n[%s]\n", modes[m].name);
-        printf("  median_ns=%" PRIu64 " p25_ns=%" PRIu64 " p75_ns=%" PRIu64 "\n",
-               median_ns, samples[n / 4], samples[(3 * n) / 4]);
-        printf("  agent_steps_per_sec=%.2f checksum=%" PRIu64 "\n",
-               agent_steps_per_s, checksum);
+        printf("  median_ns=%" PRIu64 " p25_ns=%" PRIu64 " p75_ns=%" PRIu64 "\n", median_ns, samples[n / 4],
+               samples[(3 * n) / 4]);
+        printf("  agent_steps_per_sec=%.2f checksum=%" PRIu64 "\n", agent_steps_per_s, checksum);
         print_stats(&stats);
     }
 

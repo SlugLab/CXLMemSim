@@ -7,20 +7,18 @@
  */
 
 #include "coherency_engine.h"
-#include "hdm_decoder.h"
 #include "cxlendpoint.h"
+#include "hdm_decoder.h"
 #include <algorithm>
 #include <cmath>
 
 DirectoryEntry::DirectoryEntry()
-    : cacheline_addr(0), state(MHSLDCacheState::INVALID),
-      owner_node(UINT32_MAX), owner_head(UINT32_MAX),
-      version(0), last_access_time(0), has_dirty_data(false) {}
+    : cacheline_addr(0), state(MHSLDCacheState::INVALID), owner_node(UINT32_MAX), owner_head(UINT32_MAX), version(0),
+      last_access_time(0), has_dirty_data(false) {}
 
-CoherencyEngine::CoherencyEngine(uint32_t local_node, HDMDecoder* decoder, LogPModel* logp,
-                                  uint32_t max_heads, double bandwidth_gbps)
-    : local_node_id_(local_node), hdm_decoder_(decoder), logp_model_(logp),
-      bandwidth_gbps_(bandwidth_gbps) {
+CoherencyEngine::CoherencyEngine(uint32_t local_node, HDMDecoder *decoder, LogPModel *logp, uint32_t max_heads,
+                                 double bandwidth_gbps)
+    : local_node_id_(local_node), hdm_decoder_(decoder), logp_model_(logp), bandwidth_gbps_(bandwidth_gbps) {
     heads_.resize(max_heads);
     for (uint32_t i = 0; i < max_heads; i++) {
         heads_[i].head_id = i;
@@ -29,7 +27,7 @@ CoherencyEngine::CoherencyEngine(uint32_t local_node, HDMDecoder* decoder, LogPM
     }
 }
 
-DirectoryEntry* CoherencyEngine::get_or_create_entry(uint64_t addr) {
+DirectoryEntry *CoherencyEngine::get_or_create_entry(uint64_t addr) {
     uint64_t cl_addr = addr & ~(CACHELINE_SIZE - 1);
 
     {
@@ -41,7 +39,7 @@ DirectoryEntry* CoherencyEngine::get_or_create_entry(uint64_t addr) {
     }
 
     std::unique_lock<std::shared_mutex> lock(directory_mutex_);
-    auto& entry = directory_[cl_addr];
+    auto &entry = directory_[cl_addr];
     if (!entry) {
         entry = std::make_unique<DirectoryEntry>();
         entry->cacheline_addr = cl_addr;
@@ -67,19 +65,22 @@ double CoherencyEngine::calculate_coherency_msg_latency(uint32_t target, uint64_
 }
 
 double CoherencyEngine::calculate_contention_latency(uint32_t head_id, uint64_t ts) const {
-    if (head_id >= heads_.size() || !heads_[head_id].active) return 0.0;
+    if (head_id >= heads_.size() || !heads_[head_id].active)
+        return 0.0;
 
     uint32_t contending_heads = 0;
-    for (const auto& h : heads_) {
+    for (const auto &h : heads_) {
         if (h.active && (h.total_reads + h.total_writes) > 0) {
             contending_heads++;
         }
     }
 
-    if (contending_heads <= 1) return 0.0;
+    if (contending_heads <= 1)
+        return 0.0;
 
     double fair_share = heads_[head_id].bandwidth_share;
-    if (fair_share <= 0.0) fair_share = 1.0 / contending_heads;
+    if (fair_share <= 0.0)
+        fair_share = 1.0 / contending_heads;
 
     double contention_factor = 0.3;
     double base_latency = 100.0; // Base device latency
@@ -91,8 +92,8 @@ double CoherencyEngine::calculate_contention_latency(uint32_t head_id, uint64_t 
 /* ============================================================================
  * MOESI Read State Machine
  * ============================================================================ */
-CoherencyResponse CoherencyEngine::process_read(const CoherencyRequest& req) {
-    DirectoryEntry* entry = get_or_create_entry(req.addr);
+CoherencyResponse CoherencyEngine::process_read(const CoherencyRequest &req) {
+    DirectoryEntry *entry = get_or_create_entry(req.addr);
     std::lock_guard<std::mutex> lock(entry->lock);
 
     double latency = 0.0;
@@ -104,8 +105,7 @@ CoherencyResponse CoherencyEngine::process_read(const CoherencyRequest& req) {
 
     // Check if requester already has access
     if (entry->owner_node == req.requesting_node &&
-        (entry->state == MHSLDCacheState::EXCLUSIVE ||
-         entry->state == MHSLDCacheState::MODIFIED ||
+        (entry->state == MHSLDCacheState::EXCLUSIVE || entry->state == MHSLDCacheState::MODIFIED ||
          entry->state == MHSLDCacheState::OWNED)) {
         // Local hit
         latency = calculate_contention_latency(req.requesting_head, req.timestamp);
@@ -122,61 +122,61 @@ CoherencyResponse CoherencyEngine::process_read(const CoherencyRequest& req) {
 
     // Need to acquire shared access
     switch (entry->state) {
-        case MHSLDCacheState::INVALID:
-            // First access - fetch from memory
-            entry->sharer_nodes.insert(req.requesting_node);
-            entry->state = MHSLDCacheState::SHARED;
-            entry->owner_node = req.requesting_node;
-            entry->owner_head = req.requesting_head;
-            new_state = MHSLDCacheState::SHARED;
-            // Base memory access latency (no coherency overhead)
-            break;
+    case MHSLDCacheState::INVALID:
+        // First access - fetch from memory
+        entry->sharer_nodes.insert(req.requesting_node);
+        entry->state = MHSLDCacheState::SHARED;
+        entry->owner_node = req.requesting_node;
+        entry->owner_head = req.requesting_head;
+        new_state = MHSLDCacheState::SHARED;
+        // Base memory access latency (no coherency overhead)
+        break;
 
-        case MHSLDCacheState::SHARED:
-            // Add as sharer, no invalidation needed
-            entry->sharer_nodes.insert(req.requesting_node);
-            new_state = MHSLDCacheState::SHARED;
-            break;
+    case MHSLDCacheState::SHARED:
+        // Add as sharer, no invalidation needed
+        entry->sharer_nodes.insert(req.requesting_node);
+        new_state = MHSLDCacheState::SHARED;
+        break;
 
-        case MHSLDCacheState::EXCLUSIVE:
-            if (entry->owner_node == req.requesting_node) {
-                // Same node, different head - local hit with contention
-                latency = calculate_contention_latency(req.requesting_head, req.timestamp);
-            } else {
-                // Downgrade owner to SHARED
-                latency = downgrade_owner(entry, req.requesting_node, req.timestamp);
-                data_source = entry->owner_node;
-            }
-            entry->sharer_nodes.insert(req.requesting_node);
-            entry->state = MHSLDCacheState::SHARED;
-            new_state = MHSLDCacheState::SHARED;
-            break;
+    case MHSLDCacheState::EXCLUSIVE:
+        if (entry->owner_node == req.requesting_node) {
+            // Same node, different head - local hit with contention
+            latency = calculate_contention_latency(req.requesting_head, req.timestamp);
+        } else {
+            // Downgrade owner to SHARED
+            latency = downgrade_owner(entry, req.requesting_node, req.timestamp);
+            data_source = entry->owner_node;
+        }
+        entry->sharer_nodes.insert(req.requesting_node);
+        entry->state = MHSLDCacheState::SHARED;
+        new_state = MHSLDCacheState::SHARED;
+        break;
 
-        case MHSLDCacheState::MODIFIED:
-            if (entry->owner_node == req.requesting_node) {
-                latency = calculate_contention_latency(req.requesting_head, req.timestamp);
-            } else {
-                // Fetch from owner, owner transitions to OWNED
-                latency = fetch_from_owner(entry, req.requesting_node, req.timestamp);
-                data_source = entry->owner_node;
-                entry->state = MHSLDCacheState::OWNED;
-            }
-            entry->sharer_nodes.insert(req.requesting_node);
-            new_state = MHSLDCacheState::SHARED;
-            break;
+    case MHSLDCacheState::MODIFIED:
+        if (entry->owner_node == req.requesting_node) {
+            latency = calculate_contention_latency(req.requesting_head, req.timestamp);
+        } else {
+            // Fetch from owner, owner transitions to OWNED
+            latency = fetch_from_owner(entry, req.requesting_node, req.timestamp);
+            data_source = entry->owner_node;
+            entry->state = MHSLDCacheState::OWNED;
+        }
+        entry->sharer_nodes.insert(req.requesting_node);
+        new_state = MHSLDCacheState::SHARED;
+        break;
 
-        case MHSLDCacheState::OWNED:
-            if (entry->owner_node == req.requesting_node) {
-                latency = calculate_contention_latency(req.requesting_head, req.timestamp);
-            } else {
-                // Forward data from owner
-                latency = calculate_coherency_msg_latency(entry->owner_node, req.timestamp);
-                data_source = entry->owner_node;
-                total_coherency_messages_++;
-            }
-            entry->sharer_nodes.insert(req.requesting_node);
-            new_state = MHSLDCacheState::SHARED;
-            break;
+    case MHSLDCacheState::OWNED:
+        if (entry->owner_node == req.requesting_node) {
+            latency = calculate_contention_latency(req.requesting_head, req.timestamp);
+        } else {
+            // Forward data from owner
+            latency = calculate_coherency_msg_latency(entry->owner_node, req.timestamp);
+            data_source = entry->owner_node;
+            total_coherency_messages_++;
+        }
+        entry->sharer_nodes.insert(req.requesting_node);
+        new_state = MHSLDCacheState::SHARED;
+        break;
     }
 
 done:
@@ -194,8 +194,8 @@ done:
 /* ============================================================================
  * MOESI Write State Machine
  * ============================================================================ */
-CoherencyResponse CoherencyEngine::process_write(const CoherencyRequest& req) {
-    DirectoryEntry* entry = get_or_create_entry(req.addr);
+CoherencyResponse CoherencyEngine::process_write(const CoherencyRequest &req) {
+    DirectoryEntry *entry = get_or_create_entry(req.addr);
     std::lock_guard<std::mutex> lock(entry->lock);
 
     double latency = 0.0;
@@ -208,8 +208,7 @@ CoherencyResponse CoherencyEngine::process_write(const CoherencyRequest& req) {
 
     // Check if requester already has exclusive/modified access
     if (entry->owner_node == req.requesting_node) {
-        if (entry->state == MHSLDCacheState::EXCLUSIVE ||
-            entry->state == MHSLDCacheState::MODIFIED) {
+        if (entry->state == MHSLDCacheState::EXCLUSIVE || entry->state == MHSLDCacheState::MODIFIED) {
             // Local hit - just mark as modified
             entry->state = MHSLDCacheState::MODIFIED;
             entry->has_dirty_data = true;
@@ -229,46 +228,46 @@ CoherencyResponse CoherencyEngine::process_write(const CoherencyRequest& req) {
 
     // Need to acquire exclusive access
     switch (entry->state) {
-        case MHSLDCacheState::INVALID:
-            // First access - no coherency needed
-            break;
+    case MHSLDCacheState::INVALID:
+        // First access - no coherency needed
+        break;
 
-        case MHSLDCacheState::SHARED:
-            // Invalidate all sharers
+    case MHSLDCacheState::SHARED:
+        // Invalidate all sharers
+        latency = invalidate_sharers(entry, req.requesting_node, req.timestamp);
+        break;
+
+    case MHSLDCacheState::EXCLUSIVE:
+        if (entry->owner_node != req.requesting_node) {
+            // Invalidate current owner
+            latency = calculate_coherency_msg_latency(entry->owner_node, req.timestamp);
+            total_invalidations_++;
+            total_coherency_messages_++;
+        }
+        break;
+
+    case MHSLDCacheState::MODIFIED:
+        if (entry->owner_node != req.requesting_node) {
+            // Fetch + invalidate owner
+            latency = calculate_coherency_msg_latency(entry->owner_node, req.timestamp);
+            data_source = entry->owner_node;
+            total_writebacks_++;
+            total_coherency_messages_++;
+        }
+        break;
+
+    case MHSLDCacheState::OWNED:
+        if (entry->owner_node != req.requesting_node) {
+            // Invalidate owner + sharers
+            double owner_lat = calculate_coherency_msg_latency(entry->owner_node, req.timestamp);
+            double sharer_lat = invalidate_sharers(entry, req.requesting_node, req.timestamp);
+            latency = owner_lat + sharer_lat;
+            data_source = entry->owner_node;
+            total_writebacks_++;
+        } else {
             latency = invalidate_sharers(entry, req.requesting_node, req.timestamp);
-            break;
-
-        case MHSLDCacheState::EXCLUSIVE:
-            if (entry->owner_node != req.requesting_node) {
-                // Invalidate current owner
-                latency = calculate_coherency_msg_latency(entry->owner_node, req.timestamp);
-                total_invalidations_++;
-                total_coherency_messages_++;
-            }
-            break;
-
-        case MHSLDCacheState::MODIFIED:
-            if (entry->owner_node != req.requesting_node) {
-                // Fetch + invalidate owner
-                latency = calculate_coherency_msg_latency(entry->owner_node, req.timestamp);
-                data_source = entry->owner_node;
-                total_writebacks_++;
-                total_coherency_messages_++;
-            }
-            break;
-
-        case MHSLDCacheState::OWNED:
-            if (entry->owner_node != req.requesting_node) {
-                // Invalidate owner + sharers
-                double owner_lat = calculate_coherency_msg_latency(entry->owner_node, req.timestamp);
-                double sharer_lat = invalidate_sharers(entry, req.requesting_node, req.timestamp);
-                latency = owner_lat + sharer_lat;
-                data_source = entry->owner_node;
-                total_writebacks_++;
-            } else {
-                latency = invalidate_sharers(entry, req.requesting_node, req.timestamp);
-            }
-            break;
+        }
+        break;
     }
 
     // Transition to MODIFIED for the requesting node
@@ -291,7 +290,7 @@ done:
     return {latency, new_state, true, data_source};
 }
 
-CoherencyResponse CoherencyEngine::process_atomic(const CoherencyRequest& req) {
+CoherencyResponse CoherencyEngine::process_atomic(const CoherencyRequest &req) {
     // Atomic requires exclusive access + serialization penalty
     auto resp = process_write(req);
 
@@ -308,7 +307,7 @@ CoherencyResponse CoherencyEngine::process_atomic(const CoherencyRequest& req) {
  * Coherency Actions
  * ============================================================================ */
 
-double CoherencyEngine::invalidate_sharers(DirectoryEntry* e, uint32_t except_node, uint64_t ts) {
+double CoherencyEngine::invalidate_sharers(DirectoryEntry *e, uint32_t except_node, uint64_t ts) {
     double max_latency = 0.0;
     double accumulated_gap = 0.0;
 
@@ -335,8 +334,9 @@ double CoherencyEngine::invalidate_sharers(DirectoryEntry* e, uint32_t except_no
     return max_latency;
 }
 
-double CoherencyEngine::downgrade_owner(DirectoryEntry* e, uint32_t requesting_node, uint64_t ts) {
-    if (e->owner_node == UINT32_MAX || e->owner_node == requesting_node) return 0.0;
+double CoherencyEngine::downgrade_owner(DirectoryEntry *e, uint32_t requesting_node, uint64_t ts) {
+    if (e->owner_node == UINT32_MAX || e->owner_node == requesting_node)
+        return 0.0;
 
     double latency = calculate_coherency_msg_latency(e->owner_node, ts);
 
@@ -355,15 +355,16 @@ double CoherencyEngine::downgrade_owner(DirectoryEntry* e, uint32_t requesting_n
     return latency;
 }
 
-double CoherencyEngine::fetch_from_owner(DirectoryEntry* e, uint32_t requesting_node, uint64_t ts) {
-    if (e->owner_node == UINT32_MAX) return 0.0;
+double CoherencyEngine::fetch_from_owner(DirectoryEntry *e, uint32_t requesting_node, uint64_t ts) {
+    if (e->owner_node == UINT32_MAX)
+        return 0.0;
 
     double latency = calculate_coherency_msg_latency(e->owner_node, ts);
     total_coherency_messages_++;
     return latency;
 }
 
-double CoherencyEngine::transition_to_shared(DirectoryEntry* e, uint32_t node, uint32_t head, uint64_t ts) {
+double CoherencyEngine::transition_to_shared(DirectoryEntry *e, uint32_t node, uint32_t head, uint64_t ts) {
     e->sharer_nodes.insert(node);
     if (e->state == MHSLDCacheState::INVALID) {
         e->state = MHSLDCacheState::SHARED;
@@ -373,7 +374,7 @@ double CoherencyEngine::transition_to_shared(DirectoryEntry* e, uint32_t node, u
     return 0.0;
 }
 
-double CoherencyEngine::transition_to_exclusive(DirectoryEntry* e, uint32_t node, uint32_t head, uint64_t ts) {
+double CoherencyEngine::transition_to_exclusive(DirectoryEntry *e, uint32_t node, uint32_t head, uint64_t ts) {
     double latency = invalidate_sharers(e, node, ts);
     e->owner_node = node;
     e->owner_head = head;
@@ -382,7 +383,7 @@ double CoherencyEngine::transition_to_exclusive(DirectoryEntry* e, uint32_t node
     return latency;
 }
 
-double CoherencyEngine::transition_to_modified(DirectoryEntry* e, uint32_t node, uint32_t head, uint64_t ts) {
+double CoherencyEngine::transition_to_modified(DirectoryEntry *e, uint32_t node, uint32_t head, uint64_t ts) {
     double latency = transition_to_exclusive(e, node, head, ts);
     e->state = MHSLDCacheState::MODIFIED;
     e->has_dirty_data = true;
@@ -398,9 +399,10 @@ void CoherencyEngine::handle_remote_invalidate(uint64_t addr, uint32_t from_node
 
     std::shared_lock<std::shared_mutex> dir_lock(directory_mutex_);
     auto it = directory_.find(cl_addr);
-    if (it == directory_.end()) return;
+    if (it == directory_.end())
+        return;
 
-    DirectoryEntry* entry = it->second.get();
+    DirectoryEntry *entry = it->second.get();
     std::lock_guard<std::mutex> lock(entry->lock);
 
     // Remove local node from sharers
@@ -425,9 +427,10 @@ void CoherencyEngine::handle_remote_downgrade(uint64_t addr, uint32_t from_node)
 
     std::shared_lock<std::shared_mutex> dir_lock(directory_mutex_);
     auto it = directory_.find(cl_addr);
-    if (it == directory_.end()) return;
+    if (it == directory_.end())
+        return;
 
-    DirectoryEntry* entry = it->second.get();
+    DirectoryEntry *entry = it->second.get();
     std::lock_guard<std::mutex> lock(entry->lock);
 
     if (entry->owner_node == local_node_id_) {
@@ -442,14 +445,15 @@ void CoherencyEngine::handle_remote_downgrade(uint64_t addr, uint32_t from_node)
     total_downgrades_++;
 }
 
-void CoherencyEngine::handle_remote_writeback(uint64_t addr, uint32_t from_node, const uint8_t* data) {
+void CoherencyEngine::handle_remote_writeback(uint64_t addr, uint32_t from_node, const uint8_t *data) {
     uint64_t cl_addr = addr & ~(CACHELINE_SIZE - 1);
 
     std::shared_lock<std::shared_mutex> dir_lock(directory_mutex_);
     auto it = directory_.find(cl_addr);
-    if (it == directory_.end()) return;
+    if (it == directory_.end())
+        return;
 
-    DirectoryEntry* entry = it->second.get();
+    DirectoryEntry *entry = it->second.get();
     std::lock_guard<std::mutex> lock(entry->lock);
 
     if (entry->owner_node == from_node) {
@@ -468,7 +472,8 @@ void CoherencyEngine::handle_remote_writeback(uint64_t addr, uint32_t from_node,
  * ============================================================================ */
 
 void CoherencyEngine::activate_head(uint32_t head_id, uint64_t capacity) {
-    if (head_id >= heads_.size()) return;
+    if (head_id >= heads_.size())
+        return;
 
     heads_[head_id].active = true;
     heads_[head_id].allocated_capacity = capacity;
@@ -476,10 +481,11 @@ void CoherencyEngine::activate_head(uint32_t head_id, uint64_t capacity) {
 
     // Rebalance bandwidth
     uint32_t active_count = 0;
-    for (const auto& h : heads_) {
-        if (h.active) active_count++;
+    for (const auto &h : heads_) {
+        if (h.active)
+            active_count++;
     }
-    for (auto& h : heads_) {
+    for (auto &h : heads_) {
         if (h.active) {
             h.bandwidth_share = 1.0 / active_count;
         }
@@ -487,22 +493,17 @@ void CoherencyEngine::activate_head(uint32_t head_id, uint64_t capacity) {
 }
 
 void CoherencyEngine::deactivate_head(uint32_t head_id) {
-    if (head_id >= heads_.size()) return;
+    if (head_id >= heads_.size())
+        return;
     heads_[head_id].active = false;
     heads_[head_id].bandwidth_share = 0.0;
 }
 
-void CoherencyEngine::register_fabric_link(uint32_t node_id, FabricLink* link) {
-    fabric_links_[node_id] = link;
-}
+void CoherencyEngine::register_fabric_link(uint32_t node_id, FabricLink *link) { fabric_links_[node_id] = link; }
 
-void CoherencyEngine::set_tcp_transport(DistributedTCPTransport* tcp) {
-    tcp_transport_ = tcp;
-}
+void CoherencyEngine::set_tcp_transport(DistributedTCPTransport *tcp) { tcp_transport_ = tcp; }
 
-void CoherencyEngine::set_msg_manager(DistributedMessageManager* msg) {
-    msg_manager_ = msg;
-}
+void CoherencyEngine::set_msg_manager(DistributedMessageManager *msg) { msg_manager_ = msg; }
 
 CoherencyEngine::Stats CoherencyEngine::get_stats() const {
     Stats stats;

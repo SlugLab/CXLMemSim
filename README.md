@@ -19,6 +19,7 @@ microbench/                            Microbenchmarks
 tests/                                 Server/distributed-mode tests
 qemu_integration/                      Launch scripts and guest-side integration
 qemu_integration/guest_libcuda/        Guest CUDA Driver API shim for CXL Type 2 GPU
+gem5_integration/                      gem5-CXL launch wrapper and O3CPU trace setup
 lib/qemu/                              QEMU tree with CXL Type 2/Type 3 device changes
 lib/qemu/hw/cxl/cxl_type2.c            QEMU CXL Type 2 device model
 lib/qemu/hw/cxl/cxl_hetgpu.c           Host GPU backend bridge
@@ -76,7 +77,8 @@ CXLMemSim adds a server-oriented CXL memory backend. The top-level build always 
 - `cxlmemsim`, a static library with the core simulator.
 - `cxlmemsim_server`, the Type 3 memory server.
 - `cxlmemsim_latency`, a latency calculator.
-- `test_distributed_shm`, a distributed shared-memory test.
+- built test binaries for unit and integration checks.
+- CTest targets for DCD/GFAM, ROB, and memory-stall unit behavior.
 
 The server entry point is `src/main_server.cc`. It creates a CXL controller, adds a CXL memory expander endpoint, loads the topology, initializes a shared memory pool, and then serves requests from QEMU or test clients.
 
@@ -88,6 +90,8 @@ Supported request classes include:
 - atomic compare-and-swap,
 - memory fences,
 - Label Storage Area reads and writes.
+- Dynamic Capacity Device add, release, and query operations.
+- GFAM host map, unmap, access-check, and query operations.
 
 The server supports several communication modes:
 
@@ -99,6 +103,8 @@ The server supports several communication modes:
 | `distributed` | Multi-node memory server mode with SHM, TCP, RDMA, or hybrid transport. |
 
 The memory pool is managed by `SharedMemoryManager`. It can use POSIX shared memory or a regular file as a backing store. The shared-memory header records a magic value, format version, total size, data offset, base address, and cache-line count. The default cache-line data area is mapped with `mmap()` and is reused when the backing object already exists.
+
+The server CLI uses local parse-result structs in `src/main_server.cc`, `src/main.cc`, and `src/rob.cc`, so command-line parsing is handled in-tree.
 
 ## Coherency and Distributed Memory
 
@@ -289,7 +295,7 @@ multiple QEMU guests or server nodes
 
 ## Build
 
-The project uses CMake and C++20. It depends on `cxxopts` and header-only `spdlog`. RDMA support is enabled when `librdmacm` and `libibverbs` are found.
+The project uses CMake and C++20. It depends on header-only `spdlog`; the server and ROB tools use in-tree argument parsing. RDMA support is enabled when `librdmacm` and `libibverbs` are found.
 
 ```bash
 mkdir -p build
@@ -381,6 +387,9 @@ The launcher reads the following runtime variables:
 | `CXL_PGAS_SHM` | `/cxlmemsim_pgas` | POSIX shared-memory object used by QEMU SHM mode. |
 | `CXL_MEMSIM_SERVER_BINARY` | package `bin/cxlmemsim_server` | Server binary started before QEMU. |
 | `CXL_MEMSIM_SERVER_AUTOSTART` | `auto` | Set to `1` to require server startup or `0` to disable it. |
+| `CXL_DCD_ENABLE` | `0` | Enables DCD reporting in integration wrappers. |
+| `CXL_GFAM_ENABLE` | `0` | Enables GFAM reporting in integration wrappers. |
+| `CXL_GFAM_HOST_ID` | `0` | Host ID passed to fabric-aware integrations. |
 
 QEMU's `shm` transport uses the PGAS shared-memory protocol, so the packaged launcher maps `CXL_TRANSPORT_MODE=shm` to the server's `--comm-mode pgas-shm`.
 
@@ -400,6 +409,8 @@ CXL_MEMSIM_HOST=127.0.0.1 \
 CXL_MEMSIM_PORT=9999 \
 qemu_launch_cxl.sh
 ```
+
+When QEMU connects to `cxlmemsim_server`, the Type 3 device now queries the DCD and GFAM protocol state. If DCD is enabled, QEMU logs the dynamic allocated, total, and free capacity reported by the server. If GFAM is enabled, QEMU logs host, mapping, operation, denied-access, and average-latency counters. Server-side DCD or GFAM denials are returned to QEMU as memory transaction errors instead of being silently treated as successful reads or writes.
 
 Inside the guest, quick checks are:
 
@@ -448,6 +459,24 @@ File-backed memory pool:
   --capacity=1024
 ```
 
+Dynamic Capacity Device and GFAM:
+
+```bash
+./build/cxlmemsim_server \
+  --comm-mode=tcp \
+  --port=9999 \
+  --capacity=10000 \
+  --default_latency=400 \
+  --topology=topology.txt \
+  --enable-dcd \
+  --dcd-granularity-mb=1 \
+  --dcd-initial-capacity=10000 \
+  --enable-gfam \
+  --gfam-hosts=16 \
+  --gfam-fabric-latency=80 \
+  --gfam-bandwidth=64
+```
+
 Useful options:
 
 | Option | Meaning |
@@ -458,7 +487,16 @@ Useful options:
 | `--topology` | Topology file using Newick-style syntax. |
 | `--comm-mode` | `tcp`, `shm`, `pgas-shm`, or `distributed`. |
 | `--backing-file` | Use a regular file instead of POSIX shared memory. |
+| `--enable-dcd` | Enable the Dynamic Capacity Device model. |
+| `--dcd-granularity-mb` | DCD allocation granularity in MB. |
+| `--dcd-initial-capacity` | Initial DCD capacity in MB. Omit it to allocate the full `--capacity`. |
+| `--enable-gfam` | Enable GFAM access control and fabric latency accounting. |
+| `--gfam-hosts` | Number of GFAM host IDs to register. |
+| `--gfam-fabric-latency` | Per-access GFAM fabric latency in ns. |
+| `--gfam-bandwidth` | Aggregate GFAM bandwidth in GB/s. |
 | `SPDLOG_LEVEL` | Runtime log level, for example `debug` or `trace`. |
+
+DCD/GFAM protocol operations are available over TCP and the PGAS shared-memory protocol. Query responses use the 64-byte response data area: DCD query returns total capacity, free capacity, active extents, and failed requests; GFAM query returns mappings, shared mappings, read/write/atomic operations, denied accesses, and average access latency.
 
 ## Distributed Mode
 
@@ -593,6 +631,62 @@ Available tests include:
 - `cxl_coherent_test`
 - `cxl_pointer_sharing_test`
 - `cxl_bias_benchmark`
+
+## Tests
+
+Configure with CMake and run the self-contained unit tests through CTest:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+The top-level CMake file builds every test source in `tests/`:
+
+| Target | Purpose | CTest |
+| --- | --- | --- |
+| `test_dcd_gfam` | Standalone DCD allocation and GFAM access-control checks. | Yes |
+| `test_rob` | Parses O3CPU/LSQ debug lines and feeds derived instructions into the ROB model. | Yes |
+| `test_mem_stall` | Compares O3CPU memory-stall debug intervals against modeled ROB stalls. | Yes |
+| `test_distributed_shm` | Two in-process distributed memory servers over SHM/TCP helper paths. | Built only |
+| `test_back_invalidation` | TCP/PGAS client for external back-invalidation experiments. | Built only |
+| `test_dax_back_invalidation` | DAX plus TCP client for external guest/device experiments. | Built only |
+
+`test_rob` and `test_mem_stall` use gem5-style O3CPU, LSQ, and MemDepUnit debug text. Generate compatible traces with gem5 debug flags such as `O3CPU,LSQ,MemDepUnit`.
+
+## gem5-CXL Integration
+
+`gem5_integration/run.py` is a small launcher for SlugLab's gem5-CXL fork at <https://github.com/SlugLab/gem5-CXL>. It locates a gem5 binary, selects a config script, sets CXLMemSim environment variables, and enables O3CPU trace debug output by default.
+
+Dry-run example:
+
+```bash
+./gem5_integration/run.py \
+  --gem5-root /path/to/gem5-CXL \
+  --config /path/to/gem5-CXL/configs/example/se.py \
+  --cmd /bin/true \
+  --enable-dcd \
+  --enable-gfam \
+  --dry-run
+```
+
+Full-system runs can pass kernel, disk image, workload script, memory size, CXL memory size, and extra gem5 config arguments:
+
+```bash
+./gem5_integration/run.py \
+  --gem5-root /path/to/gem5-CXL \
+  --kernel /path/to/vmlinux \
+  --disk-image /path/to/disk.img \
+  --script boot.rcS \
+  --mem-size 4GB \
+  --cxl-mem-size 16GB \
+  --cxl-host 127.0.0.1 \
+  --cxl-port 9999 \
+  --enable-dcd \
+  --enable-gfam \
+  -- --cpu-type=O3CPU
+```
 
 ## Legacy Application-Level Simulator Invocation
 

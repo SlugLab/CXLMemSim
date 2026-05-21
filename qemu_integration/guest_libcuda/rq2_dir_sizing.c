@@ -18,12 +18,12 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <time.h>
-#include <math.h>
 
 #include "cxl_gpu_cmd.h"
 
@@ -61,18 +61,18 @@ extern int cxlResetCoherencyStats(void);
  * Constants
  * ======================================================================== */
 
-#define CACHE_LINE_SIZE     64
-#define MAX_NEIGHBORS       6
-#define NUM_TRIALS          10
-#define BTREE_LOOKUPS       1000
-#define MAX_REUSE_TRACK     200000  /* max address slots for reuse profiling */
+#define CACHE_LINE_SIZE 64
+#define MAX_NEIGHBORS 6
+#define NUM_TRIALS 10
+#define BTREE_LOOKUPS 1000
+#define MAX_REUSE_TRACK 200000 /* max address slots for reuse profiling */
 
 /* Graph BFS working set sizes: small -> medium -> large */
-static const int BFS_SIZES[] = { 100, 500, 1000, 2000, 5000, 10000, 20000, 50000 };
+static const int BFS_SIZES[] = {100, 500, 1000, 2000, 5000, 10000, 20000, 50000};
 #define NUM_BFS_SIZES ((int)(sizeof(BFS_SIZES) / sizeof(BFS_SIZES[0])))
 
 /* B-tree key counts */
-static const int BTREE_SIZES[] = { 100, 500, 1000, 5000, 10000, 50000 };
+static const int BTREE_SIZES[] = {100, 500, 1000, 5000, 10000, 50000};
 #define NUM_BTREE_SIZES ((int)(sizeof(BTREE_SIZES) / sizeof(BTREE_SIZES[0])))
 
 /* ========================================================================
@@ -92,8 +92,7 @@ _Static_assert(sizeof(GraphNode) == 64, "GraphNode must be exactly 64 bytes");
  * Timing helpers
  * ======================================================================== */
 
-static inline uint64_t now_ns(void)
-{
+static inline uint64_t now_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
@@ -103,47 +102,43 @@ static inline uint64_t now_ns(void)
  * Simple LCG PRNG (deterministic, no global state)
  * ======================================================================== */
 
-typedef struct { uint64_t state; } rng_t;
+typedef struct {
+    uint64_t state;
+} rng_t;
 
-static inline void rng_seed(rng_t *r, uint64_t s)
-{
-    r->state = s ? s : 1;
-}
+static inline void rng_seed(rng_t *r, uint64_t s) { r->state = s ? s : 1; }
 
-static inline uint64_t rng_next(rng_t *r)
-{
+static inline uint64_t rng_next(rng_t *r) {
     r->state = r->state * 6364136223846793005ULL + 1442695040888963407ULL;
     return r->state;
 }
 
-static inline uint32_t rng_u32(rng_t *r, uint32_t limit)
-{
-    return (uint32_t)(rng_next(r) >> 33) % limit;
-}
+static inline uint32_t rng_u32(rng_t *r, uint32_t limit) { return (uint32_t)(rng_next(r) >> 33) % limit; }
 
 /* ========================================================================
  * Comparison function for qsort (uint64_t, ascending)
  * ======================================================================== */
 
-static int cmp_u64(const void *a, const void *b)
-{
+static int cmp_u64(const void *a, const void *b) {
     uint64_t va = *(const uint64_t *)a;
     uint64_t vb = *(const uint64_t *)b;
-    if (va < vb) return -1;
-    if (va > vb) return  1;
+    if (va < vb)
+        return -1;
+    if (va > vb)
+        return 1;
     return 0;
 }
 
-static uint64_t median_u64(uint64_t *arr, int n)
-{
-    if (n <= 0) return 0;
+static uint64_t median_u64(uint64_t *arr, int n) {
+    if (n <= 0)
+        return 0;
     qsort(arr, (size_t)n, sizeof(uint64_t), cmp_u64);
     return arr[n / 2];
 }
 
-static double median_dbl(double *arr, int n)
-{
-    if (n <= 0) return 0.0;
+static double median_dbl(double *arr, int n) {
+    if (n <= 0)
+        return 0.0;
     /* simple insertion sort for small n */
     for (int i = 1; i < n; i++) {
         double key = arr[i];
@@ -166,8 +161,7 @@ static double median_dbl(double *arr, int n)
  * Each node is one cache line.  neighbor_offsets are byte offsets so the
  * device can follow pointers through coherent memory.
  */
-static GraphNode *build_er_graph(int N, void *coh_base, rng_t *rng)
-{
+static GraphNode *build_er_graph(int N, void *coh_base, rng_t *rng) {
     GraphNode *nodes = (GraphNode *)coh_base;
 
     /* Initialize nodes */
@@ -187,7 +181,8 @@ static GraphNode *build_er_graph(int N, void *coh_base, rng_t *rng)
         int target_degree = MAX_NEIGHBORS; /* cap at 6 */
         for (int d = 0; d < target_degree; d++) {
             int j = (int)rng_u32(rng, (uint32_t)N);
-            if (j == i) continue;
+            if (j == i)
+                continue;
 
             /* Add edge i -> j if room */
             if (nodes[i].num_neighbors < MAX_NEIGHBORS) {
@@ -195,7 +190,10 @@ static GraphNode *build_er_graph(int N, void *coh_base, rng_t *rng)
                 /* Check for duplicate */
                 int dup = 0;
                 for (uint32_t k = 0; k < nodes[i].num_neighbors; k++) {
-                    if (nodes[i].neighbor_offsets[k] == offset) { dup = 1; break; }
+                    if (nodes[i].neighbor_offsets[k] == offset) {
+                        dup = 1;
+                        break;
+                    }
                 }
                 if (!dup) {
                     nodes[i].neighbor_offsets[nodes[i].num_neighbors] = offset;
@@ -214,12 +212,11 @@ static GraphNode *build_er_graph(int N, void *coh_base, rng_t *rng)
  * Also populates access_trace (if non-NULL) with cache-line-aligned addresses
  * for reuse distance profiling.
  */
-static int run_bfs(GraphNode *nodes, int N, int start_node,
-                   uint64_t *access_trace, int *trace_len, int trace_cap)
-{
+static int run_bfs(GraphNode *nodes, int N, int start_node, uint64_t *access_trace, int *trace_len, int trace_cap) {
     /* BFS queue: use a simple ring buffer */
     int *queue = malloc(sizeof(int) * (size_t)N);
-    if (!queue) return 0;
+    if (!queue)
+        return 0;
 
     int head = 0, tail = 0;
     int visited_count = 0;
@@ -247,7 +244,8 @@ static int run_bfs(GraphNode *nodes, int N, int start_node,
         for (uint32_t e = 0; e < node_u->num_neighbors; e++) {
             uint64_t off = node_u->neighbor_offsets[e];
             int v = (int)(off / sizeof(GraphNode));
-            if (v < 0 || v >= N) continue;
+            if (v < 0 || v >= N)
+                continue;
 
             /* Record the neighbor access */
             if (access_trace && tl < trace_cap) {
@@ -264,12 +262,13 @@ static int run_bfs(GraphNode *nodes, int N, int start_node,
 
     cxlCoherentFence();
     free(queue);
-    if (trace_len) *trace_len = tl;
+    if (trace_len)
+        *trace_len = tl;
     return visited_count;
 }
 
 typedef struct {
-    int    N;
+    int N;
     double hit_rate;
     uint64_t eviction_count;
     uint64_t bfs_time_ns;
@@ -279,8 +278,7 @@ typedef struct {
     uint64_t snoop_misses;
 } BFSResult;
 
-static void run_bfs_experiment(BFSResult *results)
-{
+static void run_bfs_experiment(BFSResult *results) {
     printf("\n");
     printf("================================================================\n");
     printf("  Experiment 1: Graph BFS directory pressure sweep\n");
@@ -306,8 +304,7 @@ static void run_bfs_experiment(BFSResult *results)
             void *coh_ptr = NULL;
             int ret = cxlCoherentAlloc(alloc_size, &coh_ptr);
             if (ret != CUDA_SUCCESS || !coh_ptr) {
-                fprintf(stderr, "  WARN: cxlCoherentAlloc failed for N=%d (size=%lu)\n",
-                        N, (unsigned long)alloc_size);
+                fprintf(stderr, "  WARN: cxlCoherentAlloc failed for N=%d (size=%lu)\n", N, (unsigned long)alloc_size);
                 break;
             }
 
@@ -329,15 +326,13 @@ static void run_bfs_experiment(BFSResult *results)
             cxlGetCoherencyStats(&stats);
 
             uint64_t total_snoops = stats.snoop_hits + stats.snoop_misses;
-            double hr = (total_snoops > 0)
-                ? (double)stats.snoop_hits / (double)total_snoops
-                : 0.0;
+            double hr = (total_snoops > 0) ? (double)stats.snoop_hits / (double)total_snoops : 0.0;
 
-            trial_hit_rates[valid_trials]    = hr;
-            trial_evictions[valid_trials]    = stats.evictions;
-            trial_times[valid_trials]        = t1 - t0;
-            trial_dir_entries[valid_trials]  = stats.directory_entries;
-            trial_snoop_hits[valid_trials]   = stats.snoop_hits;
+            trial_hit_rates[valid_trials] = hr;
+            trial_evictions[valid_trials] = stats.evictions;
+            trial_times[valid_trials] = t1 - t0;
+            trial_dir_entries[valid_trials] = stats.directory_entries;
+            trial_snoop_hits[valid_trials] = stats.snoop_hits;
             trial_snoop_misses[valid_trials] = stats.snoop_misses;
             valid_trials++;
 
@@ -356,14 +351,13 @@ static void run_bfs_experiment(BFSResult *results)
             continue;
         }
 
-        results[si].N                = N;
-        results[si].hit_rate         = median_dbl(trial_hit_rates, valid_trials);
-        results[si].eviction_count   = median_u64(trial_evictions, valid_trials);
-        results[si].bfs_time_ns      = median_u64(trial_times, valid_trials);
+        results[si].N = N;
+        results[si].hit_rate = median_dbl(trial_hit_rates, valid_trials);
+        results[si].eviction_count = median_u64(trial_evictions, valid_trials);
+        results[si].bfs_time_ns = median_u64(trial_times, valid_trials);
         results[si].directory_entries = median_u64(trial_dir_entries, valid_trials);
-        results[si].snoop_hits       = median_u64(trial_snoop_hits, valid_trials);
-        results[si].snoop_misses     = median_u64(trial_snoop_misses, valid_trials);
-
+        results[si].snoop_hits = median_u64(trial_snoop_hits, valid_trials);
+        results[si].snoop_misses = median_u64(trial_snoop_misses, valid_trials);
     }
 
     /* Compute normalized throughput relative to smallest N.
@@ -385,19 +379,14 @@ static void run_bfs_experiment(BFSResult *results)
     }
 
     /* Print results table */
-    printf("  %8s  %8s  %12s  %12s  %12s  %10s\n",
-           "N", "hit_rate", "evictions", "bfs_time_ns", "norm_tput", "dir_entries");
-    printf("  %8s  %8s  %12s  %12s  %12s  %10s\n",
-           "--------", "--------", "------------", "------------",
+    printf("  %8s  %8s  %12s  %12s  %12s  %10s\n", "N", "hit_rate", "evictions", "bfs_time_ns", "norm_tput",
+           "dir_entries");
+    printf("  %8s  %8s  %12s  %12s  %12s  %10s\n", "--------", "--------", "------------", "------------",
            "------------", "----------");
     for (int si = 0; si < NUM_BFS_SIZES; si++) {
         BFSResult *r = &results[si];
-        printf("  %8d  %8.4f  %12lu  %12lu  %12.4f  %10lu\n",
-               r->N, r->hit_rate,
-               (unsigned long)r->eviction_count,
-               (unsigned long)r->bfs_time_ns,
-               r->normalized_throughput,
-               (unsigned long)r->directory_entries);
+        printf("  %8d  %8.4f  %12lu  %12lu  %12.4f  %10lu\n", r->N, r->hit_rate, (unsigned long)r->eviction_count,
+               (unsigned long)r->bfs_time_ns, r->normalized_throughput, (unsigned long)r->directory_entries);
     }
 }
 
@@ -410,7 +399,7 @@ static void run_bfs_experiment(BFSResult *results)
  * Each internal node stores up to B-1 keys and B child pointers.
  * For simplicity we build a packed array-based tree (implicit pointers).
  */
-#define BTREE_B  64
+#define BTREE_B 64
 
 typedef struct BTreeNode {
     uint32_t num_keys;
@@ -425,8 +414,7 @@ typedef struct BTreeNode {
  * The tree is stored as a flat array of BTreeNode in coherent memory.
  * Node i's children are at indices (i * BTREE_B + 1) .. (i * BTREE_B + BTREE_B).
  */
-static int build_btree(int num_keys, void *coh_base, uint64_t *sorted_keys)
-{
+static int build_btree(int num_keys, void *coh_base, uint64_t *sorted_keys) {
     /* Generate sorted keys */
     for (int i = 0; i < num_keys; i++)
         sorted_keys[i] = (uint64_t)i * 17 + 3; /* deterministic, spread out */
@@ -451,7 +439,8 @@ static int build_btree(int num_keys, void *coh_base, uint64_t *sorted_keys)
         total_nodes += level_nodes;
         level_nodes *= BTREE_B;
     }
-    if (total_nodes <= 0) total_nodes = 1;
+    if (total_nodes <= 0)
+        total_nodes = 1;
 
     BTreeNode *tree = (BTreeNode *)coh_base;
 
@@ -466,9 +455,7 @@ static int build_btree(int num_keys, void *coh_base, uint64_t *sorted_keys)
         int is_leaf = (child_base >= total_nodes);
         tree[i].is_leaf = is_leaf ? 1 : 0;
 
-        int nk = (num_keys - key_idx < BTREE_B - 1)
-                 ? (num_keys - key_idx)
-                 : (BTREE_B - 1);
+        int nk = (num_keys - key_idx < BTREE_B - 1) ? (num_keys - key_idx) : (BTREE_B - 1);
         tree[i].num_keys = (uint32_t)nk;
         for (int k = 0; k < nk && key_idx < num_keys; k++) {
             tree[i].keys[k] = sorted_keys[key_idx++];
@@ -483,8 +470,7 @@ static int build_btree(int num_keys, void *coh_base, uint64_t *sorted_keys)
  * Perform a single B-tree lookup.  Descends the implicit tree structure.
  * Returns 1 if found, 0 otherwise.  The point is to generate directory traffic.
  */
-static int btree_lookup(BTreeNode *tree, int total_nodes, uint64_t key)
-{
+static int btree_lookup(BTreeNode *tree, int total_nodes, uint64_t key) {
     int node = 0;
 
     while (node < total_nodes) {
@@ -520,7 +506,7 @@ static int btree_lookup(BTreeNode *tree, int total_nodes, uint64_t key)
 }
 
 typedef struct {
-    int    num_keys;
+    int num_keys;
     double hit_rate;
     uint64_t eviction_count;
     uint64_t lookup_time_ns;
@@ -528,14 +514,12 @@ typedef struct {
     uint64_t directory_entries;
 } BTreeResult;
 
-static void run_btree_experiment(BTreeResult *results)
-{
+static void run_btree_experiment(BTreeResult *results) {
     printf("\n");
     printf("================================================================\n");
     printf("  Experiment 2: B+ tree lookup directory pressure sweep\n");
     printf("================================================================\n");
-    printf("  Branching factor B=%d, %d random lookups per size.\n",
-           BTREE_B, BTREE_LOOKUPS);
+    printf("  Branching factor B=%d, %d random lookups per size.\n", BTREE_B, BTREE_LOOKUPS);
     printf("  %d trials per configuration, reporting median.\n\n", NUM_TRIALS);
 
     for (int si = 0; si < NUM_BTREE_SIZES; si++) {
@@ -544,14 +528,18 @@ static void run_btree_experiment(BTreeResult *results)
         /* Compute total nodes needed */
         int h = 0;
         int cap = 1;
-        while (cap < num_keys) { h++; cap *= BTREE_B; }
+        while (cap < num_keys) {
+            h++;
+            cap *= BTREE_B;
+        }
         int level_nodes = 1;
         int total_nodes = 0;
         for (int l = 0; l <= h; l++) {
             total_nodes += level_nodes;
             level_nodes *= BTREE_B;
         }
-        if (total_nodes <= 0) total_nodes = 1;
+        if (total_nodes <= 0)
+            total_nodes = 1;
 
         uint64_t tree_size = (uint64_t)total_nodes * sizeof(BTreeNode);
         uint64_t keys_size = (uint64_t)num_keys * sizeof(uint64_t);
@@ -567,8 +555,7 @@ static void run_btree_experiment(BTreeResult *results)
             void *coh_ptr = NULL;
             int ret = cxlCoherentAlloc(alloc_size, &coh_ptr);
             if (ret != CUDA_SUCCESS || !coh_ptr) {
-                fprintf(stderr, "  WARN: cxlCoherentAlloc failed for keys=%d\n",
-                        num_keys);
+                fprintf(stderr, "  WARN: cxlCoherentAlloc failed for keys=%d\n", num_keys);
                 break;
             }
 
@@ -600,13 +587,11 @@ static void run_btree_experiment(BTreeResult *results)
             cxlGetCoherencyStats(&stats);
 
             uint64_t total_snoops = stats.snoop_hits + stats.snoop_misses;
-            double hr = (total_snoops > 0)
-                ? (double)stats.snoop_hits / (double)total_snoops
-                : 0.0;
+            double hr = (total_snoops > 0) ? (double)stats.snoop_hits / (double)total_snoops : 0.0;
 
-            trial_hit_rates[valid_trials]   = hr;
-            trial_evictions[valid_trials]   = stats.evictions;
-            trial_times[valid_trials]       = t1 - t0;
+            trial_hit_rates[valid_trials] = hr;
+            trial_evictions[valid_trials] = stats.evictions;
+            trial_times[valid_trials] = t1 - t0;
             trial_dir_entries[valid_trials] = stats.directory_entries;
             valid_trials++;
 
@@ -623,10 +608,10 @@ static void run_btree_experiment(BTreeResult *results)
             continue;
         }
 
-        results[si].num_keys         = num_keys;
-        results[si].hit_rate         = median_dbl(trial_hit_rates, valid_trials);
-        results[si].eviction_count   = median_u64(trial_evictions, valid_trials);
-        results[si].lookup_time_ns   = median_u64(trial_times, valid_trials);
+        results[si].num_keys = num_keys;
+        results[si].hit_rate = median_dbl(trial_hit_rates, valid_trials);
+        results[si].eviction_count = median_u64(trial_evictions, valid_trials);
+        results[si].lookup_time_ns = median_u64(trial_times, valid_trials);
         results[si].directory_entries = median_u64(trial_dir_entries, valid_trials);
     }
 
@@ -644,18 +629,14 @@ static void run_btree_experiment(BTreeResult *results)
         }
     }
 
-    printf("  %8s  %8s  %12s  %14s  %12s  %10s\n",
-           "keys", "hit_rate", "evictions", "lookup_time_ns", "norm_tput", "dir_entries");
-    printf("  %8s  %8s  %12s  %14s  %12s  %10s\n",
-           "--------", "--------", "------------", "--------------",
+    printf("  %8s  %8s  %12s  %14s  %12s  %10s\n", "keys", "hit_rate", "evictions", "lookup_time_ns", "norm_tput",
+           "dir_entries");
+    printf("  %8s  %8s  %12s  %14s  %12s  %10s\n", "--------", "--------", "------------", "--------------",
            "------------", "----------");
     for (int si = 0; si < NUM_BTREE_SIZES; si++) {
         BTreeResult *r = &results[si];
-        printf("  %8d  %8.4f  %12lu  %14lu  %12.4f  %10lu\n",
-               r->num_keys, r->hit_rate,
-               (unsigned long)r->eviction_count,
-               (unsigned long)r->lookup_time_ns,
-               r->normalized_throughput,
+        printf("  %8d  %8.4f  %12lu  %14lu  %12.4f  %10lu\n", r->num_keys, r->hit_rate,
+               (unsigned long)r->eviction_count, (unsigned long)r->lookup_time_ns, r->normalized_throughput,
                (unsigned long)r->directory_entries);
     }
 }
@@ -671,9 +652,9 @@ static void run_btree_experiment(BTreeResult *results)
  */
 
 typedef struct {
-    int    N;
+    int N;
     double W90;
-    int    trace_length;
+    int trace_length;
 } ReuseResult;
 
 /*
@@ -681,9 +662,9 @@ typedef struct {
  * Uses a hash set with timestamp tracking for O(N * log(N)) performance.
  * Returns W90 (90th percentile reuse distance).
  */
-static double compute_reuse_w90(uint64_t *trace, int trace_len)
-{
-    if (trace_len <= 0) return 0.0;
+static double compute_reuse_w90(uint64_t *trace, int trace_len) {
+    if (trace_len <= 0)
+        return 0.0;
 
     /*
      * For each address, track its last-access timestamp.
@@ -702,14 +683,14 @@ static double compute_reuse_w90(uint64_t *trace, int trace_len)
     uint64_t max_cl = 0;
     for (int i = 0; i < trace_len; i++) {
         uint64_t cl = trace[i] / CACHE_LINE_SIZE;
-        if (cl > max_cl) max_cl = cl;
+        if (cl > max_cl)
+            max_cl = cl;
     }
 
     /* last_seen[cl] = index of last access, or -1 if never */
     int *last_seen = calloc(max_cl + 1, sizeof(int));
     if (!last_seen) {
-        fprintf(stderr, "  WARN: reuse distance alloc failed (max_cl=%lu)\n",
-                (unsigned long)max_cl);
+        fprintf(stderr, "  WARN: reuse distance alloc failed (max_cl=%lu)\n", (unsigned long)max_cl);
         return 0.0;
     }
     for (uint64_t i = 0; i <= max_cl; i++)
@@ -741,7 +722,8 @@ static double compute_reuse_w90(uint64_t *trace, int trace_len)
         int prev = last_seen[cl];
         last_seen[cl] = i;
 
-        if (prev < 0) continue; /* cold miss, no reuse distance */
+        if (prev < 0)
+            continue; /* cold miss, no reuse distance */
 
         if (seen_bits && (i - prev) < 100000) {
             /* Count distinct cache lines accessed between prev+1 and i-1 */
@@ -773,7 +755,8 @@ static double compute_reuse_w90(uint64_t *trace, int trace_len)
     if (num_distances > 0) {
         qsort(distances, (size_t)num_distances, sizeof(uint64_t), cmp_u64);
         int p90_idx = (int)((double)num_distances * 0.90);
-        if (p90_idx >= num_distances) p90_idx = num_distances - 1;
+        if (p90_idx >= num_distances)
+            p90_idx = num_distances - 1;
         w90 = (double)distances[p90_idx];
     }
 
@@ -781,8 +764,7 @@ static double compute_reuse_w90(uint64_t *trace, int trace_len)
     return w90;
 }
 
-static void run_reuse_distance_experiment(ReuseResult *results)
-{
+static void run_reuse_distance_experiment(ReuseResult *results) {
     printf("\n");
     printf("================================================================\n");
     printf("  Experiment 3: Reuse distance profiling\n");
@@ -811,7 +793,8 @@ static void run_reuse_distance_experiment(ReuseResult *results)
 
         /* Allocate trace buffer */
         int trace_cap = N * (MAX_NEIGHBORS + 1);
-        if (trace_cap > MAX_REUSE_TRACK) trace_cap = MAX_REUSE_TRACK;
+        if (trace_cap > MAX_REUSE_TRACK)
+            trace_cap = MAX_REUSE_TRACK;
         uint64_t *trace = malloc(sizeof(uint64_t) * (size_t)trace_cap);
         int trace_len = 0;
 
@@ -833,15 +816,12 @@ static void run_reuse_distance_experiment(ReuseResult *results)
         cxlCoherentFree(coh_ptr);
     }
 
-    printf("  %8s  %10s  %12s  %16s\n",
-           "N", "W90", "trace_len", "min_dir (1.3*W90)");
-    printf("  %8s  %10s  %12s  %16s\n",
-           "--------", "----------", "------------", "----------------");
+    printf("  %8s  %10s  %12s  %16s\n", "N", "W90", "trace_len", "min_dir (1.3*W90)");
+    printf("  %8s  %10s  %12s  %16s\n", "--------", "----------", "------------", "----------------");
     for (int si = 0; si < NUM_BFS_SIZES; si++) {
         ReuseResult *r = &results[si];
         double min_dir = 1.3 * r->W90;
-        printf("  %8d  %10.1f  %12d  %16.0f\n",
-               r->N, r->W90, r->trace_length, min_dir);
+        printf("  %8d  %10.1f  %12d  %16.0f\n", r->N, r->W90, r->trace_length, min_dir);
     }
 }
 
@@ -849,8 +829,7 @@ static void run_reuse_distance_experiment(ReuseResult *results)
  * Experiment 4: Read hardware directory size from BAR2 registers
  * ======================================================================== */
 
-static void read_hw_directory_size(void)
-{
+static void read_hw_directory_size(void) {
     printf("\n");
     printf("================================================================\n");
     printf("  Experiment 4: Hardware directory size (BAR2 registers)\n");
@@ -867,8 +846,7 @@ static void read_hw_directory_size(void)
     memset(&stats, 0, sizeof(stats));
     cxlGetCoherencyStats(&stats);
 
-    printf("  Directory size (from stats):  %lu entries\n",
-           (unsigned long)stats.directory_entries);
+    printf("  Directory size (from stats):  %lu entries\n", (unsigned long)stats.directory_entries);
     printf("  Register offsets:\n");
     printf("    CXL_GPU_REG_COH_DIR_SIZE  = 0x%04X\n", CXL_GPU_REG_COH_DIR_SIZE);
     printf("    CXL_GPU_REG_COH_DIR_USED  = 0x%04X\n", CXL_GPU_REG_COH_DIR_USED);
@@ -882,40 +860,28 @@ static void read_hw_directory_size(void)
  * Summary
  * ======================================================================== */
 
-static void print_summary(BFSResult *bfs_results, BTreeResult *bt_results,
-                          ReuseResult *reuse_results)
-{
+static void print_summary(BFSResult *bfs_results, BTreeResult *bt_results, ReuseResult *reuse_results) {
     printf("\n");
     printf("================================================================\n");
     printf("  RQ2 SUMMARY: Directory Capacity vs Coherence Hub Viability\n");
     printf("================================================================\n");
 
     printf("\n  [Graph BFS] N vs directory pressure:\n");
-    printf("  %8s  %8s  %12s  %12s  %12s\n",
-           "N", "hit_rate", "evictions", "bfs_time_ns", "norm_tput");
-    printf("  %8s  %8s  %12s  %12s  %12s\n",
-           "--------", "--------", "------------", "------------", "------------");
+    printf("  %8s  %8s  %12s  %12s  %12s\n", "N", "hit_rate", "evictions", "bfs_time_ns", "norm_tput");
+    printf("  %8s  %8s  %12s  %12s  %12s\n", "--------", "--------", "------------", "------------", "------------");
     for (int i = 0; i < NUM_BFS_SIZES; i++) {
         BFSResult *r = &bfs_results[i];
-        printf("  %8d  %8.4f  %12lu  %12lu  %12.4f\n",
-               r->N, r->hit_rate,
-               (unsigned long)r->eviction_count,
-               (unsigned long)r->bfs_time_ns,
-               r->normalized_throughput);
+        printf("  %8d  %8.4f  %12lu  %12lu  %12.4f\n", r->N, r->hit_rate, (unsigned long)r->eviction_count,
+               (unsigned long)r->bfs_time_ns, r->normalized_throughput);
     }
 
     printf("\n  [B-tree lookups] key count vs directory pressure:\n");
-    printf("  %8s  %8s  %12s  %14s  %12s\n",
-           "keys", "hit_rate", "evictions", "lookup_time_ns", "norm_tput");
-    printf("  %8s  %8s  %12s  %14s  %12s\n",
-           "--------", "--------", "------------", "--------------", "------------");
+    printf("  %8s  %8s  %12s  %14s  %12s\n", "keys", "hit_rate", "evictions", "lookup_time_ns", "norm_tput");
+    printf("  %8s  %8s  %12s  %14s  %12s\n", "--------", "--------", "------------", "--------------", "------------");
     for (int i = 0; i < NUM_BTREE_SIZES; i++) {
         BTreeResult *r = &bt_results[i];
-        printf("  %8d  %8.4f  %12lu  %14lu  %12.4f\n",
-               r->num_keys, r->hit_rate,
-               (unsigned long)r->eviction_count,
-               (unsigned long)r->lookup_time_ns,
-               r->normalized_throughput);
+        printf("  %8d  %8.4f  %12lu  %14lu  %12.4f\n", r->num_keys, r->hit_rate, (unsigned long)r->eviction_count,
+               (unsigned long)r->lookup_time_ns, r->normalized_throughput);
     }
 
     printf("\n  [Reuse distance] W90 by working set size:\n");
@@ -939,8 +905,7 @@ static void print_summary(BFSResult *bfs_results, BTreeResult *bt_results,
     if (cliff_N > 0) {
         printf("    - BFS hit rate drops below 90%% at N=%d nodes "
                "(%d cache lines, %d KB working set)\n",
-               cliff_N, cliff_N,
-               (int)((uint64_t)cliff_N * sizeof(GraphNode) / 1024));
+               cliff_N, cliff_N, (int)((uint64_t)cliff_N * sizeof(GraphNode) / 1024));
     }
 
     /* Find the reuse distance prediction */
@@ -948,8 +913,7 @@ static void print_summary(BFSResult *bfs_results, BTreeResult *bt_results,
         if (reuse_results[i].W90 > 0) {
             printf("    - N=%d: W90=%.0f => need directory >= %.0f entries "
                    "for 90%% hit rate\n",
-                   reuse_results[i].N, reuse_results[i].W90,
-                   1.3 * reuse_results[i].W90);
+                   reuse_results[i].N, reuse_results[i].W90, 1.3 * reuse_results[i].W90);
         }
     }
 
@@ -964,8 +928,7 @@ static void print_summary(BFSResult *bfs_results, BTreeResult *bt_results,
  * Main
  * ======================================================================== */
 
-int main(void)
-{
+int main(void) {
     printf("================================================================\n");
     printf("  RQ2: Device Cache Directory Sizing Experiment\n");
     printf("  Measures directory pressure vs working set size\n");
@@ -987,7 +950,8 @@ int main(void)
         int found = 0;
         for (int di = 0; di < dev_count && !found; di++) {
             err = cuDeviceGet(&dev, di);
-            if (err != CUDA_SUCCESS) continue;
+            if (err != CUDA_SUCCESS)
+                continue;
             CUcontext try_ctx;
             err = cuCtxCreate_v2(&try_ctx, 0, dev);
             if (err == CUDA_SUCCESS) {

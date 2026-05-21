@@ -1,4 +1,4 @@
-# QEMU CXL Memory Simulator Integration
+#QEMU CXL Memory Simulator Integration
 
 This directory contains the integration between QEMU and CXLMemSim, allowing QEMU to use remote CXL memory simulated by CXLMemSim over TCP.
 
@@ -42,11 +42,11 @@ On the host running CXLMemSim:
 ### 2. Launch QEMU with CXL Memory
 
 ```bash
-# Set environment variables
+#Set environment variables
 export CXL_MEMSIM_HOST=192.168.1.100  # IP of CXLMemSim server
 export CXL_MEMSIM_PORT=9999
 
-# Launch QEMU
+#Launch QEMU
 ./launch_qemu_cxl.sh
 ```
 

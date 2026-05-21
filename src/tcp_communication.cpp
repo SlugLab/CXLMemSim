@@ -1,29 +1,31 @@
 #include "../include/tcp_communication.h"
-#include <iostream>
-#include <cstring>
-#include <thread>
-#include <chrono>
 #include <arpa/inet.h>
-#include <netinet/tcp.h>
-#include <unistd.h>
+#include <chrono>
+#include <cstring>
 #include <errno.h>
 #include <fcntl.h>
+#include <iostream>
+#include <netinet/tcp.h>
+#include <thread>
+#include <unistd.h>
 
 // Reliable send: keeps sending until all bytes are transmitted
-int TCPConnection::send_all(int fd, const void* buf, size_t len) {
-    const uint8_t* ptr = static_cast<const uint8_t*>(buf);
+int TCPConnection::send_all(int fd, const void *buf, size_t len) {
+    const uint8_t *ptr = static_cast<const uint8_t *>(buf);
     size_t remaining = len;
     while (remaining > 0) {
         ssize_t sent = ::send(fd, ptr, remaining, MSG_NOSIGNAL);
         if (sent < 0) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR)
+                continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 std::this_thread::sleep_for(std::chrono::microseconds(10));
                 continue;
             }
             return -1;
         }
-        if (sent == 0) return -1;
+        if (sent == 0)
+            return -1;
         ptr += sent;
         remaining -= sent;
     }
@@ -31,41 +33,41 @@ int TCPConnection::send_all(int fd, const void* buf, size_t len) {
 }
 
 // Reliable recv: keeps receiving until all bytes are read
-int TCPConnection::recv_all(int fd, void* buf, size_t len) {
-    uint8_t* ptr = static_cast<uint8_t*>(buf);
+int TCPConnection::recv_all(int fd, void *buf, size_t len) {
+    uint8_t *ptr = static_cast<uint8_t *>(buf);
     size_t remaining = len;
     while (remaining > 0) {
         ssize_t received = ::recv(fd, ptr, remaining, 0);
         if (received < 0) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR)
+                continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 std::this_thread::sleep_for(std::chrono::microseconds(10));
                 continue;
             }
             return -1;
         }
-        if (received == 0) return -1; // Connection closed
+        if (received == 0)
+            return -1; // Connection closed
         ptr += received;
         remaining -= received;
     }
     return 0;
 }
 
-TCPConnection::TCPConnection()
-    : sock_fd_(-1), running_(false), connected_(false) {
-}
+TCPConnection::TCPConnection() : sock_fd_(-1), running_(false), connected_(false) {}
 
-TCPConnection::~TCPConnection() {
-    disconnect();
-}
+TCPConnection::~TCPConnection() { disconnect(); }
 
-int TCPConnection::send_message(const TCPMessage& msg) {
-    if (!connected_) return -1;
+int TCPConnection::send_message(const TCPMessage &msg) {
+    if (!connected_)
+        return -1;
     return send_all(sock_fd_, &msg, sizeof(msg));
 }
 
-int TCPConnection::receive_message(TCPMessage& msg) {
-    if (!connected_) return -1;
+int TCPConnection::receive_message(TCPMessage &msg) {
+    if (!connected_)
+        return -1;
     return recv_all(sock_fd_, &msg, sizeof(msg));
 }
 
@@ -81,9 +83,8 @@ void TCPConnection::disconnect() {
 
 // ---- TCPServer ----
 
-TCPServer::TCPServer(const std::string& addr, uint16_t port)
-    : bind_addr_(addr), port_(port), listen_fd_(-1), client_fd_(-1) {
-}
+TCPServer::TCPServer(const std::string &addr, uint16_t port)
+    : bind_addr_(addr), port_(port), listen_fd_(-1), client_fd_(-1) {}
 
 TCPServer::~TCPServer() {
     stop();
@@ -122,7 +123,7 @@ int TCPServer::start() {
         inet_pton(AF_INET, bind_addr_.c_str(), &addr.sin_addr);
     }
 
-    if (::bind(listen_fd_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
+    if (::bind(listen_fd_, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) < 0) {
         std::cerr << "Failed to bind TCP address: " << strerror(errno) << std::endl;
         ::close(listen_fd_);
         listen_fd_ = -1;
@@ -145,7 +146,7 @@ int TCPServer::accept_connection() {
     struct sockaddr_in client_addr;
     socklen_t addr_len = sizeof(client_addr);
 
-    client_fd_ = ::accept(listen_fd_, reinterpret_cast<struct sockaddr*>(&client_addr), &addr_len);
+    client_fd_ = ::accept(listen_fd_, reinterpret_cast<struct sockaddr *>(&client_addr), &addr_len);
     if (client_fd_ < 0) {
         if (running_) {
             std::cerr << "Failed to accept connection: " << strerror(errno) << std::endl;
@@ -200,13 +201,9 @@ void TCPServer::stop() {
 
 // ---- TCPClient ----
 
-TCPClient::TCPClient(const std::string& addr, uint16_t port)
-    : server_addr_(addr), server_port_(port) {
-}
+TCPClient::TCPClient(const std::string &addr, uint16_t port) : server_addr_(addr), server_port_(port) {}
 
-TCPClient::~TCPClient() {
-    disconnect();
-}
+TCPClient::~TCPClient() { disconnect(); }
 
 int TCPClient::connect() {
     sock_fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -232,10 +229,10 @@ int TCPClient::connect() {
     int flags = fcntl(sock_fd_, F_GETFL, 0);
     fcntl(sock_fd_, F_SETFL, flags | O_NONBLOCK);
 
-    int ret = ::connect(sock_fd_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
+    int ret = ::connect(sock_fd_, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr));
     if (ret < 0 && errno != EINPROGRESS) {
-        std::cerr << "Failed to connect to " << server_addr_ << ":" << server_port_
-                  << ": " << strerror(errno) << std::endl;
+        std::cerr << "Failed to connect to " << server_addr_ << ":" << server_port_ << ": " << strerror(errno)
+                  << std::endl;
         ::close(sock_fd_);
         sock_fd_ = -1;
         return -1;
@@ -252,8 +249,7 @@ int TCPClient::connect() {
 
         ret = ::select(sock_fd_ + 1, nullptr, &wfds, nullptr, &tv);
         if (ret <= 0) {
-            std::cerr << "Connection to " << server_addr_ << ":" << server_port_
-                      << " timed out" << std::endl;
+            std::cerr << "Connection to " << server_addr_ << ":" << server_port_ << " timed out" << std::endl;
             ::close(sock_fd_);
             sock_fd_ = -1;
             return -1;
@@ -281,8 +277,9 @@ int TCPClient::connect() {
     return 0;
 }
 
-int TCPClient::send_request(const TCPRequest& req, TCPResponse& resp) {
-    if (!connected_) return -1;
+int TCPClient::send_request(const TCPRequest &req, TCPResponse &resp) {
+    if (!connected_)
+        return -1;
 
     TCPMessage msg;
     msg.request = req;

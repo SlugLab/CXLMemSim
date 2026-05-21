@@ -18,14 +18,15 @@
 #include <algorithm>
 #include <arpa/inet.h>
 #include <atomic>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
-#include <cxxopts.hpp>
 #include <errno.h>
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <netinet/in.h>
@@ -34,6 +35,7 @@
 #include <spdlog/cfg/env.h>
 #include <spdlog/spdlog.h>
 #include <sstream>
+#include <stdexcept>
 #include <sys/mman.h> // For msync
 #include <sys/socket.h>
 #include <thread>
@@ -45,33 +47,49 @@
 #endif
 
 // Global variables
-CXLController* controller = nullptr;
+CXLController *controller = nullptr;
 
 // Operation type constants
 constexpr uint8_t OP_READ = 0;
 constexpr uint8_t OP_WRITE = 1;
 constexpr uint8_t OP_GET_SHM_INFO = 2;
-constexpr uint8_t OP_ATOMIC_FAA = 3;   // Fetch-and-Add
-constexpr uint8_t OP_ATOMIC_CAS = 4;   // Compare-and-Swap
-constexpr uint8_t OP_FENCE = 5;        // Memory fence
-constexpr uint8_t OP_LSA_READ = 6;     // Label Storage Area read
-constexpr uint8_t OP_LSA_WRITE = 7;    // Label Storage Area write
+constexpr uint8_t OP_ATOMIC_FAA = 3; // Fetch-and-Add
+constexpr uint8_t OP_ATOMIC_CAS = 4; // Compare-and-Swap
+constexpr uint8_t OP_FENCE = 5;
+// Memory fence
+constexpr uint8_t OP_LSA_READ = 6;
+// Label Storage Area read
+constexpr uint8_t OP_LSA_WRITE = 7;
+// Label Storage Area write
+constexpr uint8_t OP_DCD_ADD = 8;
+// Dynamic capacity add; addr=base or UINT64_MAX, size=bytes, value=tag
+constexpr uint8_t OP_DCD_RELEASE = 9; // Dynamic capacity release; addr=base, size=bytes, value=tag or 0
+constexpr uint8_t OP_DCD_QUERY = 10; // Return DCD stats in response
+constexpr uint8_t OP_GFAM_MAP = 11;
+// Grant host access; value=host, expected=permission mask
+constexpr uint8_t OP_GFAM_UNMAP = 12; // Revoke host access; value=host
+constexpr uint8_t OP_GFAM_QUERY = 13; // Return GFAM stats in response
+constexpr uint8_t OP_MAX = OP_GFAM_QUERY;
 
 // Server request/response structures (matching qemu_integration)
 struct __attribute__((packed)) ServerRequest {
-    uint8_t op_type;      // 0=READ, 1=WRITE, 2=GET_SHM_INFO, 3=ATOMIC_FAA, 4=ATOMIC_CAS, 5=FENCE
+    uint8_t op_type;
+    // 0=READ, 1=WRITE, 2=GET_SHM_INFO, 3=ATOMIC_FAA, 4=ATOMIC_CAS, 5=FENCE
     uint64_t addr;
     uint64_t size;
     uint64_t timestamp;
-    uint64_t value;       // Value for FAA (add value) or CAS (desired value)
-    uint64_t expected;    // Expected value for CAS operation
-    uint8_t data[64];     // Cacheline data
+    uint64_t value;
+    // Value for FAA (add value) or CAS (desired value)
+    uint64_t expected;
+    // Expected value for CAS operation
+    uint8_t data[64];
+    // Cacheline data
 };
 
 struct __attribute__((packed)) ServerResponse {
     uint8_t status;
     uint64_t latency_ns;
-    uint64_t old_value;   // Previous value returned by atomic operations
+    uint64_t old_value; // Previous value returned by atomic operations
     uint8_t data[64];
 };
 
@@ -99,8 +117,8 @@ struct BackInvalidationEntry {
 // Communication mode enum
 enum class CommMode {
     TCP,
-    SHM,        // Shared Memory via /dev/shm (ring buffer based)
-    PGAS_SHM,   // PGAS Shared Memory (lock-free slots for cxl_backend.h clients)
+    SHM, // Shared Memory via /dev/shm (ring buffer based)
+    PGAS_SHM, // PGAS Shared Memory (lock-free slots for cxl_backend.h clients)
     DISTRIBUTED // Distributed multi-node memory server
 };
 
@@ -109,10 +127,10 @@ class ThreadPerConnectionServer {
 private:
     int server_fd;
     int port;
-    CXLController* controller;
+    CXLController *controller;
     std::atomic<bool> running;
     std::atomic<int> next_thread_id;
-    
+
     // Communication mode
     CommMode comm_mode;
     std::unique_ptr<ShmCommunicationManager> shm_comm_manager;
@@ -120,18 +138,18 @@ private:
     // PGAS SHMEM backend state (for cxl_backend.h protocol)
     std::string pgas_shm_name_;
     int pgas_shm_fd_;
-    cxl_shm_header_t* pgas_shm_header_;
-    void* pgas_memory_;
+    cxl_shm_header_t *pgas_shm_header_;
+    void *pgas_memory_;
     size_t pgas_memory_size_;
 
     // Shared memory manager for real memory allocation
     std::unique_ptr<SharedMemoryManager> shm_manager;
     std::string backing_file_;
-    
+
     // Memory storage with coherency tracking (metadata only)
     // Actual data is in shared memory managed by shm_manager
     std::shared_mutex memory_mutex;
-    
+
     // Congestion tracking
     struct CongestionInfo {
         std::atomic<int> active_requests;
@@ -140,15 +158,15 @@ private:
         std::mutex reset_mutex;
     };
     CongestionInfo congestion_info;
-    
+
     // Thread management
     std::vector<std::thread> client_threads;
     std::mutex thread_list_mutex;
-    
+
     // Back invalidation tracking
     std::map<uint64_t, std::queue<BackInvalidationEntry>> back_invalidation_queue;
     std::shared_mutex back_invalidation_mutex;
-    
+
     // Statistics
     std::atomic<uint64_t> total_reads{0};
     std::atomic<uint64_t> total_writes{0};
@@ -159,7 +177,7 @@ private:
     std::atomic<uint64_t> coherency_invalidations{0};
     std::atomic<uint64_t> coherency_downgrades{0};
     std::atomic<uint64_t> back_invalidations{0};
-    std::atomic<uint64_t> total_latency_ns{0};  // accumulated latency for avg calculation
+    std::atomic<uint64_t> total_latency_ns{0}; // accumulated latency for avg calculation
 
     // LSA (Label Storage Area) - shared across all QEMU guests
     std::vector<uint8_t> lsa_data_;
@@ -170,33 +188,28 @@ private:
     static constexpr uint64_t LOG_INTERVAL = 100000;
 
     // Helper to log stats periodically
-    void log_periodic_stats(const char* op_type, uint64_t count) {
+    void log_periodic_stats(const char *op_type, uint64_t count) {
         if (count % LOG_INTERVAL == 0) {
-            uint64_t total_ops = total_reads + total_writes + total_atomic_faa +
-                                total_atomic_cas + total_fences;
+            uint64_t total_ops = total_reads + total_writes + total_atomic_faa + total_atomic_cas + total_fences;
             SPDLOG_INFO("=== Stats @ {} {} ops ===", count, op_type);
             SPDLOG_INFO("  Total operations: {}", total_ops);
             SPDLOG_INFO("  Reads: {}, Writes: {}", total_reads.load(), total_writes.load());
-            SPDLOG_INFO("  Atomics: FAA={}, CAS={} (success={}), Fences={}",
-                       total_atomic_faa.load(), total_atomic_cas.load(),
-                       total_atomic_cas_success.load(), total_fences.load());
-            SPDLOG_INFO("  Coherency: invalidations={}, downgrades={}, back_inv={}",
-                       coherency_invalidations.load(), coherency_downgrades.load(),
-                       back_invalidations.load());
+            SPDLOG_INFO("  Atomics: FAA={}, CAS={} (success={}), Fences={}", total_atomic_faa.load(),
+                        total_atomic_cas.load(), total_atomic_cas_success.load(), total_fences.load());
+            SPDLOG_INFO("  Coherency: invalidations={}, downgrades={}, back_inv={}", coherency_invalidations.load(),
+                        coherency_downgrades.load(), back_invalidations.load());
             if (total_ops > 0) {
                 SPDLOG_INFO("  Avg latency: {} ns", total_latency_ns.load() / total_ops);
             }
         }
     }
-    
+
 public:
-    ThreadPerConnectionServer(int port, CXLController* ctrl, size_t capacity_mb,
-                            const std::string& backing_file = "", CommMode mode = CommMode::TCP,
-                            const std::string& pgas_shm_name = "/cxlmemsim_pgas")
-        : port(port), controller(ctrl), running(true), next_thread_id(0),
-          backing_file_(backing_file), comm_mode(mode),
-          pgas_shm_name_(pgas_shm_name), pgas_shm_fd_(-1),
-          pgas_shm_header_(nullptr), pgas_memory_(nullptr), pgas_memory_size_(0) {
+    ThreadPerConnectionServer(int port, CXLController *ctrl, size_t capacity_mb, const std::string &backing_file = "",
+                              CommMode mode = CommMode::TCP, const std::string &pgas_shm_name = "/cxlmemsim_pgas")
+        : port(port), controller(ctrl), running(true), next_thread_id(0), backing_file_(backing_file), comm_mode(mode),
+          pgas_shm_name_(pgas_shm_name), pgas_shm_fd_(-1), pgas_shm_header_(nullptr), pgas_memory_(nullptr),
+          pgas_memory_size_(0) {
         congestion_info.active_requests = 0;
         congestion_info.total_bandwidth_used = 0;
         congestion_info.last_reset = std::chrono::steady_clock::now();
@@ -214,47 +227,50 @@ public:
         lsa_data_.resize(lsa_size_, 0);
         SPDLOG_INFO("LSA initialized: {} bytes", lsa_size_);
     }
-    
+
     bool start();
     void run();
     void stop();
     void handle_client(int client_fd, int thread_id);
-    
+
     // Shared memory mode methods
     void run_shm_mode();
     void handle_shm_requests();
 
     // PGAS Shared memory mode methods (cxl_backend.h protocol)
-    bool init_pgas_shm(const std::string& shm_name, size_t memory_size);
+    bool init_pgas_shm(const std::string &shm_name, size_t memory_size);
     void run_pgas_shm_mode();
     int poll_pgas_shm_requests();
     void cleanup_pgas_shm();
 
 private:
     // Coherency protocol methods
-    void handle_read_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo& info);
-    void handle_write_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo& info);
-    void invalidate_sharers(uint64_t cacheline_addr, int requesting_thread, CachelineInfo& info);
-    void downgrade_owner(uint64_t cacheline_addr, int requesting_thread, CachelineInfo& info);
-    
+    void handle_read_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo &info);
+    void handle_write_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo &info);
+    void invalidate_sharers(uint64_t cacheline_addr, int requesting_thread, CachelineInfo &info);
+    void downgrade_owner(uint64_t cacheline_addr, int requesting_thread, CachelineInfo &info);
+
     // Congestion handling
     double calculate_congestion_factor();
     void update_congestion_stats(uint64_t bytes_transferred);
-    
+
     // Request handling
-    void handle_request(int client_fd, int thread_id, ServerRequest& req, ServerResponse& resp);
-    void handle_atomic_request(int thread_id, ServerRequest& req, ServerResponse& resp);
-    uint64_t calculate_total_latency(uint64_t base_latency, double congestion_factor,
-                                   bool had_coherency_miss, uint64_t size);
-    
+    void handle_request(int client_fd, int thread_id, ServerRequest &req, ServerResponse &resp);
+    void handle_atomic_request(int thread_id, ServerRequest &req, ServerResponse &resp);
+    bool is_capacity_management_op(uint8_t op_type) const;
+    void handle_capacity_management_request(int thread_id, const ServerRequest &req, ServerResponse &resp);
+    bool check_fabric_access(int thread_id, const ServerRequest &req, bool is_write, bool is_atomic,
+                             double &fabric_latency_ns, ServerResponse &resp);
+    uint64_t calculate_total_latency(uint64_t base_latency, double congestion_factor, bool had_coherency_miss,
+                                     uint64_t size);
+
     // Back invalidation methods
-    void register_back_invalidation(uint64_t cacheline_addr, int source_thread_id, 
-                                  const std::vector<uint8_t>& dirty_data, uint64_t timestamp);
-    bool check_and_apply_back_invalidations(uint64_t cacheline_addr, int requesting_thread_id, 
-                                           CachelineInfo& info);
+    void register_back_invalidation(uint64_t cacheline_addr, int source_thread_id,
+                                    const std::vector<uint8_t> &dirty_data, uint64_t timestamp);
+    bool check_and_apply_back_invalidations(uint64_t cacheline_addr, int requesting_thread_id, CachelineInfo &info);
 };
 
-static ThreadPerConnectionServer* g_server = nullptr;
+static ThreadPerConnectionServer *g_server = nullptr;
 
 // Signal handler for graceful shutdown
 void signal_handler(int sig) {
@@ -264,57 +280,296 @@ void signal_handler(int sig) {
     }
 }
 
+struct TCPPeerInfo {
+    uint32_t node_id = 0;
+    std::string addr;
+    uint16_t port = 0;
+};
+
+struct ServerOptions {
+    bool help = false;
+    int verbose = 2;
+    size_t default_latency = 100;
+    size_t interleave_size = 256;
+    int capacity = 256;
+    int port = 9999;
+    std::string topology = "topology.txt";
+    std::string backing_file;
+    std::string comm_mode_str = "tcp";
+    std::string pgas_shm_name = "/cxlmemsim_pgas";
+    uint32_t node_id = 0;
+    std::string dist_shm_name = "/cxlmemsim_dist";
+    std::string coordinator_shm;
+    std::string transport_mode_str = "shm";
+    std::string tcp_addr = "0.0.0.0";
+    uint16_t tcp_transport_port = 5555;
+    std::string tcp_peers_str;
+    std::vector<TCPPeerInfo> tcp_peers;
+    bool enable_dcd = false;
+    size_t dcd_granularity_mb = 1;
+    bool dcd_initial_capacity_specified = false;
+    size_t dcd_initial_capacity_mb = 0;
+    bool enable_gfam = false;
+    uint32_t gfam_hosts = 16;
+    double gfam_fabric_latency = 80.0;
+    double gfam_bandwidth = 64.0;
+};
+
+static void print_server_help(const char *program) {
+    std::cout << "Usage: " << program << " [options]\n\n"
+              << "Options:\n"
+              << "  -h, --help                         Show this help text\n"
+              << "  -v, --verbose <level>              Verbose level (default: 2)\n"
+              << "      --default_latency <ns>         Default latency (default: 100)\n"
+              << "      --interleave_size <bytes>      Interleave size (default: 256)\n"
+              << "      --capacity <MB>                CXL expander capacity (default: 256)\n"
+              << "  -p, --port <port>                  Server port (default: 9999)\n"
+              << "  -t, --topology <file>              Topology file (default: topology.txt)\n"
+              << "      --backing-file <path>          Back CXL memory with a regular file\n"
+              << "      --comm-mode <mode>             tcp, shm, pgas-shm, or distributed\n"
+              << "      --pgas-shm-name <name>         PGAS shared memory name\n"
+              << "      --node-id <id>                 Distributed node ID\n"
+              << "      --dist-shm-name <name>         Distributed shared memory name\n"
+              << "      --coordinator-shm <name>       Coordinator shared memory to join\n"
+              << "      --transport-mode <mode>        shm, tcp, rdma, or hybrid\n"
+              << "      --tcp-addr <addr>              Distributed TCP bind address\n"
+              << "      --tcp-port <port>              Distributed TCP port\n"
+              << "      --tcp-peers <spec>             node_id:addr:port entries separated by commas\n"
+              << "      --enable-dcd[=true|false]      Enable Dynamic Capacity Device model\n"
+              << "      --dcd-granularity-mb <MB>      DCD allocation granularity\n"
+              << "      --dcd-initial-capacity <MB>    Initial DCD tagged capacity\n"
+              << "      --enable-gfam[=true|false]     Enable GFAM model\n"
+              << "      --gfam-hosts <count>           Number of GFAM host ports\n"
+              << "      --gfam-fabric-latency <ns>     GFAM fabric traversal latency\n"
+              << "      --gfam-bandwidth <GB/s>        Aggregate GFAM fabric bandwidth\n";
+}
+
+static bool option_has_value(const std::string &arg) { return !arg.empty() && arg[0] != '-'; }
+
+static std::string require_option_value(int argc, char *argv[], int &index, const std::string &key,
+                                        const std::string &inline_value, bool has_inline_value) {
+    if (has_inline_value) {
+        return inline_value;
+    }
+    if (index + 1 >= argc || !option_has_value(argv[index + 1])) {
+        throw std::invalid_argument("Missing value for option --" + key);
+    }
+    index++;
+    return argv[index];
+}
+
+static bool parse_bool_option(const std::string &value) {
+    if (value.empty()) {
+        return true;
+    }
+    std::string lowered = value;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (lowered == "1" || lowered == "true" || lowered == "yes" || lowered == "on") {
+        return true;
+    }
+    if (lowered == "0" || lowered == "false" || lowered == "no" || lowered == "off") {
+        return false;
+    }
+    throw std::invalid_argument("Invalid boolean value: " + value);
+}
+
+static bool parse_optional_bool_option(int argc, char *argv[], int &index, const std::string &inline_value,
+                                       bool has_inline_value) {
+    if (has_inline_value) {
+        return parse_bool_option(inline_value);
+    }
+    if (index + 1 < argc && option_has_value(argv[index + 1])) {
+        std::string candidate = argv[index + 1];
+        std::string lowered = candidate;
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (lowered == "1" || lowered == "true" || lowered == "yes" || lowered == "on" || lowered == "0" ||
+            lowered == "false" || lowered == "no" || lowered == "off") {
+            index++;
+            return parse_bool_option(candidate);
+        }
+    }
+    return true;
+}
+
+static std::vector<TCPPeerInfo> parse_tcp_peers(const std::string &tcp_peers_str) {
+    std::vector<TCPPeerInfo> peers;
+    if (tcp_peers_str.empty()) {
+        return peers;
+    }
+
+    std::istringstream peers_stream(tcp_peers_str);
+    std::string peer_entry;
+    while (std::getline(peers_stream, peer_entry, ',')) {
+        std::istringstream entry_stream(peer_entry);
+        std::string token;
+        std::vector<std::string> tokens;
+        while (std::getline(entry_stream, token, ':')) {
+            tokens.push_back(token);
+        }
+        if (tokens.size() != 3) {
+            throw std::invalid_argument("Invalid TCP peer entry '" + peer_entry + "', expected node_id:addr:port");
+        }
+        TCPPeerInfo peer;
+        peer.node_id = static_cast<uint32_t>(std::stoul(tokens[0]));
+        peer.addr = tokens[1];
+        peer.port = static_cast<uint16_t>(std::stoul(tokens[2]));
+        peers.push_back(peer);
+    }
+    return peers;
+}
+
+static bool parse_server_options(int argc, char *argv[], ServerOptions &opts, std::string &error) {
+    try {
+        int positional = 0;
+        for (int i = 1; i < argc; i++) {
+            std::string arg = argv[i];
+            if (arg.empty()) {
+                continue;
+            }
+
+            if (arg[0] != '-') {
+                if (positional == 0) {
+                    opts.port = std::stoi(arg);
+                } else if (positional == 1) {
+                    opts.topology = arg;
+                } else {
+                    throw std::invalid_argument("Unexpected positional argument: " + arg);
+                }
+                positional++;
+                continue;
+            }
+
+            std::string key;
+            std::string value;
+            bool has_inline_value = false;
+
+            if (arg.rfind("--", 0) == 0) {
+                auto eq_pos = arg.find('=');
+                key = arg.substr(2, eq_pos == std::string::npos ? std::string::npos : eq_pos - 2);
+                if (eq_pos != std::string::npos) {
+                    value = arg.substr(eq_pos + 1);
+                    has_inline_value = true;
+                }
+            } else if (arg == "-h") {
+                key = "help";
+            } else if (arg == "-v") {
+                key = "verbose";
+            } else if (arg == "-p") {
+                key = "port";
+            } else if (arg == "-t") {
+                key = "topology";
+            } else {
+                throw std::invalid_argument("Unknown option: " + arg);
+            }
+
+            auto get_value = [&](const std::string &option_name) {
+                return require_option_value(argc, argv, i, option_name, value, has_inline_value);
+            };
+
+            if (key == "help") {
+                opts.help = true;
+            } else if (key == "verbose") {
+                opts.verbose = std::stoi(get_value(key));
+            } else if (key == "default_latency") {
+                opts.default_latency = std::stoull(get_value(key));
+            } else if (key == "interleave_size") {
+                opts.interleave_size = std::stoull(get_value(key));
+            } else if (key == "capacity") {
+                opts.capacity = std::stoi(get_value(key));
+            } else if (key == "port") {
+                opts.port = std::stoi(get_value(key));
+            } else if (key == "topology") {
+                opts.topology = get_value(key);
+            } else if (key == "backing-file") {
+                opts.backing_file = get_value(key);
+            } else if (key == "comm-mode") {
+                opts.comm_mode_str = get_value(key);
+            } else if (key == "pgas-shm-name") {
+                opts.pgas_shm_name = get_value(key);
+            } else if (key == "node-id") {
+                opts.node_id = static_cast<uint32_t>(std::stoul(get_value(key)));
+            } else if (key == "dist-shm-name") {
+                opts.dist_shm_name = get_value(key);
+            } else if (key == "coordinator-shm") {
+                opts.coordinator_shm = get_value(key);
+            } else if (key == "transport-mode") {
+                opts.transport_mode_str = get_value(key);
+            } else if (key == "tcp-addr") {
+                opts.tcp_addr = get_value(key);
+            } else if (key == "tcp-port") {
+                opts.tcp_transport_port = static_cast<uint16_t>(std::stoul(get_value(key)));
+            } else if (key == "tcp-peers") {
+                opts.tcp_peers_str = get_value(key);
+            } else if (key == "enable-dcd") {
+                opts.enable_dcd = parse_optional_bool_option(argc, argv, i, value, has_inline_value);
+            } else if (key == "dcd-granularity-mb") {
+                opts.dcd_granularity_mb = std::stoull(get_value(key));
+            } else if (key == "dcd-initial-capacity") {
+                opts.dcd_initial_capacity_mb = std::stoull(get_value(key));
+                opts.dcd_initial_capacity_specified = true;
+            } else if (key == "enable-gfam") {
+                opts.enable_gfam = parse_optional_bool_option(argc, argv, i, value, has_inline_value);
+            } else if (key == "gfam-hosts") {
+                opts.gfam_hosts = static_cast<uint32_t>(std::stoul(get_value(key)));
+            } else if (key == "gfam-fabric-latency") {
+                opts.gfam_fabric_latency = std::stod(get_value(key));
+            } else if (key == "gfam-bandwidth") {
+                opts.gfam_bandwidth = std::stod(get_value(key));
+            } else {
+                throw std::invalid_argument("Unknown option: --" + key);
+            }
+        }
+
+        opts.tcp_peers = parse_tcp_peers(opts.tcp_peers_str);
+        return true;
+    } catch (const std::exception &e) {
+        error = e.what();
+        return false;
+    }
+}
+
 int main(int argc, char *argv[]) {
     spdlog::cfg::load_env_levels();
-    cxxopts::Options options("CXLMemSim Server", "CXL.mem Type 3 Memory Controller Thread-per-Connection Server");
-    
-    options.add_options()
-        ("h,help", "Help for CXLMemSim Server", cxxopts::value<bool>()->default_value("false"))
-        ("v,verbose", "Verbose level", cxxopts::value<int>()->default_value("2"))
-        ("default_latency", "Default latency", cxxopts::value<size_t>()->default_value("100"))
-        ("interleave_size", "Interleave size", cxxopts::value<size_t>()->default_value("256"))
-        ("capacity", "Capacity of CXL expander in MB", cxxopts::value<int>()->default_value("256"))
-        ("p,port", "Server port", cxxopts::value<int>()->default_value("9999"))
-        ("t,topology", "Topology file", cxxopts::value<std::string>()->default_value("topology.txt"))
-        ("backing-file", "Back CXL memory with a regular file (shared across VMs)", cxxopts::value<std::string>()->default_value(""))
-        ("comm-mode", "Communication mode: tcp, shm, pgas-shm, or distributed", cxxopts::value<std::string>()->default_value("tcp"))
-        ("pgas-shm-name", "PGAS shared memory name (for pgas-shm mode)", cxxopts::value<std::string>()->default_value("/cxlmemsim_pgas"))
-        ("node-id", "Node ID for distributed mode (0 = coordinator)", cxxopts::value<uint32_t>()->default_value("0"))
-        ("dist-shm-name", "Shared memory name for distributed inter-node communication", cxxopts::value<std::string>()->default_value("/cxlmemsim_dist"))
-        ("coordinator-shm", "Coordinator's shared memory name (for joining existing cluster)", cxxopts::value<std::string>()->default_value(""))
-        ("transport-mode", "Transport mode for distributed: shm, tcp, rdma, or hybrid", cxxopts::value<std::string>()->default_value("shm"))
-        ("tcp-addr", "TCP bind address for distributed TCP transport", cxxopts::value<std::string>()->default_value("0.0.0.0"))
-        ("tcp-port", "TCP port for distributed TCP transport", cxxopts::value<uint16_t>()->default_value("5555"))
-        ("tcp-peers", "Comma-separated list of TCP peer addresses (node_id:addr:port,...)", cxxopts::value<std::string>()->default_value(""));
 
-    auto result = options.parse(argc, argv);
-    
-    std::string backing_file = result["backing-file"].as<std::string>();
-    if (result.count("help")) {
-        std::cout << options.help() << std::endl;
+    ServerOptions opts;
+    std::string parse_error;
+    if (!parse_server_options(argc, argv, opts, parse_error)) {
+        std::cerr << "Failed to parse server options: " << parse_error << "\n\n";
+        print_server_help(argv[0]);
+        return 1;
+    }
+
+    if (opts.help) {
+        print_server_help(argv[0]);
         return 0;
     }
 
-    int verbose = result["verbose"].as<int>();
-    size_t default_latency = result["default_latency"].as<size_t>();
-    size_t interleave_size = result["interleave_size"].as<size_t>();
-    int capacity = result["capacity"].as<int>();
-    int port = result["port"].as<int>();
-    std::string topology = result["topology"].as<std::string>();
-    std::string comm_mode_str = result["comm-mode"].as<std::string>();
-    
-    std::string pgas_shm_name = result["pgas-shm-name"].as<std::string>();
-
-    // Parse distributed mode options
-    uint32_t node_id = result["node-id"].as<uint32_t>();
-    std::string dist_shm_name = result["dist-shm-name"].as<std::string>();
-    std::string coordinator_shm = result["coordinator-shm"].as<std::string>();
-
-    // Parse TCP transport options
-    std::string transport_mode_str = result["transport-mode"].as<std::string>();
-    std::string tcp_addr = result["tcp-addr"].as<std::string>();
-    uint16_t tcp_transport_port = result["tcp-port"].as<uint16_t>();
-    std::string tcp_peers_str = result["tcp-peers"].as<std::string>();
+    const auto &backing_file = opts.backing_file;
+    int verbose = opts.verbose;
+    size_t default_latency = opts.default_latency;
+    size_t interleave_size = opts.interleave_size;
+    int capacity = opts.capacity;
+    int port = opts.port;
+    const auto &topology = opts.topology;
+    const auto &comm_mode_str = opts.comm_mode_str;
+    const auto &pgas_shm_name = opts.pgas_shm_name;
+    uint32_t node_id = opts.node_id;
+    const auto &dist_shm_name = opts.dist_shm_name;
+    const auto &coordinator_shm = opts.coordinator_shm;
+    const auto &transport_mode_str = opts.transport_mode_str;
+    const auto &tcp_addr = opts.tcp_addr;
+    uint16_t tcp_transport_port = opts.tcp_transport_port;
+    const auto &tcp_peers = opts.tcp_peers;
+    bool enable_dcd = opts.enable_dcd;
+    size_t dcd_granularity_mb = opts.dcd_granularity_mb;
+    bool dcd_initial_capacity_specified = opts.dcd_initial_capacity_specified;
+    size_t dcd_initial_capacity_mb = opts.dcd_initial_capacity_mb;
+    bool enable_gfam = opts.enable_gfam;
+    uint32_t gfam_hosts = opts.gfam_hosts;
+    double gfam_fabric_latency = opts.gfam_fabric_latency;
+    double gfam_bandwidth = opts.gfam_bandwidth;
 
     // Map transport mode string to enum
     DistTransportMode transport_mode = DistTransportMode::SHM;
@@ -329,36 +584,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Parse TCP peers list: "node_id:addr:port,node_id:addr:port,..."
-    struct TCPPeerInfo {
-        uint32_t node_id;
-        std::string addr;
-        uint16_t port;
-    };
-    std::vector<TCPPeerInfo> tcp_peers;
-    if (!tcp_peers_str.empty()) {
-        std::istringstream peers_stream(tcp_peers_str);
-        std::string peer_entry;
-        while (std::getline(peers_stream, peer_entry, ',')) {
-            // Parse "node_id:addr:port"
-            std::istringstream entry_stream(peer_entry);
-            std::string token;
-            std::vector<std::string> tokens;
-            while (std::getline(entry_stream, token, ':')) {
-                tokens.push_back(token);
-            }
-            if (tokens.size() == 3) {
-                TCPPeerInfo peer;
-                peer.node_id = std::stoul(tokens[0]);
-                peer.addr = tokens[1];
-                peer.port = std::stoul(tokens[2]);
-                tcp_peers.push_back(peer);
-            } else {
-                SPDLOG_WARN("Invalid TCP peer entry: '{}', expected format node_id:addr:port", peer_entry);
-            }
-        }
-    }
-
     // Parse communication mode
     CommMode comm_mode = CommMode::TCP;
     if (comm_mode_str == "shm" || comm_mode_str == "shared_memory") {
@@ -371,14 +596,10 @@ int main(int argc, char *argv[]) {
         SPDLOG_ERROR("Invalid communication mode: {}. Use 'tcp', 'shm', 'pgas-shm', or 'distributed'", comm_mode_str);
         return 1;
     }
-    
+
     // Initialize policies
-    std::array<Policy *, 4> policies = {
-        new AllocationPolicy(),
-        new MigrationPolicy(),
-        new PagingPolicy(),
-        new CachingPolicy()
-    };
+    std::array<Policy *, 4> policies = {new AllocationPolicy(), new MigrationPolicy(), new PagingPolicy(),
+                                        new CachingPolicy()};
 
     // Create controller
     controller = new CXLController(policies, capacity, PAGE, 10, default_latency);
@@ -386,12 +607,11 @@ int main(int argc, char *argv[]) {
     // Create a CXL memory expander endpoint for the server's memory pool.
     // This must happen BEFORE construct_topo() so the topology parser can
     // reference the expander by index.
-    auto *ep = new CXLMemExpander(
-        25, 25,                   // read/write bandwidth (GB/s)
-        default_latency,          // read latency (ns)
-        default_latency + 50,     // write latency (ns)
-        0,                        // expander id
-        capacity                  // capacity (MB)
+    auto *ep = new CXLMemExpander(25, 25, // read/write bandwidth (GB/s)
+                                  default_latency, // read latency (ns)
+                                  default_latency + 50, // write latency (ns)
+                                  0, // expander id
+                                  capacity // capacity (MB)
     );
     controller->insert_end_point(ep);
 
@@ -402,8 +622,7 @@ int main(int argc, char *argv[]) {
             // Read topology file
             std::ifstream topo_file(topology);
             if (topo_file.is_open()) {
-                std::string topo_content((std::istreambuf_iterator<char>(topo_file)),
-                                       std::istreambuf_iterator<char>());
+                std::string topo_content((std::istreambuf_iterator<char>(topo_file)), std::istreambuf_iterator<char>());
                 controller->construct_topo(topo_content);
                 topo_file.close();
             }
@@ -416,15 +635,38 @@ int main(int argc, char *argv[]) {
         SPDLOG_ERROR("Failed to load topology '{}': {}", topology, e.what());
         return 1;
     }
-    
+
+    if (enable_gfam && !enable_dcd) {
+        SPDLOG_INFO("GFAM requested; enabling DCD backing capacity automatically");
+        enable_dcd = true;
+    }
+
+    if (enable_dcd) {
+        uint64_t total_capacity_bytes = static_cast<uint64_t>(capacity) * 1024ULL * 1024ULL;
+        uint64_t granularity_bytes = std::max<size_t>(1, dcd_granularity_mb) * 1024ULL * 1024ULL;
+        if (!dcd_initial_capacity_specified) {
+            dcd_initial_capacity_mb = static_cast<size_t>(capacity);
+        }
+        uint64_t initial_capacity_bytes = static_cast<uint64_t>(dcd_initial_capacity_mb) * 1024ULL * 1024ULL;
+        controller->enable_dcd(total_capacity_bytes, granularity_bytes, initial_capacity_bytes, 1);
+    }
+
+    if (enable_gfam) {
+        if (gfam_hosts == 0) {
+            SPDLOG_ERROR("GFAM requires at least one host");
+            return 1;
+        }
+        controller->enable_gfam(gfam_hosts, gfam_fabric_latency, gfam_bandwidth);
+    }
+
     SPDLOG_INFO("========================================");
     SPDLOG_INFO("CXLMemSim CXL Type3 Memory Server");
     SPDLOG_INFO("========================================");
     SPDLOG_INFO("Server Configuration:");
-    const char* mode_str = (comm_mode == CommMode::TCP) ? "TCP" :
-                           (comm_mode == CommMode::SHM) ? "Shared Memory (/dev/shm)" :
-                           (comm_mode == CommMode::PGAS_SHM) ? "PGAS Shared Memory (cxl_backend.h)" :
-                           "Distributed Multi-Node";
+    const char *mode_str = (comm_mode == CommMode::TCP)        ? "TCP"
+                           : (comm_mode == CommMode::SHM)      ? "Shared Memory (/dev/shm)"
+                           : (comm_mode == CommMode::PGAS_SHM) ? "PGAS Shared Memory (cxl_backend.h)"
+                                                               : "Distributed Multi-Node";
     SPDLOG_INFO("  Communication Mode: {}", mode_str);
     if (comm_mode == CommMode::PGAS_SHM) {
         SPDLOG_INFO("  PGAS SHM Name: {}", pgas_shm_name);
@@ -432,9 +674,10 @@ int main(int argc, char *argv[]) {
     if (comm_mode == CommMode::DISTRIBUTED) {
         SPDLOG_INFO("  Node ID: {}", node_id);
         SPDLOG_INFO("  Distributed SHM Name: {}", dist_shm_name);
-        const char* transport_str = (transport_mode == DistTransportMode::TCP) ? "TCP" :
-                                    (transport_mode == DistTransportMode::RDMA) ? "RDMA" :
-                                    (transport_mode == DistTransportMode::HYBRID) ? "Hybrid (SHM+TCP)" : "SHM";
+        const char *transport_str = (transport_mode == DistTransportMode::TCP)      ? "TCP"
+                                    : (transport_mode == DistTransportMode::RDMA)   ? "RDMA"
+                                    : (transport_mode == DistTransportMode::HYBRID) ? "Hybrid (SHM+TCP)"
+                                                                                    : "SHM";
         SPDLOG_INFO("  Transport Mode: {}", transport_str);
         if (transport_mode != DistTransportMode::SHM) {
             SPDLOG_INFO("  Bind Address: {}:{}", tcp_addr, tcp_transport_port);
@@ -443,7 +686,7 @@ int main(int argc, char *argv[]) {
             }
             if (!tcp_peers.empty()) {
                 SPDLOG_INFO("  Peers: {} configured", tcp_peers.size());
-                for (const auto& peer : tcp_peers) {
+                for (const auto &peer : tcp_peers) {
                     SPDLOG_INFO("    Node {}: {}:{}", peer.node_id, peer.addr, peer.port);
                 }
             }
@@ -459,9 +702,17 @@ int main(int argc, char *argv[]) {
     SPDLOG_INFO("  Capacity: {} MB", capacity);
     SPDLOG_INFO("  Default latency: {} ns", default_latency);
     SPDLOG_INFO("  Interleave size: {} bytes", interleave_size);
+    SPDLOG_INFO("  DCD: {}", controller->dcd_enabled() ? "enabled" : "disabled");
+    SPDLOG_INFO("  GFAM: {}", controller->gfam_enabled() ? "enabled" : "disabled");
     SPDLOG_INFO("CXL Type3 Operations Supported:");
     SPDLOG_INFO("  - CXL_TYPE3_READ");
     SPDLOG_INFO("  - CXL_TYPE3_WRITE");
+    if (controller->dcd_enabled()) {
+        SPDLOG_INFO("  - Dynamic Capacity Device add/release/query");
+    }
+    if (controller->gfam_enabled()) {
+        SPDLOG_INFO("  - GFAM host access control and fabric latency");
+    }
     if (comm_mode == CommMode::DISTRIBUTED) {
         SPDLOG_INFO("  - Distributed coherency protocol");
         SPDLOG_INFO("  - Inter-node message passing");
@@ -476,7 +727,7 @@ int main(int argc, char *argv[]) {
         }
     }
     SPDLOG_INFO("========================================");
-    
+
     // Set up signal handlers
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
@@ -486,8 +737,8 @@ int main(int argc, char *argv[]) {
         try {
             SPDLOG_INFO("Starting distributed memory server node {}...", node_id);
 
-            DistributedMemoryServer dist_server(node_id, dist_shm_name, port, capacity, controller,
-                                                transport_mode, tcp_addr, tcp_transport_port);
+            DistributedMemoryServer dist_server(node_id, dist_shm_name, port, capacity, controller, transport_mode,
+                                                tcp_addr, tcp_transport_port);
 
             if (!dist_server.initialize()) {
                 SPDLOG_ERROR("Failed to initialize distributed server");
@@ -506,14 +757,14 @@ int main(int argc, char *argv[]) {
             if (transport_mode != DistTransportMode::SHM && !tcp_peers.empty()) {
                 if (transport_mode == DistTransportMode::RDMA) {
                     SPDLOG_INFO("Connecting to {} RDMA peer(s)...", tcp_peers.size());
-                    for (const auto& peer : tcp_peers) {
+                    for (const auto &peer : tcp_peers) {
                         // RDMA port is TCP port + 1000 by convention
                         if (dist_server.connect_rdma_node(peer.node_id, peer.addr, peer.port + 1000)) {
-                            SPDLOG_INFO("Connected to RDMA peer node {} at {}:{}",
-                                       peer.node_id, peer.addr, peer.port + 1000);
+                            SPDLOG_INFO("Connected to RDMA peer node {} at {}:{}", peer.node_id, peer.addr,
+                                        peer.port + 1000);
                         } else {
-                            SPDLOG_WARN("Failed to connect to RDMA peer node {} at {}:{}",
-                                       peer.node_id, peer.addr, peer.port + 1000);
+                            SPDLOG_WARN("Failed to connect to RDMA peer node {} at {}:{}", peer.node_id, peer.addr,
+                                        peer.port + 1000);
                         }
                     }
 
@@ -522,13 +773,12 @@ int main(int argc, char *argv[]) {
                     SPDLOG_INFO("RDMA LogP calibration complete");
                 } else {
                     SPDLOG_INFO("Connecting to {} TCP peer(s)...", tcp_peers.size());
-                    for (const auto& peer : tcp_peers) {
+                    for (const auto &peer : tcp_peers) {
                         if (dist_server.connect_tcp_node(peer.node_id, peer.addr, peer.port)) {
-                            SPDLOG_INFO("Connected to TCP peer node {} at {}:{}",
-                                       peer.node_id, peer.addr, peer.port);
+                            SPDLOG_INFO("Connected to TCP peer node {} at {}:{}", peer.node_id, peer.addr, peer.port);
                         } else {
-                            SPDLOG_WARN("Failed to connect to TCP peer node {} at {}:{}",
-                                       peer.node_id, peer.addr, peer.port);
+                            SPDLOG_WARN("Failed to connect to TCP peer node {} at {}:{}", peer.node_id, peer.addr,
+                                        peer.port);
                         }
                     }
 
@@ -557,14 +807,12 @@ int main(int argc, char *argv[]) {
                 if (stats_interval >= 10) {
                     stats_interval = 0;
                     auto stats = dist_server.get_stats();
-                    uint64_t total = stats.local_reads + stats.local_writes +
-                                     stats.remote_reads + stats.remote_writes;
+                    uint64_t total = stats.local_reads + stats.local_writes + stats.remote_reads + stats.remote_writes;
                     if (total > last_total) {
-                        SPDLOG_INFO("Distributed Stats: local_r={} local_w={} remote_r={} remote_w={} fwd={} coherency={} conns={}",
-                                   stats.local_reads, stats.local_writes,
-                                   stats.remote_reads, stats.remote_writes,
-                                   stats.forwarded_requests, stats.coherency_messages,
-                                   stats.active_connections);
+                        SPDLOG_INFO("Distributed Stats: local_r={} local_w={} remote_r={} remote_w={} fwd={} "
+                                    "coherency={} conns={}",
+                                    stats.local_reads, stats.local_writes, stats.remote_reads, stats.remote_writes,
+                                    stats.forwarded_requests, stats.coherency_messages, stats.active_connections);
                         last_total = total;
                     }
                 }
@@ -573,7 +821,7 @@ int main(int argc, char *argv[]) {
             dist_server.stop();
             SPDLOG_INFO("Distributed node {} stopped", node_id);
 
-        } catch (const std::exception& e) {
+        } catch (const std::exception &e) {
             SPDLOG_ERROR("Distributed server error: {}", e.what());
             return 1;
         }
@@ -591,7 +839,7 @@ int main(int argc, char *argv[]) {
         }
 
         server.run();
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
         SPDLOG_ERROR("Server error: {}", e.what());
         return 1;
     }
@@ -616,31 +864,31 @@ bool ThreadPerConnectionServer::start() {
 
     // Select communication mode
     switch (comm_mode) {
-        case CommMode::SHM:
-            SPDLOG_INFO(">>> SHM mode: Skipping TCP socket initialization <<<");
-            shm_comm_manager = std::make_unique<ShmCommunicationManager>("/cxlmemsim_comm", true);
-            if (!shm_comm_manager->initialize()) {
-                SPDLOG_ERROR("Failed to initialize shared memory communication");
-                return false;
-            }
-            SPDLOG_INFO("Server using shared memory communication mode");
-            SPDLOG_INFO("No TCP port binding - communication via /dev/shm only");
-            return true;
+    case CommMode::SHM:
+        SPDLOG_INFO(">>> SHM mode: Skipping TCP socket initialization <<<");
+        shm_comm_manager = std::make_unique<ShmCommunicationManager>("/cxlmemsim_comm", true);
+        if (!shm_comm_manager->initialize()) {
+            SPDLOG_ERROR("Failed to initialize shared memory communication");
+            return false;
+        }
+        SPDLOG_INFO("Server using shared memory communication mode");
+        SPDLOG_INFO("No TCP port binding - communication via /dev/shm only");
+        return true;
 
-        case CommMode::PGAS_SHM:
-            SPDLOG_INFO(">>> PGAS SHM mode: Skipping TCP socket initialization <<<");
-            pgas_memory_size_ = shm_info.size;
-            if (!init_pgas_shm(pgas_shm_name_, pgas_memory_size_)) {
-                SPDLOG_ERROR("Failed to initialize PGAS shared memory");
-                return false;
-            }
-            SPDLOG_INFO("Server using PGAS shared memory mode (cxl_backend.h protocol)");
-            SPDLOG_INFO("No TCP port binding - communication via {} only", pgas_shm_name_);
-            return true;
+    case CommMode::PGAS_SHM:
+        SPDLOG_INFO(">>> PGAS SHM mode: Skipping TCP socket initialization <<<");
+        pgas_memory_size_ = shm_info.size;
+        if (!init_pgas_shm(pgas_shm_name_, pgas_memory_size_)) {
+            SPDLOG_ERROR("Failed to initialize PGAS shared memory");
+            return false;
+        }
+        SPDLOG_INFO("Server using PGAS shared memory mode (cxl_backend.h protocol)");
+        SPDLOG_INFO("No TCP port binding - communication via {} only", pgas_shm_name_);
+        return true;
 
-        case CommMode::TCP:
-            SPDLOG_INFO(">>> TCP mode: Initializing TCP socket <<<");
-            break;
+    case CommMode::TCP:
+        SPDLOG_INFO(">>> TCP mode: Initializing TCP socket <<<");
+        break;
     }
 
     // TCP mode initialization (only reached if comm_mode == TCP)
@@ -677,26 +925,26 @@ bool ThreadPerConnectionServer::start() {
 
 void ThreadPerConnectionServer::run() {
     switch (comm_mode) {
-        case CommMode::SHM:
-            SPDLOG_INFO("Running in SHM mode (no TCP accept loop)");
-            run_shm_mode();
-            return;
+    case CommMode::SHM:
+        SPDLOG_INFO("Running in SHM mode (no TCP accept loop)");
+        run_shm_mode();
+        return;
 
-        case CommMode::PGAS_SHM:
-            SPDLOG_INFO("Running in PGAS SHM mode (no TCP accept loop)");
-            run_pgas_shm_mode();
-            return;
+    case CommMode::PGAS_SHM:
+        SPDLOG_INFO("Running in PGAS SHM mode (no TCP accept loop)");
+        run_pgas_shm_mode();
+        return;
 
-        case CommMode::TCP:
-            SPDLOG_INFO("Running in TCP mode");
-            break;
+    case CommMode::TCP:
+        SPDLOG_INFO("Running in TCP mode");
+        break;
     }
 
     // TCP accept loop (only reached if comm_mode == TCP)
     while (running) {
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
-        
+
         int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
         if (client_fd < 0) {
             if (running) {
@@ -704,17 +952,17 @@ void ThreadPerConnectionServer::run() {
             }
             continue;
         }
-        
+
         // Create a new thread for this client
         int thread_id = next_thread_id++;
-        
+
         {
             std::lock_guard<std::mutex> lock(thread_list_mutex);
             // Pass thread_id to handle_client
             client_threads.emplace_back(&ThreadPerConnectionServer::handle_client, this, client_fd, thread_id);
-            client_threads.back().detach();  // Detach to allow independent execution
+            client_threads.back().detach(); // Detach to allow independent execution
         }
-        
+
         SPDLOG_INFO("Accepted new client connection, assigned thread ID {}", thread_id);
     }
 }
@@ -743,63 +991,63 @@ void ThreadPerConnectionServer::stop() {
     }
 }
 
-void ThreadPerConnectionServer::handle_read_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo& info) {
+void ThreadPerConnectionServer::handle_read_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo &info) {
     switch (info.state) {
-        case INVALID:
-            info.state = SHARED;
-            info.sharers.insert(thread_id);
-            break;
-            
-        case SHARED:
-            info.sharers.insert(thread_id);
-            break;
-            
-        case EXCLUSIVE:
-        case MODIFIED:
-            // Downgrade to SHARED
-            downgrade_owner(cacheline_addr, thread_id, info);
-            info.state = SHARED;
-            info.sharers.insert(info.owner);
-            info.sharers.insert(thread_id);
-            info.owner = -1;
-            break;
+    case INVALID:
+        info.state = SHARED;
+        info.sharers.insert(thread_id);
+        break;
+
+    case SHARED:
+        info.sharers.insert(thread_id);
+        break;
+
+    case EXCLUSIVE:
+    case MODIFIED:
+        // Downgrade to SHARED
+        downgrade_owner(cacheline_addr, thread_id, info);
+        info.state = SHARED;
+        info.sharers.insert(info.owner);
+        info.sharers.insert(thread_id);
+        info.owner = -1;
+        break;
     }
 }
 
-void ThreadPerConnectionServer::handle_write_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo& info) {
+void ThreadPerConnectionServer::handle_write_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo &info) {
     // Check if we need to register back invalidation for sharers
     bool need_back_invalidation = false;
     std::set<int> sharers_to_invalidate;
-    
+
     switch (info.state) {
-        case INVALID:
-            info.state = MODIFIED;
-            info.owner = thread_id;
-            break;
-            
-        case SHARED:
-            // Need to invalidate all sharers
-            sharers_to_invalidate = info.sharers;
+    case INVALID:
+        info.state = MODIFIED;
+        info.owner = thread_id;
+        break;
+
+    case SHARED:
+        // Need to invalidate all sharers
+        sharers_to_invalidate = info.sharers;
+        need_back_invalidation = true;
+        invalidate_sharers(cacheline_addr, thread_id, info);
+        info.state = MODIFIED;
+        info.owner = thread_id;
+        info.sharers.clear();
+        break;
+
+    case EXCLUSIVE:
+    case MODIFIED:
+        if (info.owner != thread_id) {
+            // Need to invalidate current owner
+            sharers_to_invalidate.insert(info.owner);
             need_back_invalidation = true;
             invalidate_sharers(cacheline_addr, thread_id, info);
-            info.state = MODIFIED;
-            info.owner = thread_id;
-            info.sharers.clear();
-            break;
-            
-        case EXCLUSIVE:
-        case MODIFIED:
-            if (info.owner != thread_id) {
-                // Need to invalidate current owner
-                sharers_to_invalidate.insert(info.owner);
-                need_back_invalidation = true;
-                invalidate_sharers(cacheline_addr, thread_id, info);
-            }
-            info.state = MODIFIED;
-            info.owner = thread_id;
-            break;
+        }
+        info.state = MODIFIED;
+        info.owner = thread_id;
+        break;
     }
-    
+
     // Mark that this cacheline has a dirty update
     if (need_back_invalidation) {
         info.has_dirty_update = true;
@@ -807,7 +1055,8 @@ void ThreadPerConnectionServer::handle_write_coherency(uint64_t cacheline_addr, 
     }
 }
 
-void ThreadPerConnectionServer::invalidate_sharers(uint64_t cacheline_addr, int requesting_thread, CachelineInfo& info) {
+void ThreadPerConnectionServer::invalidate_sharers(uint64_t cacheline_addr, int requesting_thread,
+                                                   CachelineInfo &info) {
     for (int sharer : info.sharers) {
         if (sharer != requesting_thread) {
             coherency_invalidations++;
@@ -820,7 +1069,7 @@ void ThreadPerConnectionServer::invalidate_sharers(uint64_t cacheline_addr, int 
     }
 }
 
-void ThreadPerConnectionServer::downgrade_owner(uint64_t cacheline_addr, int requesting_thread, CachelineInfo& info) {
+void ThreadPerConnectionServer::downgrade_owner(uint64_t cacheline_addr, int requesting_thread, CachelineInfo &info) {
     if (info.owner != -1 && info.owner != requesting_thread) {
         coherency_downgrades++;
         SPDLOG_DEBUG("Downgrading cacheline 0x{:x} from thread {}", cacheline_addr, info.owner);
@@ -829,29 +1078,29 @@ void ThreadPerConnectionServer::downgrade_owner(uint64_t cacheline_addr, int req
 
 double ThreadPerConnectionServer::calculate_congestion_factor() {
     std::lock_guard<std::mutex> lock(congestion_info.reset_mutex);
-    
+
     auto now = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - congestion_info.last_reset);
-    
+
     // Reset stats every second
     if (duration.count() > 1000) {
         congestion_info.total_bandwidth_used = 0;
         congestion_info.last_reset = now;
     }
-    
+
     // Calculate congestion based on active requests and bandwidth usage
     int active = congestion_info.active_requests.load();
     uint64_t bandwidth_used = congestion_info.total_bandwidth_used.load();
-    
+
     // Simple congestion model: factor increases with active requests
     // Base factor is 1.0, increases by 0.1 for every 10 active requests
     double congestion_factor = 1.0 + (active / 10.0) * 0.1;
-    
+
     // Additional factor based on bandwidth usage (assuming 64GB/s max)
-    if (bandwidth_used > 64ULL * 1024 * 1024 * 1024) {  // Over 64GB/s
+    if (bandwidth_used > 64ULL * 1024 * 1024 * 1024) { // Over 64GB/s
         congestion_factor *= 1.5;
     }
-    
+
     return congestion_factor;
 }
 
@@ -859,26 +1108,123 @@ void ThreadPerConnectionServer::update_congestion_stats(uint64_t bytes_transferr
     congestion_info.total_bandwidth_used += bytes_transferred;
 }
 
-uint64_t ThreadPerConnectionServer::calculate_total_latency(uint64_t base_latency, double congestion_factor, 
-                                                           bool had_coherency_miss, uint64_t size) {
+uint64_t ThreadPerConnectionServer::calculate_total_latency(uint64_t base_latency, double congestion_factor,
+                                                            bool had_coherency_miss, uint64_t size) {
     double latency = base_latency;
-    
+
     // Apply congestion factor
     latency *= congestion_factor;
-    
+
     // Add coherency miss penalty (50ns for invalidation/downgrade)
     if (had_coherency_miss) {
         latency += 50;
     }
-    
+
     // Add transfer time based on bandwidth (64GB/s)
     double transfer_time_ns = (size * 8.0) / (64.0 * 1e9) * 1e9;
     latency += transfer_time_ns;
-    
+
     return static_cast<uint64_t>(latency);
 }
 
-void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, ServerRequest& req, ServerResponse& resp) {
+bool ThreadPerConnectionServer::is_capacity_management_op(uint8_t op_type) const {
+    return op_type == OP_DCD_ADD || op_type == OP_DCD_RELEASE || op_type == OP_DCD_QUERY || op_type == OP_GFAM_MAP ||
+           op_type == OP_GFAM_UNMAP || op_type == OP_GFAM_QUERY;
+}
+
+void ThreadPerConnectionServer::handle_capacity_management_request(int thread_id, const ServerRequest &req,
+                                                                   ServerResponse &resp) {
+    auto write_u64 = [&resp](size_t offset, uint64_t value) {
+        if (offset + sizeof(value) <= sizeof(resp.data)) {
+            memcpy(resp.data + offset, &value, sizeof(value));
+        }
+    };
+
+    resp.status = 0;
+    resp.latency_ns = static_cast<uint64_t>(controller->dramlatency);
+    resp.old_value = 0;
+
+    switch (req.op_type) {
+    case OP_DCD_ADD: {
+        auto result = controller->dcd_add_capacity(req.addr, req.size, req.value, req.timestamp);
+        resp.status = static_cast<uint8_t>(result.status);
+        resp.old_value = result.base;
+        write_u64(0, result.size);
+        write_u64(8, result.tag);
+
+        if (result.status == DCDStatus::OK && controller->gfam_enabled()) {
+            controller->gfam_grant_access(static_cast<uint32_t>(thread_id), result.base, result.size, DCD_PERM_ALL);
+        }
+        break;
+    }
+    case OP_DCD_RELEASE: {
+        auto status = controller->dcd_release_capacity(req.addr, req.size, req.value, req.timestamp);
+        resp.status = static_cast<uint8_t>(status);
+        break;
+    }
+    case OP_DCD_QUERY: {
+        auto stats = controller->get_dcd_stats();
+        resp.old_value = stats.allocated_capacity;
+        write_u64(0, stats.total_capacity);
+        write_u64(8, stats.free_capacity);
+        write_u64(16, stats.active_extents);
+        write_u64(24, stats.failed_requests);
+        break;
+    }
+    case OP_GFAM_MAP: {
+        uint32_t host_id = static_cast<uint32_t>(req.value);
+        uint32_t permissions = req.expected == 0 ? DCD_PERM_ALL : static_cast<uint32_t>(req.expected);
+        auto status = controller->gfam_grant_access(host_id, req.addr, req.size, permissions);
+        resp.status = static_cast<uint8_t>(status);
+        break;
+    }
+    case OP_GFAM_UNMAP: {
+        uint32_t host_id = static_cast<uint32_t>(req.value);
+        auto status = controller->gfam_revoke_access(host_id, req.addr, req.size);
+        resp.status = static_cast<uint8_t>(status);
+        break;
+    }
+    case OP_GFAM_QUERY: {
+        auto stats = controller->get_gfam_stats();
+        resp.old_value = stats.hosts;
+        write_u64(0, stats.mappings);
+        write_u64(8, stats.shared_mappings);
+        write_u64(16, stats.read_ops);
+        write_u64(24, stats.write_ops);
+        write_u64(32, stats.atomic_ops);
+        write_u64(40, stats.denied_accesses);
+        write_u64(48, static_cast<uint64_t>(stats.avg_access_latency_ns));
+        break;
+    }
+    default:
+        resp.status = static_cast<uint8_t>(DCDStatus::INVALID_REQUEST);
+        break;
+    }
+}
+
+bool ThreadPerConnectionServer::check_fabric_access(int thread_id, const ServerRequest &req, bool is_write,
+                                                    bool is_atomic, double &fabric_latency_ns, ServerResponse &resp) {
+    fabric_latency_ns = 0.0;
+
+    if (!controller->dcd_is_allocated(req.addr, req.size)) {
+        resp.status = static_cast<uint8_t>(DCDStatus::NOT_FOUND);
+        resp.latency_ns = static_cast<uint64_t>(controller->dramlatency);
+        return false;
+    }
+
+    auto access = controller->gfam_record_access(static_cast<uint32_t>(thread_id), req.addr, req.size, is_write,
+                                                 is_atomic, req.timestamp);
+    if (!access.allowed) {
+        resp.status = static_cast<uint8_t>(access.status);
+        resp.latency_ns = static_cast<uint64_t>(controller->dramlatency);
+        return false;
+    }
+
+    fabric_latency_ns = access.latency_ns;
+    return true;
+}
+
+void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, ServerRequest &req, ServerResponse &resp) {
     // CRITICAL: Memory barrier before reading from shared memory
     // This ensures we see all updates from other guests
     std::atomic_thread_fence(std::memory_order_seq_cst);
@@ -886,6 +1232,11 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     // Dispatch atomic operations to dedicated handler
     if (req.op_type == OP_ATOMIC_FAA || req.op_type == OP_ATOMIC_CAS || req.op_type == OP_FENCE) {
         handle_atomic_request(thread_id, req, resp);
+        return;
+    }
+
+    if (is_capacity_management_op(req.op_type)) {
+        handle_capacity_management_request(thread_id, req, resp);
         return;
     }
 
@@ -897,8 +1248,8 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             memcpy(resp.data, lsa_data_.data() + req.addr, clamped_size);
             resp.status = 0;
         } else {
-            SPDLOG_ERROR("Thread {}: LSA read out of bounds: offset=0x{:x} size={}",
-                         thread_id, (uint64_t)req.addr, clamped_size);
+            SPDLOG_ERROR("Thread {}: LSA read out of bounds: offset=0x{:x} size={}", thread_id, (uint64_t)req.addr,
+                         clamped_size);
             resp.status = 1;
         }
         return;
@@ -917,7 +1268,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
         return;
     }
 
-    uint64_t cacheline_addr = req.addr & ~(63ULL);  // 64-byte aligned
+    uint64_t cacheline_addr = req.addr & ~(63ULL); // 64-byte aligned
     bool had_coherency_miss = false;
 
     // Clamp size: some devices (e.g. cxl-type1 probes) may send size=0
@@ -926,8 +1277,13 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
         req.size = SHM_CACHELINE_SIZE;
     }
 
+    double fabric_latency_ns = 0.0;
+    if (!check_fabric_access(thread_id, req, req.op_type == OP_WRITE, false, fabric_latency_ns, resp)) {
+        return;
+    }
+
     // Log CXL Type3 operation with detailed information
-    const char* op_name = (req.op_type == OP_READ) ? "CXL_TYPE3_READ" : "CXL_TYPE3_WRITE";
+    const char *op_name = (req.op_type == OP_READ) ? "CXL_TYPE3_READ" : "CXL_TYPE3_WRITE";
 
     // Log incoming request details
     // SPDLOG_INFO("Thread {}: {} request - addr=0x{:x}, size={}, cacheline=0x{:x}",
@@ -937,96 +1293,92 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
         // Log first 16 bytes of write data
         std::stringstream data_str;
         for (uint64_t i = 0; i < std::min<uint64_t>(16, req.size); i++) {
-            data_str << std::hex << std::setfill('0') << std::setw(2) 
-                    << static_cast<int>(req.data[i]) << " ";
+            data_str << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(req.data[i]) << " ";
         }
-        // SPDLOG_INFO("Thread {}: WRITE data (first 16 bytes): {}", 
+        // SPDLOG_INFO("Thread {}: WRITE data (first 16 bytes): {}",
         //            thread_id, data_str.str());
     }
-    
+
     // Check if address is valid in shared memory
-    if (!shm_manager->is_valid_address(req.addr)) {
-        SPDLOG_ERROR("Thread {}: Invalid address 0x{:x} not in CXL memory range",
-                    thread_id, (uint64_t)req.addr);
+    if (req.addr > std::numeric_limits<uint64_t>::max() - (req.size - 1) || !shm_manager->is_valid_address(req.addr) ||
+        !shm_manager->is_valid_address(req.addr + req.size - 1)) {
+        SPDLOG_ERROR("Thread {}: Invalid address 0x{:x} not in CXL memory range", thread_id, (uint64_t)req.addr);
         resp.status = 1;
         return;
     }
-    
+
     // Increment active requests
     congestion_info.active_requests++;
-    
+
     // Base CXL device latency. The tree-traversal calculate_latency() requires
     // perf-populated address entries which don't exist in server mode, so use
     // the configured DRAM latency directly.
-    double base_latency = controller->dramlatency;
+    double base_latency = controller->dramlatency + fabric_latency_ns;
 
     // Handle coherency and memory operation
     {
         std::unique_lock<std::shared_mutex> lock(memory_mutex);
-        
+
         // Get metadata from shared memory manager
-        auto* metadata = shm_manager->get_cacheline_metadata(cacheline_addr);
+        auto *metadata = shm_manager->get_cacheline_metadata(cacheline_addr);
         if (!metadata) {
-            SPDLOG_ERROR("Thread {}: Failed to get metadata for cacheline 0x{:x}", 
-                        thread_id, cacheline_addr);
+            SPDLOG_ERROR("Thread {}: Failed to get metadata for cacheline 0x{:x}", thread_id, cacheline_addr);
             resp.status = 1;
             congestion_info.active_requests--;
             return;
         }
-        
+
         // Lock the cacheline for this operation
         std::lock_guard<std::mutex> cacheline_lock(metadata->lock);
-        
+
         // Reference to metadata for compatibility with existing code
-        auto& info = *metadata;
-        
+        auto &info = *metadata;
+
         // Check if we need coherency actions
         if (req.op_type == OP_READ) {
-            // SPDLOG_DEBUG("Thread {}: CXL_TYPE3_READ processing - checking coherency for cacheline 0x{:x}", 
+            // SPDLOG_DEBUG("Thread {}: CXL_TYPE3_READ processing - checking coherency for cacheline 0x{:x}",
             //             thread_id, cacheline_addr);
-            
+
             // First check for back invalidations
             bool had_back_invalidation = check_and_apply_back_invalidations(cacheline_addr, thread_id, info);
-            
+
             if (info.state == EXCLUSIVE || info.state == MODIFIED) {
                 if (info.owner != -1 && info.owner != thread_id) {
                     had_coherency_miss = true;
-                    SPDLOG_DEBUG("Thread {}: CXL_TYPE3_READ coherency miss - cacheline owned by thread {}", 
-                                thread_id, info.owner);
+                    SPDLOG_DEBUG("Thread {}: CXL_TYPE3_READ coherency miss - cacheline owned by thread {}", thread_id,
+                                 info.owner);
                 }
             }
             handle_read_coherency(cacheline_addr, thread_id, info);
-            
+
             // Read data from shared memory
             if (!shm_manager->read_cacheline(req.addr, resp.data, req.size)) {
                 // Force sync before reporting failure
-                auto* metadata_ptr = shm_manager->get_cacheline_metadata(cacheline_addr);
+                auto *metadata_ptr = shm_manager->get_cacheline_metadata(cacheline_addr);
                 if (metadata_ptr) {
                     msync(metadata_ptr, sizeof(CachelineMetadata), MS_INVALIDATE | MS_SYNC);
                 }
-                SPDLOG_ERROR("Thread {}: Failed to read from shared memory at 0x{:x}",
-                            thread_id, (uint64_t)req.addr);
+                SPDLOG_ERROR("Thread {}: Failed to read from shared memory at 0x{:x}", thread_id, (uint64_t)req.addr);
                 resp.status = 1;
                 congestion_info.active_requests--;
                 return;
             }
-            
+
             // Log the data being read
             std::stringstream read_data_str;
             for (uint64_t i = 0; i < std::min<uint64_t>(16, req.size); i++) {
-                read_data_str << std::hex << std::setfill('0') << std::setw(2) 
-                             << static_cast<int>(resp.data[i]) << " ";
+                read_data_str << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(resp.data[i]) << " ";
             }
-            // SPDLOG_INFO("Thread {}: READ response data (first 16 bytes): {}", 
+            // SPDLOG_INFO("Thread {}: READ response data (first 16 bytes): {}",
             //            thread_id, read_data_str.str());
-            
+
             // Add back invalidation latency penalty if we had one
             if (had_back_invalidation) {
-                had_coherency_miss = true;  // Treat back invalidation as coherency miss
-                SPDLOG_DEBUG("Thread {}: CXL_TYPE3_READ had back invalidation for cacheline 0x{:x}", 
-                            thread_id, cacheline_addr);
+                had_coherency_miss = true; // Treat back invalidation as coherency miss
+                SPDLOG_DEBUG("Thread {}: CXL_TYPE3_READ had back invalidation for cacheline 0x{:x}", thread_id,
+                             cacheline_addr);
             }
-            
+
             total_reads++;
 
             // Propagate stats through CXL topology (switches/expanders)
@@ -1039,19 +1391,18 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             }
 
             log_periodic_stats("READ", total_reads.load());
-        } else {  // WRITE
-            // SPDLOG_DEBUG("Thread {}: CXL_TYPE3_WRITE processing - checking coherency for cacheline 0x{:x}", 
+        } else { // WRITE
+            // SPDLOG_DEBUG("Thread {}: CXL_TYPE3_WRITE processing - checking coherency for cacheline 0x{:x}",
             //             thread_id, cacheline_addr);
-            
+
             if (info.state == SHARED && !info.sharers.empty()) {
                 had_coherency_miss = true;
-                SPDLOG_DEBUG("Thread {}: CXL_TYPE3_WRITE coherency miss - cacheline shared by {} threads", 
-                            thread_id, info.sharers.size());
-            } else if ((info.state == EXCLUSIVE || info.state == MODIFIED) && 
-                      info.owner != thread_id) {
+                SPDLOG_DEBUG("Thread {}: CXL_TYPE3_WRITE coherency miss - cacheline shared by {} threads", thread_id,
+                             info.sharers.size());
+            } else if ((info.state == EXCLUSIVE || info.state == MODIFIED) && info.owner != thread_id) {
                 had_coherency_miss = true;
-                SPDLOG_DEBUG("Thread {}: CXL_TYPE3_WRITE coherency miss - cacheline owned by thread {}", 
-                            thread_id, info.owner);
+                SPDLOG_DEBUG("Thread {}: CXL_TYPE3_WRITE coherency miss - cacheline owned by thread {}", thread_id,
+                             info.owner);
             }
             // Keep track of who needs invalidation before state change
             std::set<int> threads_to_invalidate;
@@ -1060,62 +1411,60 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             } else if ((info.state == EXCLUSIVE || info.state == MODIFIED) && info.owner != thread_id) {
                 threads_to_invalidate.insert(info.owner);
             }
-            
+
             if (!threads_to_invalidate.empty()) {
-                // SPDLOG_INFO("Thread {}: CXL_TYPE3_WRITE invalidating {} threads for cacheline 0x{:x}", 
-                        //    thread_id, threads_to_invalidate.size(), cacheline_addr);
+                // SPDLOG_INFO("Thread {}: CXL_TYPE3_WRITE invalidating {} threads for cacheline 0x{:x}",
+                //    thread_id, threads_to_invalidate.size(), cacheline_addr);
             }
-            
+
             handle_write_coherency(cacheline_addr, thread_id, info);
-            
+
             // Write data to shared memory
             if (!shm_manager->write_cacheline(req.addr, req.data, req.size)) {
-                SPDLOG_ERROR("Thread {}: Failed to write to shared memory at 0x{:x}",
-                            thread_id, (uint64_t)req.addr);
+                SPDLOG_ERROR("Thread {}: Failed to write to shared memory at 0x{:x}", thread_id, (uint64_t)req.addr);
                 resp.status = 1;
                 congestion_info.active_requests--;
                 return;
             }
 
             // CRITICAL: Force sync to physical memory so other guests can see it
-            auto* metadata_ptr = shm_manager->get_cacheline_metadata(cacheline_addr);
+            auto *metadata_ptr = shm_manager->get_cacheline_metadata(cacheline_addr);
             if (metadata_ptr) {
                 msync(metadata_ptr, sizeof(CachelineMetadata), MS_SYNC);
             }
             // Force sync the data as well
-            void* data_ptr = shm_manager->get_data_area();
+            void *data_ptr = shm_manager->get_data_area();
             if (data_ptr) {
-                msync((uint8_t*)data_ptr + (cacheline_addr & ~SHM_CACHELINE_MASK), SHM_CACHELINE_SIZE, MS_SYNC);
+                msync((uint8_t *)data_ptr + (cacheline_addr & ~SHM_CACHELINE_MASK), SHM_CACHELINE_SIZE, MS_SYNC);
             }
             std::atomic_thread_fence(std::memory_order_release);
 
             // SPDLOG_INFO("Thread {}: WRITE completed successfully at addr=0x{:x}, size={}",
-                    //    thread_id, req.addr, req.size);
-            
+            //    thread_id, req.addr, req.size);
+
             // Verify write by reading back
             uint8_t verify_data[64];
             if (shm_manager->read_cacheline(req.addr, verify_data, req.size)) {
                 std::stringstream verify_str;
                 for (uint64_t i = 0; i < std::min<uint64_t>(16, req.size); i++) {
-                    verify_str << std::hex << std::setfill('0') << std::setw(2) 
-                              << static_cast<int>(verify_data[i]) << " ";
+                    verify_str << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(verify_data[i])
+                               << " ";
                 }
-
             }
-            
+
             // Register back invalidation for threads that had this cacheline
             if (!threads_to_invalidate.empty()) {
                 // Read the dirty data from shared memory for back invalidation
                 std::vector<uint8_t> dirty_data(req.size);
                 shm_manager->read_cacheline(req.addr, dirty_data.data(), req.size);
-                
+
                 for (int invalidated_thread : threads_to_invalidate) {
                     if (invalidated_thread != thread_id) {
                         register_back_invalidation(cacheline_addr, thread_id, dirty_data, req.timestamp);
                     }
                 }
             }
-            
+
             total_writes++;
 
             // Propagate stats through CXL topology (switches/expanders)
@@ -1132,44 +1481,43 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
 
         info.last_access_time = req.timestamp;
     }
-    
+
     // Calculate congestion factor
     double congestion_factor = calculate_congestion_factor();
-    
+
     // Update congestion statistics
     update_congestion_stats(req.size);
-    
+
     // Calculate total latency including congestion and coherency effects
-    uint64_t total_latency = calculate_total_latency(base_latency, congestion_factor, 
-                                                    had_coherency_miss, req.size);
-    
+    uint64_t total_latency = calculate_total_latency(base_latency, congestion_factor, had_coherency_miss, req.size);
+
     // Decrement active requests
     congestion_info.active_requests--;
-    
+
     // Fill response
     resp.status = 0;
     resp.latency_ns = total_latency;
     total_latency_ns += total_latency;
 
     // Enhanced logging for CXL Type3 operations
-    const char* op_result = (req.op_type == OP_READ) ? "CXL_TYPE3_READ_COMPLETE" : "CXL_TYPE3_WRITE_COMPLETE";
+    const char *op_result = (req.op_type == OP_READ) ? "CXL_TYPE3_READ_COMPLETE" : "CXL_TYPE3_WRITE_COMPLETE";
     // SPDLOG_INFO("Thread {}: {} addr=0x{:x} size={} latency={}ns (base={}ns congestion={:.2f}x coherency_miss={})",
-    //             thread_id, op_result, req.addr, req.size, 
-                // total_latency, static_cast<uint64_t>(base_latency), congestion_factor, had_coherency_miss);
-    
+    //             thread_id, op_result, req.addr, req.size,
+    // total_latency, static_cast<uint64_t>(base_latency), congestion_factor, had_coherency_miss);
+
     // Log cache state changes
     // if (had_coherency_miss) {
-    //     SPDLOG_INFO("Thread {}: Coherency action for addr=0x{:x} cacheline=0x{:x}", 
+    //     SPDLOG_INFO("Thread {}: Coherency action for addr=0x{:x} cacheline=0x{:x}",
     //                 thread_id, req.addr, cacheline_addr);
     // }
-    
+
     // Detailed debug logging
     // SPDLOG_DEBUG("Thread {}: Memory access details - cacheline_addr=0x{:x} offset={} data_size={}",
     //             thread_id, cacheline_addr, req.addr - cacheline_addr, req.size);
 }
 
-void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerRequest& req, ServerResponse& resp) {
-    uint64_t cacheline_addr = req.addr & ~(63ULL);  // 64-byte aligned
+void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerRequest &req, ServerResponse &resp) {
+    uint64_t cacheline_addr = req.addr & ~(63ULL); // 64-byte aligned
 
     // Increment active requests for congestion tracking
     congestion_info.active_requests++;
@@ -1177,15 +1525,37 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
     // Atomic: DRAM latency + serialization overhead
     double base_latency = controller->dramlatency + 20;
 
+    if (req.op_type != OP_FENCE) {
+        if (req.size == 0 || req.size > sizeof(uint64_t)) {
+            req.size = sizeof(uint64_t);
+        }
+
+        double fabric_latency_ns = 0.0;
+        if (!check_fabric_access(thread_id, req, true, true, fabric_latency_ns, resp)) {
+            congestion_info.active_requests--;
+            return;
+        }
+        base_latency += fabric_latency_ns;
+
+        if (req.addr > std::numeric_limits<uint64_t>::max() - (req.size - 1) ||
+            !shm_manager->is_valid_address(req.addr) || !shm_manager->is_valid_address(req.addr + req.size - 1)) {
+            SPDLOG_ERROR("Thread {}: Invalid atomic address 0x{:x}", thread_id, (uint64_t)req.addr);
+            resp.status = 1;
+            resp.old_value = 0;
+            congestion_info.active_requests--;
+            return;
+        }
+    }
+
     // Atomic operations require exclusive access with proper coherency
     {
         std::unique_lock<std::shared_mutex> lock(memory_mutex);
 
         // Get metadata from shared memory manager
-        auto* metadata = shm_manager->get_cacheline_metadata(cacheline_addr);
+        auto *metadata = shm_manager->get_cacheline_metadata(cacheline_addr);
         if (!metadata) {
-            SPDLOG_ERROR("Thread {}: Failed to get metadata for atomic op at cacheline 0x{:x}",
-                        thread_id, cacheline_addr);
+            SPDLOG_ERROR("Thread {}: Failed to get metadata for atomic op at cacheline 0x{:x}", thread_id,
+                         cacheline_addr);
             resp.status = 1;
             resp.old_value = 0;
             congestion_info.active_requests--;
@@ -1196,7 +1566,7 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
         std::lock_guard<std::mutex> cacheline_lock(metadata->lock);
 
         // Get pointer to the data location in shared memory
-        void* data_area = shm_manager->get_data_area();
+        void *data_area = shm_manager->get_data_area();
         if (!data_area) {
             SPDLOG_ERROR("Thread {}: Failed to get data area for atomic op", thread_id);
             resp.status = 1;
@@ -1207,84 +1577,83 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
 
         // Calculate offset within cacheline
         size_t offset = req.addr % 64;
-        uint64_t* ptr = reinterpret_cast<uint64_t*>(
-            static_cast<uint8_t*>(data_area) + cacheline_addr + offset);
+        uint64_t *ptr = reinterpret_cast<uint64_t *>(static_cast<uint8_t *>(data_area) + cacheline_addr + offset);
 
         switch (req.op_type) {
-            case OP_ATOMIC_FAA: {
-                // Fetch-and-Add: atomically add value and return old value
-                uint64_t old_value = __atomic_fetch_add(ptr, req.value, __ATOMIC_SEQ_CST);
-                resp.old_value = old_value;
+        case OP_ATOMIC_FAA: {
+            // Fetch-and-Add: atomically add value and return old value
+            uint64_t old_value = __atomic_fetch_add(ptr, req.value, __ATOMIC_SEQ_CST);
+            resp.old_value = old_value;
 
-                // Update metadata
-                metadata->last_access_time = req.timestamp;
+            // Update metadata
+            metadata->last_access_time = req.timestamp;
+            metadata->state = MODIFIED;
+            metadata->owner = thread_id;
+            metadata->sharers.clear();
+            metadata->version++;
+
+            // Force sync to physical memory
+            msync(ptr, sizeof(uint64_t), MS_SYNC);
+            __atomic_thread_fence(__ATOMIC_RELEASE);
+
+            total_atomic_faa++;
+            log_periodic_stats("ATOMIC_FAA", total_atomic_faa.load());
+            SPDLOG_DEBUG("Thread {}: ATOMIC_FAA addr=0x{:x} add={} old={} new={}", thread_id, req.addr, req.value,
+                         old_value, old_value + req.value);
+            break;
+        }
+
+        case OP_ATOMIC_CAS: {
+            // Compare-and-Swap: if *ptr == expected, set *ptr = value
+            uint64_t expected = req.expected;
+            bool success =
+                __atomic_compare_exchange_n(ptr, &expected, req.value, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+            resp.old_value = expected; // Returns actual value (old if success, current if fail)
+
+            // Update metadata
+            metadata->last_access_time = req.timestamp;
+            if (success) {
                 metadata->state = MODIFIED;
                 metadata->owner = thread_id;
                 metadata->sharers.clear();
                 metadata->version++;
+                total_atomic_cas_success++;
 
                 // Force sync to physical memory
                 msync(ptr, sizeof(uint64_t), MS_SYNC);
-                __atomic_thread_fence(__ATOMIC_RELEASE);
+            }
+            __atomic_thread_fence(__ATOMIC_RELEASE);
 
-                total_atomic_faa++;
-                log_periodic_stats("ATOMIC_FAA", total_atomic_faa.load());
-                SPDLOG_DEBUG("Thread {}: ATOMIC_FAA addr=0x{:x} add={} old={} new={}",
-                            thread_id, req.addr, req.value, old_value, old_value + req.value);
-                break;
+            total_atomic_cas++;
+            log_periodic_stats("ATOMIC_CAS", total_atomic_cas.load());
+            SPDLOG_DEBUG("Thread {}: ATOMIC_CAS addr=0x{:x} expected={} desired={} actual={} success={}", thread_id,
+                         req.addr, req.expected, req.value, expected, success);
+            break;
+        }
+
+        case OP_FENCE: {
+            // Memory fence: ensure all prior operations are visible
+            __atomic_thread_fence(__ATOMIC_SEQ_CST);
+            resp.old_value = 0;
+
+            // Also sync the entire shared memory region
+            if (data_area) {
+                auto shm_info = shm_manager->get_shm_info();
+                msync(data_area, shm_info.size, MS_SYNC);
             }
 
-            case OP_ATOMIC_CAS: {
-                // Compare-and-Swap: if *ptr == expected, set *ptr = value
-                uint64_t expected = req.expected;
-                bool success = __atomic_compare_exchange_n(ptr, &expected, req.value,
-                                                          false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-                resp.old_value = expected;  // Returns actual value (old if success, current if fail)
+            total_fences++;
+            log_periodic_stats("FENCE", total_fences.load());
+            SPDLOG_DEBUG("Thread {}: FENCE completed", thread_id);
+            break;
+        }
 
-                // Update metadata
-                metadata->last_access_time = req.timestamp;
-                if (success) {
-                    metadata->state = MODIFIED;
-                    metadata->owner = thread_id;
-                    metadata->sharers.clear();
-                    metadata->version++;
-                    total_atomic_cas_success++;
-
-                    // Force sync to physical memory
-                    msync(ptr, sizeof(uint64_t), MS_SYNC);
-                }
-                __atomic_thread_fence(__ATOMIC_RELEASE);
-
-                total_atomic_cas++;
-                log_periodic_stats("ATOMIC_CAS", total_atomic_cas.load());
-                SPDLOG_DEBUG("Thread {}: ATOMIC_CAS addr=0x{:x} expected={} desired={} actual={} success={}",
-                            thread_id, req.addr, req.expected, req.value, expected, success);
-                break;
-            }
-
-            case OP_FENCE: {
-                // Memory fence: ensure all prior operations are visible
-                __atomic_thread_fence(__ATOMIC_SEQ_CST);
-                resp.old_value = 0;
-
-                // Also sync the entire shared memory region
-                if (data_area) {
-                    auto shm_info = shm_manager->get_shm_info();
-                    msync(data_area, shm_info.size, MS_SYNC);
-                }
-
-                total_fences++;
-                log_periodic_stats("FENCE", total_fences.load());
-                SPDLOG_DEBUG("Thread {}: FENCE completed", thread_id);
-                break;
-            }
-
-            default:
-                SPDLOG_ERROR("Thread {}: Unknown atomic op_type: {}", thread_id, req.op_type);
-                resp.status = 1;
-                resp.old_value = 0;
-                congestion_info.active_requests--;
-                return;
+        default:
+            SPDLOG_ERROR("Thread {}: Unknown atomic op_type: {}", thread_id, req.op_type);
+            resp.status = 1;
+            resp.old_value = 0;
+            congestion_info.active_requests--;
+            return;
         }
     }
 
@@ -1299,7 +1668,7 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
 
     // Add extra latency for atomic RMW operations (read-modify-write)
     if (req.op_type != OP_FENCE) {
-        total_latency += 20;  // Additional 20ns for atomic RMW overhead
+        total_latency += 20; // Additional 20ns for atomic RMW overhead
     }
 
     // Decrement active requests
@@ -1313,23 +1682,23 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
 
 void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
     // Thread ID is now passed as parameter
-    
+
     // Get client information for debugging
     struct sockaddr_in client_addr;
     socklen_t addr_len = sizeof(client_addr);
-    if (getpeername(client_fd, (struct sockaddr*)&client_addr, &addr_len) == 0) {
+    if (getpeername(client_fd, (struct sockaddr *)&client_addr, &addr_len) == 0) {
         char client_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
-        SPDLOG_INFO("Thread {}: Client connected from {}:{} (fd={})", 
-                   thread_id, client_ip, ntohs(client_addr.sin_port), client_fd);
+        SPDLOG_INFO("Thread {}: Client connected from {}:{} (fd={})", thread_id, client_ip, ntohs(client_addr.sin_port),
+                    client_fd);
     } else {
         SPDLOG_INFO("Thread {}: Client connected (fd={})", thread_id, client_fd);
     }
-    
+
     while (running) {
         ServerRequest req;
         ssize_t received = recv(client_fd, &req, sizeof(req), MSG_WAITALL);
-        
+
         if (received != sizeof(req)) {
             if (received == 0) {
                 // This might be a probe connection - don't log as error
@@ -1344,19 +1713,17 @@ void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
                     // Non-blocking socket, no data available
                     continue;
                 } else {
-                    SPDLOG_ERROR("Thread {}: recv() failed with error: {} ({})", 
-                                thread_id, strerror(err), err);
+                    SPDLOG_ERROR("Thread {}: recv() failed with error: {} ({})", thread_id, strerror(err), err);
                 }
             } else {
-                SPDLOG_ERROR("Thread {}: Incomplete request - received {} bytes, expected {}", 
-                            thread_id, received, sizeof(req));
+                SPDLOG_ERROR("Thread {}: Incomplete request - received {} bytes, expected {}", thread_id, received,
+                             sizeof(req));
                 // Dump what we received for debugging
                 if (received > 0) {
                     std::stringstream hex_dump;
-                    unsigned char* buf = (unsigned char*)&req;
+                    unsigned char *buf = (unsigned char *)&req;
                     for (ssize_t i = 0; i < received && i < 32; i++) {
-                        hex_dump << std::hex << std::setfill('0') << std::setw(2) 
-                                << (int)buf[i] << " ";
+                        hex_dump << std::hex << std::setfill('0') << std::setw(2) << (int)buf[i] << " ";
                     }
                     SPDLOG_DEBUG("Thread {}: Partial data: {}", thread_id, hex_dump.str());
                 }
@@ -1365,9 +1732,10 @@ void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
         }
 
         // Validate op_type before processing
-        if (req.op_type > OP_LSA_WRITE) {
-            SPDLOG_WARN("Thread {}: Invalid op_type {} (0x{:02x}) - possibly non-CXL client (HTTP scanner?), disconnecting",
-                        thread_id, (int)req.op_type, (int)req.op_type);
+        if (req.op_type > OP_MAX) {
+            SPDLOG_WARN(
+                "Thread {}: Invalid op_type {} (0x{:02x}) - possibly non-CXL client (HTTP scanner?), disconnecting",
+                thread_id, (int)req.op_type, (int)req.op_type);
             break;
         }
 
@@ -1382,8 +1750,8 @@ void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
             shm_resp.num_cachelines = shm_info.num_cachelines;
             strncpy(shm_resp.shm_name, shm_info.shm_name.c_str(), sizeof(shm_resp.shm_name) - 1);
 
-            SPDLOG_INFO("Thread {}: Sending shared memory info - name: {}, size: {} bytes",
-                       thread_id, shm_info.shm_name, shm_info.size);
+            SPDLOG_INFO("Thread {}: Sending shared memory info - name: {}, size: {} bytes", thread_id,
+                        shm_info.shm_name, shm_info.size);
 
             ssize_t sent = send(client_fd, &shm_resp, sizeof(shm_resp), 0);
             if (sent != sizeof(shm_resp)) {
@@ -1398,103 +1766,100 @@ void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
 
         // Clamp size to data buffer limit to prevent out-of-bounds reads
         if (req.size > sizeof(req.data)) {
-            SPDLOG_WARN("Thread {}: Clamping request size from {} to {} (data buffer limit)",
-                        thread_id, (uint64_t)req.size, sizeof(req.data));
+            SPDLOG_WARN("Thread {}: Clamping request size from {} to {} (data buffer limit)", thread_id,
+                        (uint64_t)req.size, sizeof(req.data));
             req.size = sizeof(req.data);
         }
 
         handle_request(client_fd, thread_id, req, resp);
-        
+
         ssize_t sent = send(client_fd, &resp, sizeof(resp), 0);
         if (sent != sizeof(resp)) {
             SPDLOG_ERROR("Thread {}: Failed to send response", thread_id);
             break;
         }
     }
-    
+
     close(client_fd);
     SPDLOG_INFO("Thread {}: Connection closed", thread_id);
 }
 
 // Back invalidation implementation
 void ThreadPerConnectionServer::register_back_invalidation(uint64_t cacheline_addr, int source_thread_id,
-                                                         const std::vector<uint8_t>& dirty_data, uint64_t timestamp) {
+                                                           const std::vector<uint8_t> &dirty_data, uint64_t timestamp) {
     std::unique_lock<std::shared_mutex> lock(back_invalidation_mutex);
-    
+
     BackInvalidationEntry entry;
     entry.cacheline_addr = cacheline_addr;
     entry.source_thread_id = source_thread_id;
     entry.timestamp = timestamp;
     entry.dirty_data = dirty_data;
-    
+
     back_invalidation_queue[cacheline_addr].push(entry);
-    
-    SPDLOG_DEBUG("Registered back invalidation for cacheline 0x{:x} from thread {}", 
-                 cacheline_addr, source_thread_id);
+
+    SPDLOG_DEBUG("Registered back invalidation for cacheline 0x{:x} from thread {}", cacheline_addr, source_thread_id);
 }
 
 bool ThreadPerConnectionServer::check_and_apply_back_invalidations(uint64_t cacheline_addr, int requesting_thread_id,
-                                                                 CachelineInfo& info) {
+                                                                   CachelineInfo &info) {
     std::unique_lock<std::shared_mutex> lock(back_invalidation_mutex);
-    
+
     auto it = back_invalidation_queue.find(cacheline_addr);
     if (it == back_invalidation_queue.end() || it->second.empty()) {
-        return false;  // No back invalidations pending
+        return false; // No back invalidations pending
     }
-    
+
     bool had_back_invalidation = false;
-    
+
     // Process all pending back invalidations for this cacheline
     while (!it->second.empty()) {
-        BackInvalidationEntry& entry = it->second.front();
-        
+        BackInvalidationEntry &entry = it->second.front();
+
         // Apply the dirty data if it's newer than our current data
         if (entry.timestamp > info.last_access_time) {
             // Write the dirty data directly to shared memory
             // Calculate the actual address from cacheline base
-            uint64_t write_addr = cacheline_addr;  // Start of cacheline
-            
-            if (!shm_manager->write_cacheline(write_addr, entry.dirty_data.data(), 
-                                             entry.dirty_data.size())) {
-                SPDLOG_ERROR("Failed to apply back invalidation to shared memory at 0x{:x}", 
-                            write_addr);
+            uint64_t write_addr = cacheline_addr; // Start of cacheline
+
+            if (!shm_manager->write_cacheline(write_addr, entry.dirty_data.data(), entry.dirty_data.size())) {
+                SPDLOG_ERROR("Failed to apply back invalidation to shared memory at 0x{:x}", write_addr);
             } else {
-                info.has_dirty_update = false;  // Clear the flag after applying
+                info.has_dirty_update = false; // Clear the flag after applying
                 info.dirty_update_time = entry.timestamp;
-                
+
                 back_invalidations++;
                 had_back_invalidation = true;
-                
-                SPDLOG_DEBUG("Applied back invalidation for cacheline 0x{:x} from thread {} to thread {}", 
-                            cacheline_addr, entry.source_thread_id, requesting_thread_id);
+
+                SPDLOG_DEBUG("Applied back invalidation for cacheline 0x{:x} from thread {} to thread {}",
+                             cacheline_addr, entry.source_thread_id, requesting_thread_id);
             }
         }
-        
+
         it->second.pop();
     }
-    
+
     // Clean up empty queue
     if (it->second.empty()) {
         back_invalidation_queue.erase(it);
     }
-    
+
     return had_back_invalidation;
 }
 
 // Shared memory mode implementation
 void ThreadPerConnectionServer::run_shm_mode() {
     SPDLOG_INFO("Running in shared memory communication mode");
-    
+
     // Create worker threads for handling SHM requests
-    const int num_workers = 4;  // Configurable number of worker threads
+    const int num_workers = 4; // Configurable number of worker threads
     std::vector<std::thread> workers;
-    
+
     for (int i = 0; i < num_workers; i++) {
         workers.emplace_back(&ThreadPerConnectionServer::handle_shm_requests, this);
     }
-    
+
     // Wait for workers to finish (they won't unless stopped)
-    for (auto& worker : workers) {
+    for (auto &worker : workers) {
         if (worker.joinable()) {
             worker.join();
         }
@@ -1505,19 +1870,20 @@ void ThreadPerConnectionServer::handle_shm_requests() {
     while (running) {
         uint32_t client_id;
         ShmRequest shm_req;
-        
+
         // Wait for request with 100ms timeout
         if (!shm_comm_manager->wait_for_request(client_id, shm_req, 100)) {
             continue;
         }
-        
+
         // Convert ShmRequest to ServerRequest format
         ServerRequest req;
         req.op_type = shm_req.op_type;
         req.addr = shm_req.addr;
         req.size = shm_req.size;
         req.timestamp = shm_req.timestamp;
-        req.value = shm_req.value;       // For atomic FAA/CAS operations
+        req.value = shm_req.value;
+        // For atomic FAA/CAS operations
         req.expected = shm_req.expected; // For atomic CAS operation
         std::memcpy(req.data, shm_req.data, sizeof(req.data));
 
@@ -1525,30 +1891,30 @@ void ThreadPerConnectionServer::handle_shm_requests() {
         if (req.op_type == OP_GET_SHM_INFO) {
             ShmResponse shm_resp = {0};
             auto shm_info = shm_manager->get_shm_info();
-            
+
             // For SHM mode, we return the info in the data field
             // Format: first 8 bytes = base_addr, next 8 = size, next 8 = num_cachelines
-            uint64_t* data_ptr = reinterpret_cast<uint64_t*>(shm_resp.data);
+            uint64_t *data_ptr = reinterpret_cast<uint64_t *>(shm_resp.data);
             data_ptr[0] = shm_info.base_addr;
             data_ptr[1] = shm_info.size;
             data_ptr[2] = shm_info.num_cachelines;
             shm_resp.status = 0;
-            
+
             shm_comm_manager->send_response(client_id, shm_resp);
             continue;
         }
-        
+
         // Process regular request
         ServerResponse resp = {0};
-        handle_request(-1, client_id, req, resp);  // Use client_id as thread_id
-        
+        handle_request(-1, client_id, req, resp); // Use client_id as thread_id
+
         // Convert ServerResponse to ShmResponse
         ShmResponse shm_resp;
         shm_resp.status = resp.status;
         shm_resp.latency_ns = resp.latency_ns;
-        shm_resp.old_value = resp.old_value;  // For atomic operations
+        shm_resp.old_value = resp.old_value; // For atomic operations
         std::memcpy(shm_resp.data, resp.data, sizeof(shm_resp.data));
-        
+
         // Send response back
         shm_comm_manager->send_response(client_id, shm_resp);
     }
@@ -1566,20 +1932,29 @@ struct PGASMemoryEntry {
 
     // Metadata portion (64 bytes)
     struct {
-        uint8_t cache_state;        // MESI state (0=Invalid, 1=Shared, 2=Exclusive, 3=Modified)
-        uint8_t owner_id;           // Current owner host/thread ID
-        uint16_t sharers_bitmap;    // Bitmap of hosts/threads sharing this line
-        uint32_t access_count;      // Number of accesses
-        uint64_t last_access_time;  // Timestamp of last access
-        uint64_t virtual_addr;      // Virtual address mapping
-        uint64_t physical_addr;     // Physical address
-        uint32_t version;           // Version number for coherency
-        uint8_t flags;              // Various flags (dirty, locked, etc.)
-        uint8_t reserved[23];       // Reserved for future use
+        uint8_t cache_state;
+        // MESI state (0=Invalid, 1=Shared, 2=Exclusive, 3=Modified)
+        uint8_t owner_id;
+        // Current owner host/thread ID
+        uint16_t sharers_bitmap;
+        // Bitmap of hosts/threads sharing this line
+        uint32_t access_count;
+        // Number of accesses
+        uint64_t last_access_time; // Timestamp of last access
+        uint64_t virtual_addr;
+        // Virtual address mapping
+        uint64_t physical_addr;
+        // Physical address
+        uint32_t version;
+        // Version number for coherency
+        uint8_t flags;
+        // Various flags (dirty, locked, etc.)
+        uint8_t reserved[23];
+        // Reserved for future use
     } metadata;
 } __attribute__((packed));
 
-bool ThreadPerConnectionServer::init_pgas_shm(const std::string& shm_name, size_t memory_size) {
+bool ThreadPerConnectionServer::init_pgas_shm(const std::string &shm_name, size_t memory_size) {
     // Remove existing shared memory
     shm_unlink(shm_name.c_str());
 
@@ -1605,8 +1980,7 @@ bool ThreadPerConnectionServer::init_pgas_shm(const std::string& shm_name, size_
     }
 
     // Map shared memory
-    void* mapped = mmap(NULL, total_size, PROT_READ | PROT_WRITE,
-                        MAP_SHARED, pgas_shm_fd_, 0);
+    void *mapped = mmap(NULL, total_size, PROT_READ | PROT_WRITE, MAP_SHARED, pgas_shm_fd_, 0);
     if (mapped == MAP_FAILED) {
         SPDLOG_ERROR("Failed to mmap PGAS shared memory: {}", strerror(errno));
         close(pgas_shm_fd_);
@@ -1614,8 +1988,8 @@ bool ThreadPerConnectionServer::init_pgas_shm(const std::string& shm_name, size_
         return false;
     }
 
-    pgas_shm_header_ = (cxl_shm_header_t*)mapped;
-    pgas_memory_ = (char*)mapped + header_size;
+    pgas_shm_header_ = (cxl_shm_header_t *)mapped;
+    pgas_memory_ = (char *)mapped + header_size;
     pgas_memory_size_ = entry_region_size;
 
     // Initialize header
@@ -1624,25 +1998,25 @@ bool ThreadPerConnectionServer::init_pgas_shm(const std::string& shm_name, size_
     pgas_shm_header_->version = CXL_SHM_VERSION;
     pgas_shm_header_->num_slots = CXL_SHM_MAX_SLOTS;
     pgas_shm_header_->memory_base = 0;
-    pgas_shm_header_->memory_size = memory_size;  // Original memory size (data only)
+    pgas_shm_header_->memory_size = memory_size; // Original memory size (data only)
     pgas_shm_header_->num_cachelines = num_cachelines;
-    pgas_shm_header_->metadata_enabled = 1;  // Always enabled in PGAS mode
+    pgas_shm_header_->metadata_enabled = 1; // Always enabled in PGAS mode
     pgas_shm_header_->entry_size = sizeof(PGASMemoryEntry);
     pgas_shm_header_->flags = CXL_SHM_FLAG_METADATA_ENABLED;
 
     // Initialize memory entries (data + metadata)
-    PGASMemoryEntry* entries = (PGASMemoryEntry*)pgas_memory_;
+    PGASMemoryEntry *entries = (PGASMemoryEntry *)pgas_memory_;
     for (size_t i = 0; i < num_cachelines; i++) {
         memset(&entries[i], 0, sizeof(PGASMemoryEntry));
         entries[i].metadata.cache_state = CXL_CACHE_INVALID;
-        entries[i].metadata.owner_id = 0xFF;  // No owner
-        entries[i].metadata.physical_addr = i * 64;  // Cacheline address
+        entries[i].metadata.owner_id = 0xFF; // No owner
+        entries[i].metadata.physical_addr = i * 64; // Cacheline address
     }
 
     SPDLOG_INFO("PGAS shared memory initialized:");
     SPDLOG_INFO("  Name: {}", shm_name);
-    SPDLOG_INFO("  Memory size: {} MB ({} cachelines)", memory_size / (1024*1024), num_cachelines);
-    SPDLOG_INFO("  Total mapped size: {} MB (including metadata)", total_size / (1024*1024));
+    SPDLOG_INFO("  Memory size: {} MB ({} cachelines)", memory_size / (1024 * 1024), num_cachelines);
+    SPDLOG_INFO("  Total mapped size: {} MB (including metadata)", total_size / (1024 * 1024));
     SPDLOG_INFO("  Entry size: {} bytes (64 data + 64 metadata)", sizeof(PGASMemoryEntry));
 
     return true;
@@ -1664,14 +2038,14 @@ void ThreadPerConnectionServer::run_pgas_shm_mode() {
                 int processed = poll_pgas_shm_requests();
                 if (processed == 0) {
                     // No requests - sleep briefly to reduce CPU usage
-                    usleep(100);  // 100us
+                    usleep(100); // 100us
                 }
             }
         });
     }
 
     // Wait for workers to finish
-    for (auto& worker : workers) {
+    for (auto &worker : workers) {
         if (worker.joinable()) {
             worker.join();
         }
@@ -1681,23 +2055,25 @@ void ThreadPerConnectionServer::run_pgas_shm_mode() {
 }
 
 int ThreadPerConnectionServer::poll_pgas_shm_requests() {
-    if (!pgas_shm_header_ || !running) return 0;
+    if (!pgas_shm_header_ || !running)
+        return 0;
 
     int processed = 0;
-    PGASMemoryEntry* entries = (PGASMemoryEntry*)pgas_memory_;
+    PGASMemoryEntry *entries = (PGASMemoryEntry *)pgas_memory_;
     size_t num_cachelines = pgas_shm_header_->memory_size / 64;
 
     for (uint32_t i = 0; i < pgas_shm_header_->num_slots; i++) {
-        cxl_shm_slot_t* slot = &pgas_shm_header_->slots[i];
+        cxl_shm_slot_t *slot = &pgas_shm_header_->slots[i];
 
         uint32_t req = __atomic_load_n(&slot->req_type, __ATOMIC_ACQUIRE);
-        if (req == CXL_SHM_REQ_NONE) continue;
+        if (req == CXL_SHM_REQ_NONE)
+            continue;
 
         // Multiple PGAS worker threads scan the same slots. Claim the request
         // before doing any work so only one worker can service a client slot.
         uint32_t expected = req;
-        if (!__atomic_compare_exchange_n(&slot->req_type, &expected, CXL_SHM_REQ_NONE,
-                                         false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        if (!__atomic_compare_exchange_n(&slot->req_type, &expected, CXL_SHM_REQ_NONE, false, __ATOMIC_ACQ_REL,
+                                         __ATOMIC_ACQUIRE)) {
             continue;
         }
 
@@ -1711,129 +2087,249 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
             continue;
         }
 
-        PGASMemoryEntry* entry = &entries[cacheline_idx];
+        PGASMemoryEntry *entry = &entries[cacheline_idx];
 
         // Base CXL device latency (server mode has no perf-populated address entries)
         double base_latency = controller->dramlatency;
+        auto check_pgas_fabric_access = [&](bool is_write, bool is_atomic, size_t access_size,
+                                            double &fabric_latency_ns) -> bool {
+            if (access_size == 0) {
+                access_size = 64;
+            }
+            if (!controller->dcd_is_allocated(addr, access_size)) {
+                return false;
+            }
+            auto access = controller->gfam_record_access(i, addr, access_size, is_write, is_atomic, request_ts);
+            if (!access.allowed) {
+                return false;
+            }
+            fabric_latency_ns = access.latency_ns;
+            return true;
+        };
+        auto write_slot_u64 = [](cxl_shm_slot_t *slot, size_t offset, uint64_t value) {
+            if (offset + sizeof(value) <= sizeof(slot->data)) {
+                std::memcpy(slot->data + offset, &value, sizeof(value));
+            }
+        };
 
         switch (req) {
-            case CXL_SHM_REQ_READ: {
-                // Update metadata
-                entry->metadata.access_count++;
-                entry->metadata.last_access_time = request_ts;
-
-                // Copy data to slot
-                size_t copy_size = std::min((size_t)slot->size, (size_t)64);
-                size_t offset = addr % 64;
-                memcpy((void*)slot->data, entry->data + offset, copy_size);
-
-                // Copy metadata to response (use latency_ns field for cache_state)
-                slot->latency_ns = (uint64_t)base_latency;
-
-                // Store cache state in first byte of data response padding
-                // Client can check this for coherency information
-
-                total_reads++;
-
-                // PGAS server mode may be used with a minimal topology file whose
-                // switch objects are not fully materialized. Keep the authoritative
-                // operation counters independent from that optional topology walk.
-                controller->counter.inc_local();
-
-                log_periodic_stats("PGAS_READ", total_reads.load());
-                __atomic_thread_fence(__ATOMIC_RELEASE);
-                slot->resp_status = CXL_SHM_RESP_OK;
+        case CXL_SHM_REQ_READ: {
+            double fabric_latency_ns = 0.0;
+            size_t copy_size = std::min((size_t)slot->size, (size_t)64);
+            if (!check_pgas_fabric_access(false, false, copy_size, fabric_latency_ns)) {
+                slot->resp_status = CXL_SHM_RESP_ERROR;
                 processed++;
                 break;
             }
 
-            case CXL_SHM_REQ_WRITE: {
-                // Copy data from slot to memory
-                size_t copy_size = std::min((size_t)slot->size, (size_t)64);
-                size_t offset = addr % 64;
-                memcpy(entry->data + offset, (void*)slot->data, copy_size);
+            // Update metadata
+            entry->metadata.access_count++;
+            entry->metadata.last_access_time = request_ts;
 
-                // Update metadata
-                entry->metadata.access_count++;
-                entry->metadata.last_access_time = request_ts;
-                entry->metadata.cache_state = 3;  // MODIFIED
-                entry->metadata.version++;
+            // Copy data to slot
+            size_t offset = addr % 64;
+            memcpy((void *)slot->data, entry->data + offset, copy_size);
 
-                slot->latency_ns = (uint64_t)base_latency;
-                total_writes++;
+            // Copy metadata to response (use latency_ns field for cache_state)
+            slot->latency_ns = (uint64_t)(base_latency + fabric_latency_ns);
 
-                // PGAS server mode may be used with a minimal topology file whose
-                // switch objects are not fully materialized. Keep the authoritative
-                // operation counters independent from that optional topology walk.
-                controller->counter.inc_local();
+            // Store cache state in first byte of data response padding
+            // Client can check this for coherency information
 
-                log_periodic_stats("PGAS_WRITE", total_writes.load());
-                __atomic_thread_fence(__ATOMIC_RELEASE);
-                slot->resp_status = CXL_SHM_RESP_OK;
-                processed++;
-                break;
-            }
+            total_reads++;
 
-            case CXL_SHM_REQ_ATOMIC_FAA: {
-                if (slot->addr + sizeof(uint64_t) <= num_cachelines * 64) {
-                    uint64_t* ptr = (uint64_t*)(entry->data + (addr % 64));
-                    uint64_t old = __atomic_fetch_add(ptr, slot->value, __ATOMIC_SEQ_CST);
-                    memcpy((void*)slot->data, &old, sizeof(old));
+            // PGAS server mode may be used with a minimal topology file whose
+            // switch objects are not fully materialized. Keep the authoritative
+            // operation counters independent from that optional topology walk.
+            controller->counter.inc_local();
 
-                    entry->metadata.access_count++;
-                    entry->metadata.cache_state = 3;  // MODIFIED
-                    entry->metadata.version++;
-
-                    slot->latency_ns = (uint64_t)base_latency;
-                    __atomic_thread_fence(__ATOMIC_RELEASE);
-                    slot->resp_status = CXL_SHM_RESP_OK;
-                    total_atomic_faa++;
-                    log_periodic_stats("PGAS_FAA", total_atomic_faa.load());
-                } else {
-                    slot->resp_status = CXL_SHM_RESP_ERROR;
-                }
-                processed++;
-                break;
-            }
-
-            case CXL_SHM_REQ_ATOMIC_CAS: {
-                if (slot->addr + sizeof(uint64_t) <= num_cachelines * 64) {
-                    uint64_t* ptr = (uint64_t*)(entry->data + (addr % 64));
-                    uint64_t expected = slot->expected;
-                    __atomic_compare_exchange_n(ptr, &expected, slot->value,
-                                                false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-                    memcpy((void*)slot->data, &expected, sizeof(expected));
-
-                    entry->metadata.access_count++;
-                    entry->metadata.version++;
-
-                    slot->latency_ns = (uint64_t)base_latency;
-                    __atomic_thread_fence(__ATOMIC_RELEASE);
-                    slot->resp_status = CXL_SHM_RESP_OK;
-                    total_atomic_cas++;
-                    log_periodic_stats("PGAS_CAS", total_atomic_cas.load());
-                } else {
-                    slot->resp_status = CXL_SHM_RESP_ERROR;
-                }
-                processed++;
-                break;
-            }
-
-            case CXL_SHM_REQ_FENCE: {
-                __atomic_thread_fence(__ATOMIC_SEQ_CST);
-                slot->latency_ns = 0;
-                __atomic_thread_fence(__ATOMIC_RELEASE);
-                slot->resp_status = CXL_SHM_RESP_OK;
-                total_fences++;
-                log_periodic_stats("PGAS_FENCE", total_fences.load());
-                processed++;
-                break;
-            }
-
-            default:
-                break;
+            log_periodic_stats("PGAS_READ", total_reads.load());
+            __atomic_thread_fence(__ATOMIC_RELEASE);
+            slot->resp_status = CXL_SHM_RESP_OK;
+            processed++;
+            break;
         }
 
+        case CXL_SHM_REQ_WRITE: {
+            // Copy data from slot to memory
+            size_t copy_size = std::min((size_t)slot->size, (size_t)64);
+            double fabric_latency_ns = 0.0;
+            if (!check_pgas_fabric_access(true, false, copy_size, fabric_latency_ns)) {
+                slot->resp_status = CXL_SHM_RESP_ERROR;
+                processed++;
+                break;
+            }
+
+            size_t offset = addr % 64;
+            memcpy(entry->data + offset, (void *)slot->data, copy_size);
+
+            // Update metadata
+            entry->metadata.access_count++;
+            entry->metadata.last_access_time = request_ts;
+            entry->metadata.cache_state = 3; // MODIFIED
+            entry->metadata.version++;
+
+            slot->latency_ns = (uint64_t)(base_latency + fabric_latency_ns);
+            total_writes++;
+
+            // PGAS server mode may be used with a minimal topology file whose
+            // switch objects are not fully materialized. Keep the authoritative
+            // operation counters independent from that optional topology walk.
+            controller->counter.inc_local();
+
+            log_periodic_stats("PGAS_WRITE", total_writes.load());
+            __atomic_thread_fence(__ATOMIC_RELEASE);
+            slot->resp_status = CXL_SHM_RESP_OK;
+            processed++;
+            break;
+        }
+
+        case CXL_SHM_REQ_ATOMIC_FAA: {
+            double fabric_latency_ns = 0.0;
+            if (!check_pgas_fabric_access(true, true, sizeof(uint64_t), fabric_latency_ns)) {
+                slot->resp_status = CXL_SHM_RESP_ERROR;
+                processed++;
+                break;
+            }
+            if (slot->addr + sizeof(uint64_t) <= num_cachelines * 64) {
+                uint64_t *ptr = (uint64_t *)(entry->data + (addr % 64));
+                uint64_t old = __atomic_fetch_add(ptr, slot->value, __ATOMIC_SEQ_CST);
+                memcpy((void *)slot->data, &old, sizeof(old));
+
+                entry->metadata.access_count++;
+                entry->metadata.cache_state = 3; // MODIFIED
+                entry->metadata.version++;
+
+                slot->latency_ns = (uint64_t)(base_latency + fabric_latency_ns);
+                __atomic_thread_fence(__ATOMIC_RELEASE);
+                slot->resp_status = CXL_SHM_RESP_OK;
+                total_atomic_faa++;
+                log_periodic_stats("PGAS_FAA", total_atomic_faa.load());
+            } else {
+                slot->resp_status = CXL_SHM_RESP_ERROR;
+            }
+            processed++;
+            break;
+        }
+
+        case CXL_SHM_REQ_ATOMIC_CAS: {
+            double fabric_latency_ns = 0.0;
+            if (!check_pgas_fabric_access(true, true, sizeof(uint64_t), fabric_latency_ns)) {
+                slot->resp_status = CXL_SHM_RESP_ERROR;
+                processed++;
+                break;
+            }
+            if (slot->addr + sizeof(uint64_t) <= num_cachelines * 64) {
+                uint64_t *ptr = (uint64_t *)(entry->data + (addr % 64));
+                uint64_t expected = slot->expected;
+                __atomic_compare_exchange_n(ptr, &expected, slot->value, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+                memcpy((void *)slot->data, &expected, sizeof(expected));
+
+                entry->metadata.access_count++;
+                entry->metadata.version++;
+
+                slot->latency_ns = (uint64_t)(base_latency + fabric_latency_ns);
+                __atomic_thread_fence(__ATOMIC_RELEASE);
+                slot->resp_status = CXL_SHM_RESP_OK;
+                total_atomic_cas++;
+                log_periodic_stats("PGAS_CAS", total_atomic_cas.load());
+            } else {
+                slot->resp_status = CXL_SHM_RESP_ERROR;
+            }
+            processed++;
+            break;
+        }
+
+        case CXL_SHM_REQ_FENCE: {
+            __atomic_thread_fence(__ATOMIC_SEQ_CST);
+            slot->latency_ns = 0;
+            __atomic_thread_fence(__ATOMIC_RELEASE);
+            slot->resp_status = CXL_SHM_RESP_OK;
+            total_fences++;
+            log_periodic_stats("PGAS_FENCE", total_fences.load());
+            processed++;
+            break;
+        }
+
+        case CXL_SHM_REQ_DCD_ADD: {
+            auto result = controller->dcd_add_capacity(slot->addr, slot->size, slot->value, request_ts);
+            slot->value = result.base;
+            write_slot_u64(slot, 0, result.size);
+            write_slot_u64(slot, 8, result.tag);
+            slot->latency_ns = static_cast<uint64_t>(base_latency);
+            if (result.status == DCDStatus::OK && controller->gfam_enabled()) {
+                controller->gfam_grant_access(i, result.base, result.size, DCD_PERM_ALL);
+            }
+            __atomic_thread_fence(__ATOMIC_RELEASE);
+            slot->resp_status = result.status == DCDStatus::OK ? CXL_SHM_RESP_OK : CXL_SHM_RESP_ERROR;
+            processed++;
+            break;
+        }
+
+        case CXL_SHM_REQ_DCD_RELEASE: {
+            auto status = controller->dcd_release_capacity(slot->addr, slot->size, slot->value, request_ts);
+            slot->latency_ns = static_cast<uint64_t>(base_latency);
+            __atomic_thread_fence(__ATOMIC_RELEASE);
+            slot->resp_status = status == DCDStatus::OK ? CXL_SHM_RESP_OK : CXL_SHM_RESP_ERROR;
+            processed++;
+            break;
+        }
+
+        case CXL_SHM_REQ_DCD_QUERY: {
+            auto stats = controller->get_dcd_stats();
+            slot->value = stats.allocated_capacity;
+            write_slot_u64(slot, 0, stats.total_capacity);
+            write_slot_u64(slot, 8, stats.free_capacity);
+            write_slot_u64(slot, 16, stats.active_extents);
+            write_slot_u64(slot, 24, stats.failed_requests);
+            slot->latency_ns = static_cast<uint64_t>(base_latency);
+            __atomic_thread_fence(__ATOMIC_RELEASE);
+            slot->resp_status = CXL_SHM_RESP_OK;
+            processed++;
+            break;
+        }
+
+        case CXL_SHM_REQ_GFAM_MAP: {
+            uint32_t host_id = static_cast<uint32_t>(slot->value);
+            uint32_t permissions = slot->expected == 0 ? DCD_PERM_ALL : static_cast<uint32_t>(slot->expected);
+            auto status = controller->gfam_grant_access(host_id, slot->addr, slot->size, permissions);
+            slot->latency_ns = static_cast<uint64_t>(base_latency);
+            __atomic_thread_fence(__ATOMIC_RELEASE);
+            slot->resp_status = status == DCDStatus::OK ? CXL_SHM_RESP_OK : CXL_SHM_RESP_ERROR;
+            processed++;
+            break;
+        }
+
+        case CXL_SHM_REQ_GFAM_UNMAP: {
+            uint32_t host_id = static_cast<uint32_t>(slot->value);
+            auto status = controller->gfam_revoke_access(host_id, slot->addr, slot->size);
+            slot->latency_ns = static_cast<uint64_t>(base_latency);
+            __atomic_thread_fence(__ATOMIC_RELEASE);
+            slot->resp_status = status == DCDStatus::OK ? CXL_SHM_RESP_OK : CXL_SHM_RESP_ERROR;
+            processed++;
+            break;
+        }
+
+        case CXL_SHM_REQ_GFAM_QUERY: {
+            auto stats = controller->get_gfam_stats();
+            slot->value = stats.hosts;
+            write_slot_u64(slot, 0, stats.mappings);
+            write_slot_u64(slot, 8, stats.shared_mappings);
+            write_slot_u64(slot, 16, stats.read_ops);
+            write_slot_u64(slot, 24, stats.write_ops);
+            write_slot_u64(slot, 32, stats.atomic_ops);
+            write_slot_u64(slot, 40, stats.denied_accesses);
+            write_slot_u64(slot, 48, static_cast<uint64_t>(stats.avg_access_latency_ns));
+            slot->latency_ns = static_cast<uint64_t>(base_latency);
+            __atomic_thread_fence(__ATOMIC_RELEASE);
+            slot->resp_status = CXL_SHM_RESP_OK;
+            processed++;
+            break;
+        }
+
+        default:
+            break;
+        }
     }
 
     return processed;
