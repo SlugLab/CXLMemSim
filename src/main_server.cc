@@ -1283,11 +1283,11 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     }
 
     // Log CXL Type3 operation with detailed information
-    const char *op_name = (req.op_type == OP_READ) ? "CXL_TYPE3_READ" : "CXL_TYPE3_WRITE";
+    [[maybe_unused]] const char *op_name = (req.op_type == OP_READ) ? "CXL_TYPE3_READ" : "CXL_TYPE3_WRITE";
 
     // Log incoming request details
-    // SPDLOG_INFO("Thread {}: {} request - addr=0x{:x}, size={}, cacheline=0x{:x}",
-    //             thread_id, op_name, req.addr, req.size, cacheline_addr);
+    SPDLOG_TRACE("Thread {}: {} request - addr=0x{:x}, size={}, cacheline=0x{:x}", thread_id, op_name, req.addr,
+                 req.size, cacheline_addr);
 
     if (req.op_type == OP_WRITE) {
         // Log first 16 bytes of write data
@@ -1500,10 +1500,11 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     total_latency_ns += total_latency;
 
     // Enhanced logging for CXL Type3 operations
-    const char *op_result = (req.op_type == OP_READ) ? "CXL_TYPE3_READ_COMPLETE" : "CXL_TYPE3_WRITE_COMPLETE";
-    // SPDLOG_INFO("Thread {}: {} addr=0x{:x} size={} latency={}ns (base={}ns congestion={:.2f}x coherency_miss={})",
-    //             thread_id, op_result, req.addr, req.size,
-    // total_latency, static_cast<uint64_t>(base_latency), congestion_factor, had_coherency_miss);
+    [[maybe_unused]] const char *op_result =
+        (req.op_type == OP_READ) ? "CXL_TYPE3_READ_COMPLETE" : "CXL_TYPE3_WRITE_COMPLETE";
+    SPDLOG_TRACE("Thread {}: {} addr=0x{:x} size={} latency={}ns (base={}ns congestion={:.2f}x coherency_miss={})",
+                 thread_id, op_result, req.addr, req.size, total_latency, static_cast<uint64_t>(base_latency),
+                 congestion_factor, had_coherency_miss);
 
     // Log cache state changes
     // if (had_coherency_miss) {

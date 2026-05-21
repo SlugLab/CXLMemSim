@@ -14,10 +14,46 @@
 #include "cxlcontroller.h"
 #include "helper.h"
 #include "pebs.h"
+#if defined(__linux__)
+#include <sched.h>
+#else
+#include <array>
+#endif
 #include <atomic>
 #include <mutex>
-#include <sched.h>
+#include <string>
 #include <vector>
+
+#if !defined(__linux__)
+struct cpu_set_t {
+    std::array<unsigned long, 16> words{};
+};
+
+inline void CPU_ZERO(cpu_set_t *set) { set->words.fill(0); }
+
+inline void CPU_SET(int cpu, cpu_set_t *set) {
+    constexpr int kBitsPerWord = static_cast<int>(sizeof(unsigned long) * 8);
+    if (cpu >= 0 && static_cast<size_t>(cpu / kBitsPerWord) < set->words.size()) {
+        set->words[cpu / kBitsPerWord] |= 1UL << (cpu % kBitsPerWord);
+    }
+}
+
+inline int CPU_ISSET(int cpu, const cpu_set_t *set) {
+    constexpr int kBitsPerWord = static_cast<int>(sizeof(unsigned long) * 8);
+    if (cpu < 0 || static_cast<size_t>(cpu / kBitsPerWord) >= set->words.size()) {
+        return 0;
+    }
+    return (set->words[cpu / kBitsPerWord] & (1UL << (cpu % kBitsPerWord))) != 0;
+}
+
+inline int CPU_COUNT(const cpu_set_t *set) {
+    int count = 0;
+    for (unsigned long word : set->words) {
+        count += __builtin_popcountl(word);
+    }
+    return count;
+}
+#endif
 
 enum MONITOR_STATUS {
     MONITOR_OFF = 0,
@@ -67,6 +103,10 @@ public:
     bool is_process;
     PEBS *pebs_ctx{};
     LBR *lbr_ctx{};
+#if defined(__APPLE__) && !CXLMEMSIM_HAS_LINUX_PERF
+    pid_t xctrace_pid{};
+    std::string xctrace_output_path;
+#endif
 
     Monitor(const Monitor &other)
         : tgid(other.tgid), tid(other.tid), cpu_core(other.cpu_core), wanted_delay(other.wanted_delay),
@@ -75,6 +115,10 @@ public:
           total_delay(other.total_delay), start_exec_ts(other.start_exec_ts), end_exec_ts(other.end_exec_ts),
           is_process(other.is_process), pebs_ctx(nullptr), lbr_ctx(nullptr) {
         status.store(other.status.load());
+#if defined(__APPLE__) && !CXLMEMSIM_HAS_LINUX_PERF
+        xctrace_pid = other.xctrace_pid;
+        xctrace_output_path = other.xctrace_output_path;
+#endif
         std::copy(std::begin(other.elem), std::end(other.elem), std::begin(elem));
         before = &elem[0];
         after = &elem[1];
@@ -91,9 +135,8 @@ public:
 template <> struct std::formatter<Monitors> {
     // Parse function to handle any format specifiers (if needed)
     constexpr auto parse(std::format_parse_context &ctx) -> decltype(ctx.begin()) {
-        // If you have specific format specifiers, parse them here
-        // For simplicity, we'll ignore them and return the end iterator
-        return ctx.end();
+        // If you have specific format specifiers, parse them here.
+        return ctx.begin();
     }
 
     // Format function to output the Monitors data
@@ -102,7 +145,6 @@ template <> struct std::formatter<Monitors> {
 
         if (p.print_flag) {
             for (size_t mon_id = 0; mon_id < p.mon.size(); ++mon_id) {
-                const auto &mon = p.mon[mon_id];
                 for (size_t core_idx = 0; core_idx < helper.used_cha.size(); ++core_idx) {
                     for (size_t cha_idx = 0; cha_idx < helper.perf_conf.cha.size(); ++cha_idx) {
                         result += std::format("mon{}_{}_{}_{},", mon_id, std::get<0>(helper.perf_conf.cha[cha_idx]),

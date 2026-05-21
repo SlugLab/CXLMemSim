@@ -316,7 +316,7 @@ public:
 
 // C++20 std::formatter for CXLController
 template <> struct std::formatter<CXLController> {
-    constexpr auto parse(std::format_parse_context &ctx) -> decltype(ctx.begin()) { return ctx.end(); }
+    constexpr auto parse(std::format_parse_context &ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
 
     template <typename FormatContext>
     auto format(const CXLController &controller, FormatContext &ctx) const -> decltype(ctx.out()) {

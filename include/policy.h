@@ -406,10 +406,10 @@ public:
     explicit FrequencyBasedInvalidationPolicy(uint64_t threshold = 100, uint64_t interval = 10000000)
         : access_threshold(threshold), last_cleanup(0), cleanup_interval(interval) {}
 
-    bool should_cache(uint64_t addr, uint64_t timestamp);
-    bool should_invalidate(uint64_t addr, uint64_t timestamp);
+    bool should_cache(uint64_t addr, uint64_t timestamp) override;
+    bool should_invalidate(uint64_t addr, uint64_t timestamp) override;
 
-    std::vector<uint64_t> get_invalidation_list(CXLController *controller);
+    std::vector<uint64_t> get_invalidation_list(CXLController *controller) override;
 
     int compute_once(CXLController *controller) override;
 };
@@ -517,8 +517,6 @@ public:
             return 0;
         }
 
-        uint64_t controller_load = controller->counter.local + controller->counter.remote;
-
         struct DeviceLoad {
             CXLMemExpander *expander;
             uint64_t load;
@@ -557,8 +555,6 @@ public:
         auto min_it = std::min_element(expander_loads.begin(), expander_loads.end(),
                                        [](const DeviceLoad &a, const DeviceLoad &b) { return a.load < b.load; });
 
-        CXLMemExpander *highest_load_expander = max_it->expander;
-        CXLMemExpander *lowest_load_expander = min_it->expander;
         uint64_t highest_load = max_it->load;
         uint64_t lowest_load = min_it->load;
 
@@ -627,12 +623,7 @@ public:
         auto max_it = std::max_element(expander_loads.begin(), expander_loads.end(),
                                        [](const DeviceLoad &a, const DeviceLoad &b) { return a.load < b.load; });
 
-        auto min_it = std::min_element(expander_loads.begin(), expander_loads.end(),
-                                       [](const DeviceLoad &a, const DeviceLoad &b) { return a.load < b.load; });
-
         CXLMemExpander *highest_load_expander = max_it->expander;
-        CXLMemExpander *lowest_load_expander = min_it->expander;
-
         int migration_count = 0;
         for (const auto &info : highest_load_expander->occupation) {
             to_migrate.emplace_back(info.address, per_size);

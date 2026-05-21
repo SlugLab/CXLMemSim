@@ -126,6 +126,25 @@ public:
 #if CXLMEMSIM_HAS_LINUX_PERF
     std::vector<Uncore> chas;
     std::vector<Incore> cpus;
+#else
+    struct NoopCHA {
+        int read_cha_elems(CHAElem *elem) {
+            if (elem) {
+                elem->cha.fill(0);
+            }
+            return 0;
+        }
+    };
+    struct NoopCPU {
+        ssize_t read_cpu_elems(CPUElem *elem) {
+            if (elem) {
+                elem->cpu.fill(0);
+            }
+            return 0;
+        }
+    };
+    std::vector<NoopCHA> chas;
+    std::vector<NoopCPU> cpus;
 #endif
     Helper *helper;
     PMUInfo(pid_t pid, Helper *h, PerfConfig *perf_config);
@@ -154,6 +173,8 @@ public:
     PerfConfig detect_model(uint32_t model, const std::vector<std::string> &perf_name,
                             const std::vector<uint64_t> &perf_conf1, const std::vector<uint64_t> &perf_conf2);
 };
+
+bool get_cpu_info(struct CPUInfo *);
 
 #if CXLMEMSIM_HAS_LINUX_PERF
 long perf_event_open(perf_event_attr *event_attr, pid_t pid, int cpu, int group_fd, unsigned long flags);

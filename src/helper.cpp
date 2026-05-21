@@ -10,6 +10,7 @@
  */
 
 #include "helper.h"
+#include <cstring>
 #include <fstream>
 #if CXLMEMSIM_HAS_LINUX_PERF
 #include <monitor.h>
@@ -18,6 +19,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#if defined(__APPLE__) && !CXLMEMSIM_HAS_LINUX_PERF
+#include <sys/sysctl.h>
+#endif
 
 ModelContext model_ctx[] = {{CPU_MDL_BDX,
                              {
@@ -61,6 +65,44 @@ ModelContext model_ctx[] = {{CPU_MDL_BDX,
 #if CXLMEMSIM_HAS_LINUX_PERF
 long perf_event_open(struct perf_event_attr *event_attr, pid_t pid, int cpu, int group_fd, unsigned long flags) {
     return syscall(__NR_perf_event_open, event_attr, pid, cpu, group_fd, flags);
+}
+#else
+bool get_cpu_info(struct CPUInfo *cpu_info) {
+    if (cpu_info == nullptr) {
+        return false;
+    }
+
+    *cpu_info = {};
+#if defined(__APPLE__)
+    char vendor[sizeof(cpu_info->vendor_id)] = {};
+    size_t vendor_len = sizeof(vendor);
+    if (sysctlbyname("machdep.cpu.vendor", vendor, &vendor_len, nullptr, 0) == 0 && vendor[0] != '\0') {
+        std::strncpy(cpu_info->vendor_id, vendor, sizeof(cpu_info->vendor_id) - 1);
+    } else {
+        std::strncpy(cpu_info->vendor_id, "Unknown", sizeof(cpu_info->vendor_id) - 1);
+    }
+
+    uint32_t value = 0;
+    size_t value_len = sizeof(value);
+    if (sysctlbyname("machdep.cpu.family", &value, &value_len, nullptr, 0) == 0) {
+        cpu_info->cpu_family = value;
+    }
+    value = 0;
+    value_len = sizeof(value);
+    if (sysctlbyname("machdep.cpu.model", &value, &value_len, nullptr, 0) == 0) {
+        cpu_info->cpu_model = value;
+    }
+    value = 0;
+    value_len = sizeof(value);
+    if (sysctlbyname("machdep.cpu.stepping", &value, &value_len, nullptr, 0) == 0) {
+        cpu_info->cpu_stepping = value;
+    }
+
+    return true;
+#else
+    std::strncpy(cpu_info->vendor_id, "Unknown", sizeof(cpu_info->vendor_id) - 1);
+    return true;
+#endif
 }
 #endif
 

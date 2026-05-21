@@ -10,16 +10,32 @@
  */
 
 #include "monitor.h"
+#include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <csignal>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <dirent.h>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
+#include <sstream>
+#if CXLMEMSIM_HAS_LINUX_PERF
+#include <sys/syscall.h>
+#endif
+#include <sys/wait.h>
+#include <thread>
+#include <unistd.h>
 #include <vector>
 timespec Monitor::last_delay = {0, 0};
 
+#if CXLMEMSIM_HAS_LINUX_PERF
 std::vector<pid_t> get_thread_ids(pid_t pid) {
     std::vector<pid_t> thread_ids;
 
@@ -63,6 +79,286 @@ bool set_thread_affinity(pid_t tid, int cpu_id) {
 
     return true;
 }
+#endif
+
+#if !CXLMEMSIM_HAS_LINUX_PERF
+namespace {
+
+#if defined(__APPLE__)
+struct XctraceSummary {
+    uint64_t sample_count{};
+    uint64_t miss_sample_count{};
+    uint64_t backtrace_sample_count{};
+};
+
+std::filesystem::path make_xctrace_output_path(pid_t pid) {
+    const char *dir_env = std::getenv("CXLMEMSIM_XCTRACE_DIR");
+    std::filesystem::path output_dir = dir_env && dir_env[0] != '\0' ? dir_env : "xctrace";
+    std::filesystem::create_directories(output_dir);
+
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    const auto stamp = std::chrono::duration_cast<std::chrono::seconds>(now).count();
+    return output_dir / std::format("cxlmemsim_legacy_{}_{}.trace", pid, stamp);
+}
+
+std::string xctrace_template_name() {
+    const char *template_env = std::getenv("CXLMEMSIM_XCTRACE_TEMPLATE");
+    return template_env && template_env[0] != '\0' ? template_env : "CPU Counters";
+}
+
+std::chrono::milliseconds xctrace_startup_delay() {
+    const char *startup_env = std::getenv("CXLMEMSIM_XCTRACE_STARTUP_MS");
+    if (startup_env && startup_env[0] != '\0') {
+        return std::chrono::milliseconds(std::max(0, std::atoi(startup_env)));
+    }
+    return std::chrono::milliseconds(1500);
+}
+
+std::chrono::milliseconds xctrace_stop_grace() {
+    const char *stop_env = std::getenv("CXLMEMSIM_XCTRACE_STOP_MS");
+    if (stop_env && stop_env[0] != '\0') {
+        return std::chrono::milliseconds(std::max(0, std::atoi(stop_env)));
+    }
+    return std::chrono::milliseconds(5000);
+}
+
+std::optional<std::filesystem::path> find_xctrace() {
+    const char *xctrace_env = std::getenv("CXLMEMSIM_XCTRACE");
+    if (xctrace_env && xctrace_env[0] != '\0' && access(xctrace_env, X_OK) == 0) {
+        return std::filesystem::path{xctrace_env};
+    }
+
+    for (const auto &candidate : {"/Applications/Xcode.app/Contents/Developer/usr/bin/xctrace", "/usr/bin/xctrace"}) {
+        if (access(candidate, X_OK) == 0) {
+            return std::filesystem::path{candidate};
+        }
+    }
+
+    return std::nullopt;
+}
+
+pid_t start_xctrace_recording(pid_t target_pid, std::string *output_path) {
+    const char *disable_env = std::getenv("CXLMEMSIM_XCTRACE_DISABLE");
+    if (disable_env && std::strcmp(disable_env, "1") == 0) {
+        return -1;
+    }
+
+    auto xctrace_path = find_xctrace();
+    if (!xctrace_path) {
+        std::cerr << "xctrace is unavailable; install Xcode or set CXLMEMSIM_XCTRACE to an xctrace path.\n";
+        return -1;
+    }
+
+    const auto output = make_xctrace_output_path(target_pid);
+    const auto output_string = output.string();
+    const auto target_pid_string = std::to_string(target_pid);
+    const auto template_name = xctrace_template_name();
+
+    pid_t recorder_pid = fork();
+    if (recorder_pid < 0) {
+        std::cerr << "Failed to fork xctrace recorder: " << std::strerror(errno) << "\n";
+        return -1;
+    }
+
+    if (recorder_pid == 0) {
+        execl(xctrace_path->c_str(), "xctrace", "record", "--quiet", "--template", template_name.c_str(), "--attach",
+              target_pid_string.c_str(), "--output", output_string.c_str(), "--no-prompt", nullptr);
+        std::_Exit(127);
+    }
+
+    if (output_path) {
+        *output_path = output_string;
+    }
+    std::cout << "xctrace recording: " << output_string << " (template: " << template_name << ")\n";
+    return recorder_pid;
+}
+
+void stop_xctrace_recording(pid_t recorder_pid) {
+    if (recorder_pid <= 0 || kill(recorder_pid, 0) != 0) {
+        return;
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() + xctrace_stop_grace();
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (kill(recorder_pid, 0) != 0) {
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    kill(recorder_pid, SIGINT);
+}
+
+std::filesystem::path make_xctrace_export_path(const std::filesystem::path &trace_path, std::string_view schema) {
+    auto export_path = trace_path;
+    export_path += ".";
+    export_path += schema;
+    export_path += ".xml";
+    return export_path;
+}
+
+bool wait_for_child(pid_t child_pid) {
+    int status = 0;
+    while (waitpid(child_pid, &status, 0) < 0) {
+        if (errno == EINTR) {
+            continue;
+        }
+        return false;
+    }
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+bool export_xctrace_table(const std::string &trace_path, std::string_view schema, std::filesystem::path *output_path) {
+    auto xctrace_path = find_xctrace();
+    if (!xctrace_path || trace_path.empty()) {
+        return false;
+    }
+
+    const auto output = make_xctrace_export_path(trace_path, schema);
+    const std::string xpath = std::format("/trace-toc/run[@number=\"1\"]/data/table[@schema=\"{}\"]", schema);
+    const auto output_string = output.string();
+
+    pid_t export_pid = fork();
+    if (export_pid < 0) {
+        return false;
+    }
+
+    if (export_pid == 0) {
+        auto *dev_null = std::freopen("/dev/null", "w", stdout);
+        (void)dev_null;
+        dev_null = std::freopen("/dev/null", "w", stderr);
+        (void)dev_null;
+        execl(xctrace_path->c_str(), "xctrace", "export", "--input", trace_path.c_str(), "--xpath", xpath.c_str(),
+              "--output", output_string.c_str(), nullptr);
+        std::_Exit(127);
+    }
+
+    if (!wait_for_child(export_pid) || !std::filesystem::exists(output)) {
+        return false;
+    }
+
+    if (output_path) {
+        *output_path = output;
+    }
+    return true;
+}
+
+std::string read_text_file(const std::filesystem::path &path) {
+    std::ifstream input(path);
+    if (!input) {
+        return {};
+    }
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    return buffer.str();
+}
+
+std::string lower_copy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return value;
+}
+
+XctraceSummary parse_counting_mode_samples(const std::string &xml) {
+    XctraceSummary summary{};
+    size_t pos = 0;
+    while ((pos = xml.find("<row", pos)) != std::string::npos) {
+        const size_t row_end = xml.find("</row>", pos);
+        if (row_end == std::string::npos) {
+            break;
+        }
+
+        const std::string row = xml.substr(pos, row_end - pos);
+        const std::string lower_row = lower_copy(row);
+        summary.sample_count++;
+        if (lower_row.find("<tagged-backtrace") != std::string::npos) {
+            summary.backtrace_sample_count++;
+        }
+        if (lower_row.find("miss") != std::string::npos || lower_row.find("cache") != std::string::npos ||
+            lower_row.find("l1d") != std::string::npos) {
+            summary.miss_sample_count++;
+        }
+
+        pos = row_end + std::string_view("</row>").size();
+    }
+    return summary;
+}
+
+uint64_t parse_metric_table_cycle_rows(const std::string &xml) {
+    uint64_t cycle_rows = 0;
+    size_t pos = 0;
+    while ((pos = xml.find("<row", pos)) != std::string::npos) {
+        const size_t row_end = xml.find("</row>", pos);
+        if (row_end == std::string::npos) {
+            break;
+        }
+
+        const std::string row = lower_copy(xml.substr(pos, row_end - pos));
+        if (row.find("fmt=\"cycle\"") != std::string::npos || row.find(">cycle</string>") != std::string::npos) {
+            cycle_rows++;
+        }
+        pos = row_end + std::string_view("</row>").size();
+    }
+    return cycle_rows;
+}
+
+XctraceSummary summarize_xctrace(const std::string &trace_path) {
+    XctraceSummary summary{};
+
+    std::filesystem::path samples_xml_path;
+    if (export_xctrace_table(trace_path, "CountingModeSamples", &samples_xml_path)) {
+        summary = parse_counting_mode_samples(read_text_file(samples_xml_path));
+        if (!std::getenv("CXLMEMSIM_XCTRACE_KEEP_XML")) {
+            std::filesystem::remove(samples_xml_path);
+        }
+    }
+
+    if (summary.sample_count == 0) {
+        std::filesystem::path metrics_xml_path;
+        if (export_xctrace_table(trace_path, "MetricTable", &metrics_xml_path)) {
+            summary.sample_count = parse_metric_table_cycle_rows(read_text_file(metrics_xml_path));
+            summary.backtrace_sample_count = summary.sample_count;
+            if (!std::getenv("CXLMEMSIM_XCTRACE_KEEP_XML")) {
+                std::filesystem::remove(metrics_xml_path);
+            }
+        }
+    }
+
+    return summary;
+}
+
+void apply_xctrace_summary(Monitor &mon) {
+    if (mon.xctrace_output_path.empty()) {
+        return;
+    }
+
+    const XctraceSummary summary = summarize_xctrace(mon.xctrace_output_path);
+    if (summary.sample_count == 0 && summary.backtrace_sample_count == 0 && summary.miss_sample_count == 0) {
+        SPDLOG_WARN("xctrace export did not produce macOS counter samples for {}", mon.xctrace_output_path);
+        return;
+    }
+
+    mon.before->pebs.total = summary.sample_count;
+    mon.after->pebs.total = summary.sample_count;
+    mon.before->pebs.llcmiss = summary.miss_sample_count;
+    mon.after->pebs.llcmiss = summary.miss_sample_count;
+    mon.before->lbr.total = summary.backtrace_sample_count;
+    mon.after->lbr.total = summary.backtrace_sample_count;
+}
+#endif
+
+bool process_is_running(pid_t pid) {
+    if (pid <= 0) {
+        return false;
+    }
+    if (kill(pid, 0) == 0) {
+        return true;
+    }
+    return errno != ESRCH;
+}
+
+} // namespace
+#endif
 
 Monitors::Monitors(int cpu_count, cpu_set_t *use_cpuset) : print_flag(true) {
     mon = std::vector<Monitor>(cpu_count);
@@ -135,6 +431,7 @@ int Monitors::enable(uint32_t tgid, uint32_t tid, bool is_process, uint64_t pebs
     }
 
     /* set CPU affinity to not used core. */
+#if CXLMEMSIM_HAS_LINUX_PERF
     int s;
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
@@ -162,6 +459,9 @@ int Monitors::enable(uint32_t tgid, uint32_t tid, bool is_process, uint64_t pebs
                 std::cout << "Failed to setaffinity" << std::endl;
             }
         }
+#else
+    (void)pebs_sample_period;
+#endif
 
     /* init */
     disable(target);
@@ -171,6 +471,7 @@ int Monitors::enable(uint32_t tgid, uint32_t tid, bool is_process, uint64_t pebs
     mon[target].is_process = is_process;
 
     if (pebs_sample_period) {
+#if CXLMEMSIM_HAS_LINUX_PERF
         /* pebs start */
         std::unique_ptr<PEBS> pebs_ctx;
         std::unique_ptr<LBR> lbr_ctx;
@@ -193,6 +494,17 @@ int Monitors::enable(uint32_t tgid, uint32_t tid, bool is_process, uint64_t pebs
         mon[target].pebs_ctx = pebs_ctx.release();
         mon[target].lbr_ctx = lbr_ctx.release();
         new std::jthread(mon[target].wait, &mon, target);
+#else
+#if defined(__APPLE__)
+        mon[target].stop();
+        mon[target].xctrace_pid = start_xctrace_recording(tgid, &mon[target].xctrace_output_path);
+        if (mon[target].xctrace_pid > 0) {
+            std::this_thread::sleep_for(xctrace_startup_delay());
+        }
+#else
+        SPDLOG_WARN("PEBS/LBR sampling is unavailable on this platform; legacy will run with zero PMU samples.");
+#endif
+#endif
     }
     SPDLOG_INFO("pid {}[tgid={}, tid={}] monitoring start", target, mon[target].tgid, mon[target].tid);
 
@@ -211,13 +523,22 @@ void Monitors::disable(const uint32_t target) {
     mon[target].end_exec_ts.tv_sec = 0;
     mon[target].end_exec_ts.tv_nsec = 0;
     if (mon[target].pebs_ctx != nullptr) {
+#if CXLMEMSIM_HAS_LINUX_PERF
         delete mon[target].pebs_ctx;
+#endif
         mon[target].pebs_ctx = nullptr;
     }
     if (mon[target].lbr_ctx != nullptr) {
+#if CXLMEMSIM_HAS_LINUX_PERF
         delete mon[target].lbr_ctx;
+#endif
         mon[target].lbr_ctx = nullptr;
     }
+#if defined(__APPLE__) && !CXLMEMSIM_HAS_LINUX_PERF
+    stop_xctrace_recording(mon[target].xctrace_pid);
+    mon[target].xctrace_pid = -1;
+    mon[target].xctrace_output_path.clear();
+#endif
     for (auto &j : mon[target].elem) {
         j.pebs.total = 0;
         j.pebs.llcmiss = 0;
@@ -234,8 +555,19 @@ bool Monitors::check_all_terminated(const uint32_t processes) {
         auto st = mon[i].status.load();
 
         if (st == MONITOR_ON || st == MONITOR_OFF) {
-            // We still have an active or paused monitor => not all terminated
-            allTerminated = false;
+#if !CXLMEMSIM_HAS_LINUX_PERF
+            if (!process_is_running(mon[i].tid)) {
+                mon[i].status = MONITOR_TERMINATED;
+                if (this->terminate(mon[i].tgid, mon[i].tid, processes) < 0) {
+                    SPDLOG_ERROR("Failed to terminate monitor");
+                    exit(1);
+                }
+            } else
+#endif
+            {
+                // We still have an active or paused monitor => not all terminated
+                allTerminated = false;
+            }
         } else if (st != MONITOR_DISABLE) {
             // Possibly MONITOR_TERMINATED or other final states
             // Attempt to finalize if needed
@@ -259,16 +591,24 @@ int Monitors::terminate(const uint32_t tgid, const uint32_t tid, const int32_t t
             continue;
         }
         target = i;
-        /* pebs stop */
-        delete mon[target].pebs_ctx;
-        delete mon[target].lbr_ctx;
-        mon[target].pebs_ctx = nullptr;
-        mon[target].lbr_ctx = nullptr;
-
-        /* Save end time */
+        /* Save end time before trace serialization work. */
         if (mon[target].end_exec_ts.tv_sec == 0 && mon[target].end_exec_ts.tv_nsec == 0) {
             clock_gettime(CLOCK_MONOTONIC, &mon[i].end_exec_ts);
         }
+
+        /* pebs stop */
+#if CXLMEMSIM_HAS_LINUX_PERF
+        delete mon[target].pebs_ctx;
+        delete mon[target].lbr_ctx;
+#endif
+        mon[target].pebs_ctx = nullptr;
+        mon[target].lbr_ctx = nullptr;
+#if defined(__APPLE__) && !CXLMEMSIM_HAS_LINUX_PERF
+        stop_xctrace_recording(mon[target].xctrace_pid);
+        mon[target].xctrace_pid = -1;
+        apply_xctrace_summary(mon[target]);
+#endif
+
         /* display results */
         std::cout << std::format("========== Process {}[tgid={}, tid={}] statistics summary ==========\n", target,
                                  mon[target].tgid, mon[target].tid);
@@ -281,6 +621,11 @@ int Monitors::terminate(const uint32_t tgid, const uint32_t tid, const int32_t t
                                  mon[target].after->pebs.llcmiss)
                   << std::endl;
         std::cout << std::format("LBR sample total {}", mon[target].before->lbr.total) << std::endl;
+#if defined(__APPLE__) && !CXLMEMSIM_HAS_LINUX_PERF
+        if (!mon[target].xctrace_output_path.empty()) {
+            std::cout << std::format("xctrace output {}", mon[target].xctrace_output_path) << std::endl;
+        }
+#endif
         std::cout << std::format("{}", *controller) << std::endl;
         break;
     }
@@ -296,10 +641,15 @@ void Monitor::stop() { // thread create and proecess create get the pmu
         SPDLOG_DEBUG("Send SIGSTOP to pid={}", this->tid);
         ret = kill(this->tid, SIGSTOP);
     } else {
+#if CXLMEMSIM_HAS_LINUX_PERF
         // Use SIGUSR1 instead of SIGSTOP.
         // When the target thread receives SIGUSR1, it must stop until it receives SIGCONT.
         SPDLOG_DEBUG("Send SIGUSR1 to tid={}(tgid={})", this->tid, this->tgid);
         ret = syscall(SYS_tgkill, this->tgid, this->tid, SIGUSR1);
+#else
+        SPDLOG_DEBUG("Send SIGSTOP to pid={}", this->tid);
+        ret = kill(this->tid, SIGSTOP);
+#endif
     }
 
     if (ret == -1) {
@@ -322,7 +672,12 @@ void Monitor::run() {
     // SPDLOG_INFO("Send SIGCONT to tid={}(tgid={})", this->tid, this->tgid);
     // usleep(10);
 
-    if (syscall(SYS_tgkill, this->tgid, this->tid, SIGCONT) == -1) {
+#if CXLMEMSIM_HAS_LINUX_PERF
+    const int ret = syscall(SYS_tgkill, this->tgid, this->tid, SIGCONT);
+#else
+    const int ret = kill(this->tid, SIGCONT);
+#endif
+    if (ret == -1) {
         if (errno == ESRCH) {
             // in this case process or process group does not exist.
             // It might be a zombie or has terminated execution.
@@ -349,6 +704,9 @@ void Monitor::clear_time(timespec *time) {
 Monitor::Monitor() // which one to hook
     : tgid(0), tid(0), cpu_core(0), status(0), injected_delay({0}), wasted_delay({0}), before(nullptr), after(nullptr),
       total_delay(0), start_exec_ts({0}), end_exec_ts({0}), is_process(false) {
+#if defined(__APPLE__) && !CXLMEMSIM_HAS_LINUX_PERF
+    xctrace_pid = -1;
+#endif
 
     for (auto &j : this->elem) {
         j.cpus = std::vector<CPUElem>(helper.used_cpu.size());
@@ -356,7 +714,7 @@ Monitor::Monitor() // which one to hook
     }
 }
 
-static bool check_continue(const timespec wasted_delay, const timespec injected_delay) {
+[[maybe_unused]] static bool check_continue(const timespec wasted_delay, const timespec injected_delay) {
     // This equation for original one. but it causes like 45ms-> 60ms
     // calculated delay : 45ms
     // actual elapsed time : 60ms (default epoch: 20ms)
@@ -398,6 +756,11 @@ timespec operator*(const timespec &lhs, const timespec &rhs) {
     return result;
 }
 void Monitor::wait(std::vector<Monitor> *mons, int target) {
+#if !CXLMEMSIM_HAS_LINUX_PERF
+    (void)mons;
+    (void)target;
+    return;
+#else
     auto &mon = (*mons)[target];
     uint64_t diff_nsec, target_nsec;
     timespec start_ts{}, end_ts{};
@@ -428,4 +791,5 @@ void Monitor::wait(std::vector<Monitor> *mons, int target) {
         clock_gettime(CLOCK_MONOTONIC, &end_ts);
     }
     // SPDLOG_INFO("{}:{}", prev_wanted_delay.tv_sec, prev_wanted_delay.tv_nsec);
+#endif
 }

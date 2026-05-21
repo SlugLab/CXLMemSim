@@ -49,6 +49,7 @@ set(SOURCE_FILES
     src/coherency_engine.cpp
     src/policy.cpp
     src/helper.cpp
+    src/monitor.cpp
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -56,7 +57,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         src/incore.cpp
         src/uncore.cpp
         src/perf.cpp
-        src/monitor.cpp
         src/rob.cpp
         src/lbr.cpp
         src/pebs.cpp
@@ -104,7 +104,8 @@ add_executable(cxlmemsim_server src/main_server.cc)
 target_include_directories(cxlmemsim_server PRIVATE include src ${spdlog_INCLUDE_DIR})
 target_link_libraries(cxlmemsim_server cxlmemsim_server_lib cxlmemsim spdlog::spdlog_header_only ${RT_LIB} ${ATOMIC_LIB})
 
-# Build legacy CXLMemSim
+# Build legacy CXLMemSim. Linux uses perf/ptrace monitoring; other platforms
+# build a no-PMU compatibility mode.
 add_executable(cxlmemsim_legacy src/main.cc)
 target_include_directories(cxlmemsim_legacy PRIVATE include src ${spdlog_INCLUDE_DIR})
 target_link_libraries(cxlmemsim_legacy cxlmemsim_server_lib cxlmemsim spdlog::spdlog_header_only ${RT_LIB} ${ATOMIC_LIB})

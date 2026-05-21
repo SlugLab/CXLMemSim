@@ -288,7 +288,7 @@ int main(int argc, char *argv[]) {
     auto mlc_bandwidth = opts.mlc_bandwidth;
     auto bandwidth_knee = opts.bandwidth_knee;
     auto bandwidth_window_ns = opts.bandwidth_window_ns;
-    auto frequency = opts.frequency;
+    [[maybe_unused]] auto frequency = opts.frequency;
     auto topology = opts.topology;
     auto capacity = opts.capacity;
     auto dramlatency = opts.dramlatency;
@@ -380,7 +380,7 @@ int main(int argc, char *argv[]) {
     auto tnum = CPU_COUNT(&use_cpuset);
     auto cur_processes = 0;
     auto ncpu = helper.num_of_cpu();
-    auto ncha = helper.num_of_cha();
+    [[maybe_unused]] auto ncha = helper.num_of_cha();
     SPDLOG_DEBUG("tnum:{}", tnum);
     for (size_t idx = 0; idx < weight.size(); idx++) {
         SPDLOG_DEBUG("weight[{}]:{}", weight_vec[idx], weight[idx]);
@@ -537,10 +537,12 @@ int main(int argc, char *argv[]) {
                 std::vector<uint64_t> cha_vec{0, 0, 0, 0}, cpu_vec{0, 0, 0, 0};
 
                 /*** read CPU params */
-                uint64_t wb_cnt = 0, target_l2stall = 0, target_llcmiss = 0, target_llchits = 0, target_l2miss = 0,
-                         all_llcmiss = 0, all_prefetch = 0;
+                uint64_t wb_cnt = 0, target_l2stall = 0, target_llcmiss = 0, target_llchits = 0, all_llcmiss = 0,
+                         all_prefetch = 0;
+                [[maybe_unused]] uint64_t target_l2miss = 0;
                 double writeback_latency;
                 /* read PEBS and LBR samples */
+#if CXLMEMSIM_HAS_LINUX_PERF
                 if (mon.is_process) {
                     /* read PEBS sample */
                     if (mon.pebs_ctx && mon.pebs_ctx->read(controller, &mon.after->pebs) < 0) {
@@ -551,6 +553,7 @@ int main(int argc, char *argv[]) {
                         SPDLOG_ERROR("[{}:{}:{}] Warning: Failed LBR read", i, mon.tgid, mon.tid);
                     }
                 }
+#endif
                 target_llcmiss = mon.after->pebs.total - mon.before->pebs.total;
 
                 for (size_t idx = 0; idx < pmu.cpus.size(); idx++) {
