@@ -14,12 +14,99 @@
 #include <algorithm>
 #include <random>
 
+namespace {
+
+constexpr uint64_t kCacheLineSize = 64;
+
+BandwidthModelConfig normalize_bandwidth_model(BandwidthModelConfig config) {
+    config.read_peak_gbps = std::max(0.001, config.read_peak_gbps);
+    config.write_peak_gbps = std::max(0.001, config.write_peak_gbps);
+    if (config.mixed_peak_gbps <= 0.0) {
+        config.mixed_peak_gbps = 2.0 / ((1.0 / config.read_peak_gbps) + (1.0 / config.write_peak_gbps));
+    }
+    config.mixed_peak_gbps = std::max(0.001, config.mixed_peak_gbps);
+    config.knee_utilization = std::clamp(config.knee_utilization, 0.10, 0.95);
+    config.saturation_utilization = std::clamp(config.saturation_utilization, config.knee_utilization + 0.01, 0.995);
+    config.low_utilization_slope = std::clamp(config.low_utilization_slope, 0.0, 1.0);
+    config.max_penalty_ns = std::max(0.0, config.max_penalty_ns);
+    config.min_window_ns = std::max<uint64_t>(1000, config.min_window_ns);
+    return config;
+}
+
+double interpolate_peak_bandwidth(const BandwidthModelConfig &model, double read_ratio) {
+    const double mixed_peak = model.mixed_peak_gbps;
+    if (read_ratio >= 0.95) {
+        return model.read_peak_gbps;
+    }
+    if (read_ratio <= 0.05) {
+        return model.write_peak_gbps;
+    }
+    if (read_ratio >= 0.5) {
+        const double t = (read_ratio - 0.5) / 0.5;
+        return mixed_peak + t * (model.read_peak_gbps - mixed_peak);
+    }
+    const double t = read_ratio / 0.5;
+    return model.write_peak_gbps + t * (mixed_peak - model.write_peak_gbps);
+}
+
+double calculate_mlc_bandwidth_penalty(const BandwidthModelConfig &model, size_t access_count, uint64_t first_timestamp,
+                                       uint64_t last_timestamp, double read_ratio, double read_latency_ns,
+                                       double write_latency_ns, int component_id, const char *component_name) {
+    if (access_count == 0) {
+        return 0.0;
+    }
+
+    const uint64_t observed_window_ns = last_timestamp > first_timestamp ? last_timestamp - first_timestamp : 0;
+    const double window_ns = static_cast<double>(std::max(observed_window_ns, model.min_window_ns));
+    const double observed_gbps = static_cast<double>(access_count * kCacheLineSize) / window_ns;
+    const double peak_gbps = std::max(0.001, interpolate_peak_bandwidth(model, read_ratio));
+    const double utilization = observed_gbps / peak_gbps;
+    if (utilization <= 0.0) {
+        return 0.0;
+    }
+
+    const double transfer_ns_per_cacheline = static_cast<double>(kCacheLineSize) / peak_gbps;
+    const double base_latency_ns = read_latency_ns * read_ratio + write_latency_ns * (1.0 - read_ratio);
+    double penalty_ns = transfer_ns_per_cacheline * utilization * model.low_utilization_slope;
+
+    if (utilization > model.knee_utilization) {
+        const double clipped_utilization = std::min(utilization, model.saturation_utilization);
+        const double knee_span = std::max(0.001, model.saturation_utilization - model.knee_utilization);
+        const double knee_progress = (clipped_utilization - model.knee_utilization) / knee_span;
+        const double queue_multiplier =
+            (clipped_utilization / std::max(0.001, 1.0 - clipped_utilization)) * knee_progress * knee_progress;
+        penalty_ns += transfer_ns_per_cacheline * queue_multiplier;
+    }
+    if (utilization > model.saturation_utilization) {
+        penalty_ns += base_latency_ns * ((utilization - model.saturation_utilization) /
+                                         std::max(0.001, 1.0 - model.saturation_utilization));
+    }
+
+    const double dynamic_cap = std::max(model.max_penalty_ns, base_latency_ns * 10.0);
+    penalty_ns = std::clamp(penalty_ns, 0.0, dynamic_cap);
+    SPDLOG_DEBUG("{} bandwidth model: id={} accesses={} window_ns={} observed={:.3f}GB/s peak={:.3f}GB/s util={:.3f} "
+                 "read_ratio={:.2f} penalty={:.3f}ns mlc={}",
+                 component_name, component_id, access_count, window_ns, observed_gbps, peak_gbps, utilization,
+                 read_ratio, penalty_ns, model.calibrated_from_mlc);
+    return penalty_ns;
+}
+
+} // namespace
+
 CXLMemExpander::CXLMemExpander(int read_bw, int write_bw, int read_lat, int write_lat, int id, int capacity)
     : capacity(capacity), id(id), read_credits_(INITIAL_CREDITS), write_credits_(INITIAL_CREDITS) {
     this->bandwidth.read = read_bw;
     this->bandwidth.write = write_bw;
     this->latency.read = read_lat;
     this->latency.write = write_lat;
+    this->bandwidth_model_.read_peak_gbps = std::max(0.001, static_cast<double>(read_bw));
+    this->bandwidth_model_.write_peak_gbps = std::max(0.001, static_cast<double>(write_bw));
+    this->bandwidth_model_.mixed_peak_gbps =
+        2.0 / ((1.0 / this->bandwidth_model_.read_peak_gbps) + (1.0 / this->bandwidth_model_.write_peak_gbps));
+}
+
+void CXLMemExpander::configure_bandwidth_model(const BandwidthModelConfig &config) {
+    bandwidth_model_ = normalize_bandwidth_model(config);
 }
 // CXLMemExpandercalculate_latency
 double CXLMemExpander::calculate_latency(const std::vector<std::tuple<uint64_t, uint64_t>> &elem, double dramlatency) {
@@ -108,28 +195,29 @@ double CXLMemExpander::calculate_bandwidth(const std::vector<std::tuple<uint64_t
         return 0.0;
     }
 
-    // 20ms
-    uint64_t current_time = std::get<0>(elem.back());
-    uint64_t window_start = current_time - 20000000; // 20ms = 20,000,000ns
-
     size_t access_count = 0;
-    uint64_t total_data = 0;
-    constexpr uint64_t CACHE_LINE_SIZE = 64; // 64
-
+    uint64_t first_timestamp = UINT64_MAX;
+    uint64_t last_seen_timestamp = 0;
     for (const auto &[timestamp, addr] : elem) {
-        if (timestamp >= window_start) {
+        if (is_address_local(addr)) {
             access_count++;
-            total_data += CACHE_LINE_SIZE; // TODO other than cacheline granularity
+            first_timestamp = std::min(first_timestamp, timestamp);
+            last_seen_timestamp = std::max(last_seen_timestamp, timestamp);
         }
     }
 
-    //  (GB/s)
-    //  = ( / )
-    double time_window_seconds = 0.02; // 20ms = 0.02s
-    double bandwidth_gbps = (total_data / time_window_seconds) / (1024.0 * 1024.0 * 1024.0);
+    if (access_count == 0) {
+        return 0.0;
+    }
 
-    double max_bandwidth = this->bandwidth.read + this->bandwidth.write;
-    return std::min(bandwidth_gbps - max_bandwidth, 0.0);
+    const double read_ops = static_cast<double>(counter.load.get() + counter.hit_old.get());
+    const double write_ops =
+        static_cast<double>(counter.store.get() + counter.migrate_in.get() + counter.migrate_out.get());
+    const double total_ops = read_ops + write_ops;
+    const double read_ratio = total_ops > 0.0 ? read_ops / total_ops : 1.0;
+
+    return calculate_mlc_bandwidth_penalty(bandwidth_model_, access_count, first_timestamp, last_seen_timestamp,
+                                           read_ratio, latency.read, latency.write, id, "CXL endpoint");
 }
 void CXLMemExpander::delete_entry(uint64_t addr, uint64_t length) {
     bool modified = false;
@@ -263,7 +351,31 @@ void CXLSwitch::delete_entry(uint64_t addr, uint64_t length) {
         switch_->delete_entry(addr, length);
     }
 }
-CXLSwitch::CXLSwitch(int id) : id(id) {}
+CXLSwitch::CXLSwitch(int id) : id(id) { bandwidth_model_ = normalize_bandwidth_model(bandwidth_model_); }
+
+void CXLSwitch::configure_bandwidth_model(const BandwidthModelConfig &config) {
+    bandwidth_model_ = normalize_bandwidth_model(config);
+    for (auto *switch_ : switches) {
+        if (switch_) {
+            switch_->configure_bandwidth_model(config);
+        }
+    }
+}
+
+bool CXLSwitch::contains_address(uint64_t addr) {
+    for (auto *expander : expanders) {
+        if (expander && expander->is_address_local(addr)) {
+            return true;
+        }
+    }
+    for (auto *switch_ : switches) {
+        if (switch_ && switch_->contains_address(addr)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 double CXLSwitch::calculate_latency(const std::vector<std::tuple<uint64_t, uint64_t>> &elem, double dramlatency) {
     double lat = 0.0;
     for (auto &expander : this->expanders) {
@@ -276,6 +388,30 @@ double CXLSwitch::calculate_latency(const std::vector<std::tuple<uint64_t, uint6
 }
 double CXLSwitch::calculate_bandwidth(const std::vector<std::tuple<uint64_t, uint64_t>> &elem) {
     double bw = 0.0;
+    if (!elem.empty()) {
+        size_t access_count = 0;
+        uint64_t first_timestamp = UINT64_MAX;
+        uint64_t last_seen_timestamp = 0;
+        for (const auto &[timestamp, addr] : elem) {
+            if (!contains_address(addr)) {
+                continue;
+            }
+            access_count++;
+            first_timestamp = std::min(first_timestamp, timestamp);
+            last_seen_timestamp = std::max(last_seen_timestamp, timestamp);
+        }
+
+        if (access_count > 0) {
+            const double read_ops = static_cast<double>(counter.load.get());
+            const double write_ops = static_cast<double>(counter.store.get() + counter.conflict.get());
+            const double total_ops = read_ops + write_ops;
+            const double read_ratio = total_ops > 0.0 ? read_ops / total_ops : 1.0;
+            bw += calculate_mlc_bandwidth_penalty(bandwidth_model_, access_count, first_timestamp, last_seen_timestamp,
+                                                  read_ratio, congestion_latency, congestion_latency * 1.5, id,
+                                                  "CXL fabric");
+        }
+    }
+
     for (auto &expander : this->expanders) {
         bw += expander->calculate_bandwidth(elem);
     }

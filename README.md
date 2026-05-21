@@ -660,6 +660,7 @@ The top-level CMake file builds every test source in `tests/`:
 | `test_dcd_gfam` | Standalone DCD allocation and GFAM access-control checks. | Yes |
 | `test_rob` | Parses O3CPU/LSQ debug lines and feeds derived instructions into the ROB model. | Yes |
 | `test_mem_stall` | Compares O3CPU memory-stall debug intervals against modeled ROB stalls. | Yes |
+| `test_bandwidth_model` | Checks MLC-style bandwidth saturation and subtree-scoped fabric accounting. | Yes |
 | `test_distributed_shm` | Two in-process distributed memory servers over SHM/TCP helper paths. | Built only |
 | `test_back_invalidation` | TCP/PGAS client for external back-invalidation experiments. | Built only |
 | `test_dax_back_invalidation` | DAX plus TCP client for external guest/device experiments. | Built only |
@@ -712,9 +713,21 @@ SPDLOG_LEVEL=debug ./CXLMemSim \
   -c 0,2 \
   -d 85 \
   -b 100,100 \
+  --mlc-bandwidth 92,78,64,0.82 \
+  --bandwidth-window-ns 100000 \
   -w 85.5,86.5,87.5,85.5,86.5,87.5,88 \
   -o "(1,(2,3))"
 ```
+
+### MLC-Calibrated Bandwidth Model
+
+The legacy simulator can use Intel MLC-style measured bandwidth points instead of a fixed linear bandwidth penalty. Pass read-only, write-only, and mixed read/write peak bandwidth in GB/s:
+
+```bash
+--mlc-bandwidth <read_gbps>,<write_gbps>,<mixed_gbps>[,<knee_ratio>]
+```
+
+The model applies independently at each CXL memory expander and at each switch in the CXL fabric. That means bandwidth saturation can be charged at a device, a leaf switch, an upstream switch, or the root fabric path, depending on which subtree owns the cache-line addresses. `--bandwidth-knee` controls where latency starts rising sharply, and `--bandwidth-window-ns` sets the minimum accounting window used to avoid unstable penalties from very short bursts.
 
 Common options:
 
@@ -726,6 +739,9 @@ Common options:
 | `-d` | Platform DRAM latency in ns. |
 | `-b` | Read/write bandwidth vector. |
 | `-l` | Read/write latency vector. |
+| `--mlc-bandwidth` | Read, write, mixed MLC peak bandwidth in GB/s, plus optional knee ratio. |
+| `--bandwidth-knee` | Utilization where the MLC-style latency curve starts bending upward. |
+| `--bandwidth-window-ns` | Minimum accounting window for bandwidth saturation calculations. |
 | `-w` | Heuristic weights for bandwidth and latency calculations. |
 | `-o` | Newick-style CXL topology. |
 

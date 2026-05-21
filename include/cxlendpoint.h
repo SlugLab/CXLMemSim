@@ -79,6 +79,18 @@ struct CXLRequest {
     uint64_t complete_time;
 };
 
+struct BandwidthModelConfig {
+    double read_peak_gbps = 50.0;
+    double write_peak_gbps = 50.0;
+    double mixed_peak_gbps = 50.0;
+    double knee_utilization = 0.80;
+    double saturation_utilization = 0.98;
+    double low_utilization_slope = 0.05;
+    double max_penalty_ns = 5000.0;
+    uint64_t min_window_ns = 100000;
+    bool calibrated_from_mlc = false;
+};
+
 /* ============================================================================
  * LogP Queuing Model
  *
@@ -392,6 +404,7 @@ public:
     bool cache_valid = false;
     CXLMemExpanderEvent counter{};
     CXLMemExpanderEvent last_counter{};
+    BandwidthModelConfig bandwidth_model_{};
     mutable std::shared_mutex occupationMutex_;
 
     // Queue management for CXL requests
@@ -429,6 +442,7 @@ public:
     std::vector<AddressRange> address_ranges;
 
     CXLMemExpander(int read_bw, int write_bw, int read_lat, int write_lat, int id, int capacity);
+    void configure_bandwidth_model(const BandwidthModelConfig &config);
     std::vector<std::tuple<uint64_t, uint64_t>> get_access(uint64_t timestamp) override;
     void set_epoch(int epoch) override;
     void free_stats(double size) override;
@@ -499,6 +513,7 @@ public:
     std::vector<CXLMemExpander *> expanders{};
     std::vector<CXLSwitch *> switches{};
     CXLSwitchEvent counter{};
+    BandwidthModelConfig bandwidth_model_{};
     int id = -1;
     int epoch = 0;
     uint64_t last_timestamp = 0;
@@ -507,6 +522,8 @@ public:
 
     double congestion_latency = 0.02; // 200ns is the latency of the switch
     explicit CXLSwitch(int id);
+    void configure_bandwidth_model(const BandwidthModelConfig &config);
+    bool contains_address(uint64_t addr);
     std::vector<std::tuple<uint64_t, uint64_t>> get_access(uint64_t timestamp) override;
     double calculate_latency(const std::vector<std::tuple<uint64_t, uint64_t>> &elem,
                              double dramlatency) override; // traverse the tree to calculate the latency

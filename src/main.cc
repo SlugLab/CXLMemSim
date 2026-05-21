@@ -51,6 +51,9 @@ struct CXLMemSimOptions {
     double frequency = 4000.0;
     std::vector<int> latency{200, 250, 200, 250, 200, 250};
     std::vector<int> bandwidth{50, 50, 50, 50, 50, 50};
+    std::vector<double> mlc_bandwidth{};
+    double bandwidth_knee = 0.80;
+    uint64_t bandwidth_window_ns = 100000;
     std::vector<std::string> pmu_name{"prefetch",  "l2hit",        "l2miss",      "cpus_dram_rds",
                                       "llcl_hits", "snoop_fwd_wb", "total_stall", "l2stall"};
     std::vector<uint64_t> pmu_config1{0x02c0, 0x0134, 0x7e35, 0x01d3, 0x04d1, 0x01b7, 0x04004a3, 0x0449};
@@ -129,6 +132,9 @@ void print_main_help(const char *program) {
               << "  -f, --frequency <MHz>          CPU frequency used by the model\n"
               << "  -l, --latency <list>           Read/write latency vector\n"
               << "  -b, --bandwidth <list>         Read/write bandwidth vector\n"
+              << "      --mlc-bandwidth <list>     MLC read,write,mixed GB/s and optional knee ratio\n"
+              << "      --bandwidth-knee <ratio>   Utilization where bandwidth latency starts rising\n"
+              << "      --bandwidth-window-ns <ns> Minimum bandwidth accounting window\n"
               << "  -x, --pmu_name <list>          PMU event names\n"
               << "  -y, --pmu_config1 <list>       PMU config values\n"
               << "  -z, --pmu_config2 <list>       PMU config1 values\n"
@@ -219,6 +225,15 @@ bool parse_main_options(int argc, char *argv[], CXLMemSimOptions &opts, std::str
                 opts.latency = parse_csv_vector<int>(get_value(key));
             } else if (key == "bandwidth") {
                 opts.bandwidth = parse_csv_vector<int>(get_value(key));
+            } else if (key == "mlc-bandwidth") {
+                opts.mlc_bandwidth = parse_csv_vector<double>(get_value(key));
+                if (opts.mlc_bandwidth.size() >= 4) {
+                    opts.bandwidth_knee = opts.mlc_bandwidth[3];
+                }
+            } else if (key == "bandwidth-knee") {
+                opts.bandwidth_knee = parse_value<double>(get_value(key));
+            } else if (key == "bandwidth-window-ns") {
+                opts.bandwidth_window_ns = parse_value<uint64_t>(get_value(key));
             } else if (key == "pmu_name") {
                 opts.pmu_name = parse_csv_vector<std::string>(get_value(key));
             } else if (key == "pmu_config1") {
@@ -270,6 +285,9 @@ int main(int argc, char *argv[]) {
     auto pebsperiod = opts.pebsperiod;
     auto latency = opts.latency;
     auto bandwidth = opts.bandwidth;
+    auto mlc_bandwidth = opts.mlc_bandwidth;
+    auto bandwidth_knee = opts.bandwidth_knee;
+    auto bandwidth_window_ns = opts.bandwidth_window_ns;
     auto frequency = opts.frequency;
     auto topology = opts.topology;
     auto capacity = opts.capacity;
@@ -381,10 +399,32 @@ int main(int argc, char *argv[]) {
             SPDLOG_DEBUG(" write_bandwidth:{}", bandwidth[(idx - 1) * 2 + 1]);
             auto *ep = new CXLMemExpander(bandwidth[(idx - 1) * 2], bandwidth[(idx - 1) * 2 + 1],
                                           latency[(idx - 1) * 2], latency[(idx - 1) * 2 + 1], idx - 1, capacity[idx]);
+            BandwidthModelConfig bw_model;
+            bw_model.read_peak_gbps =
+                mlc_bandwidth.size() >= 1 ? mlc_bandwidth[0] : static_cast<double>(bandwidth[(idx - 1) * 2]);
+            bw_model.write_peak_gbps =
+                mlc_bandwidth.size() >= 2 ? mlc_bandwidth[1] : static_cast<double>(bandwidth[(idx - 1) * 2 + 1]);
+            bw_model.mixed_peak_gbps = mlc_bandwidth.size() >= 3 ? mlc_bandwidth[2] : 0.0;
+            bw_model.knee_utilization = bandwidth_knee;
+            bw_model.min_window_ns = bandwidth_window_ns;
+            bw_model.calibrated_from_mlc = !mlc_bandwidth.empty();
+            ep->configure_bandwidth_model(bw_model);
             controller->insert_end_point(ep);
         }
     }
     controller->construct_topo(topology);
+
+    BandwidthModelConfig fabric_bw_model;
+    fabric_bw_model.read_peak_gbps =
+        mlc_bandwidth.size() >= 1 ? mlc_bandwidth[0] : static_cast<double>(bandwidth.empty() ? 50 : bandwidth[0]);
+    fabric_bw_model.write_peak_gbps =
+        mlc_bandwidth.size() >= 2 ? mlc_bandwidth[1] : static_cast<double>(bandwidth.size() >= 2 ? bandwidth[1] : 50);
+    fabric_bw_model.mixed_peak_gbps = mlc_bandwidth.size() >= 3 ? mlc_bandwidth[2] : 0.0;
+    fabric_bw_model.knee_utilization = bandwidth_knee;
+    fabric_bw_model.min_window_ns = bandwidth_window_ns;
+    fabric_bw_model.calibrated_from_mlc = !mlc_bandwidth.empty();
+    controller->configure_bandwidth_model(fabric_bw_model);
+
     /** Hove been got by socket if it's not main thread and synchro */
     SPDLOG_DEBUG("cpu_freq:{}", frequency);
     SPDLOG_DEBUG("num_of_cha:{}", ncha);

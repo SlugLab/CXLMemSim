@@ -131,6 +131,11 @@ target_include_directories(test_mem_stall PRIVATE include src ${spdlog_INCLUDE_D
 target_link_libraries(test_mem_stall cxlmemsim spdlog::spdlog_header_only ${RT_LIB} ${ATOMIC_LIB})
 add_test(NAME test_mem_stall COMMAND test_mem_stall)
 
+add_executable(test_bandwidth_model tests/test_bandwidth_model.cpp)
+target_include_directories(test_bandwidth_model PRIVATE include src ${spdlog_INCLUDE_DIR})
+target_link_libraries(test_bandwidth_model cxlmemsim spdlog::spdlog_header_only ${RT_LIB} ${ATOMIC_LIB})
+add_test(NAME test_bandwidth_model COMMAND test_bandwidth_model)
+
 # Integration-style test clients. They require an external server/DAX setup, so
 # CMake builds them but does not register them as always-on CTest tests.
 add_executable(test_back_invalidation tests/test_back_invalidation.cpp)
