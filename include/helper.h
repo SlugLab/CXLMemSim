@@ -106,10 +106,11 @@ struct LBRElem {
 };
 
 struct CPUInfo {
-    uint32_t max_cpuid;
-    uint32_t cpu_family;
-    uint32_t cpu_model;
-    uint32_t cpu_stepping;
+    char vendor_id[16]{};
+    uint32_t max_cpuid{};
+    uint32_t cpu_family{};
+    uint32_t cpu_model{};
+    uint32_t cpu_stepping{};
 };
 
 struct Elem {

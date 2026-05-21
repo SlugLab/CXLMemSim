@@ -14,7 +14,9 @@
 #include <cstring>
 #include <ctime>
 #include <dirent.h>
+#include <exception>
 #include <iostream>
+#include <memory>
 #include <vector>
 timespec Monitor::last_delay = {0, 0};
 
@@ -170,10 +172,26 @@ int Monitors::enable(uint32_t tgid, uint32_t tid, bool is_process, uint64_t pebs
 
     if (pebs_sample_period) {
         /* pebs start */
-        mon[target].pebs_ctx = new PEBS(tgid, pebs_sample_period);
-        SPDLOG_DEBUG("{}Process [tgid={}, tid={}]: enable to pebs.", target, mon[target].tgid,
-                     mon[target].tid); // multiple tid multiple pid
-        mon[target].lbr_ctx = new LBR(tgid, 1000);
+        std::unique_ptr<PEBS> pebs_ctx;
+        std::unique_ptr<LBR> lbr_ctx;
+        try {
+            pebs_ctx = std::make_unique<PEBS>(tgid, pebs_sample_period);
+        } catch (const std::exception &e) {
+            SPDLOG_ERROR("Failed to initialize PEBS for tgid={}, tid={}: {}", tgid, tid, e.what());
+            disable(target);
+            return -3;
+        }
+        SPDLOG_DEBUG("{}Process [tgid={}, tid={}]: enable to pebs.", target, mon[target].tgid, mon[target].tid);
+
+        try {
+            lbr_ctx = std::make_unique<LBR>(tgid, 1000);
+        } catch (const std::exception &e) {
+            SPDLOG_WARN("LBR is unavailable for tgid={}, tid={}: {}; continuing with PEBS samples only.", tgid, tid,
+                        e.what());
+        }
+
+        mon[target].pebs_ctx = pebs_ctx.release();
+        mon[target].lbr_ctx = lbr_ctx.release();
         new std::jthread(mon[target].wait, &mon, target);
     }
     SPDLOG_INFO("pid {}[tgid={}, tid={}] monitoring start", target, mon[target].tgid, mon[target].tid);
@@ -193,22 +211,12 @@ void Monitors::disable(const uint32_t target) {
     mon[target].end_exec_ts.tv_sec = 0;
     mon[target].end_exec_ts.tv_nsec = 0;
     if (mon[target].pebs_ctx != nullptr) {
-        mon[target].pebs_ctx->fd = -1;
-        mon[target].pebs_ctx->pid = -1;
-        mon[target].pebs_ctx->seq = 0;
-        mon[target].pebs_ctx->rdlen = 0;
-        mon[target].pebs_ctx->seq = 0;
-        mon[target].pebs_ctx->mp = nullptr;
-        mon[target].pebs_ctx->sample_period = 0;
+        delete mon[target].pebs_ctx;
+        mon[target].pebs_ctx = nullptr;
     }
     if (mon[target].lbr_ctx != nullptr) {
-        mon[target].lbr_ctx->fd = -1;
-        mon[target].lbr_ctx->pid = -1;
-        mon[target].lbr_ctx->seq = 0;
-        mon[target].lbr_ctx->rdlen = 0;
-        mon[target].lbr_ctx->seq = 0;
-        mon[target].lbr_ctx->mp = nullptr;
-        mon[target].lbr_ctx->sample_period = 0;
+        delete mon[target].lbr_ctx;
+        mon[target].lbr_ctx = nullptr;
     }
     for (auto &j : mon[target].elem) {
         j.pebs.total = 0;
@@ -254,6 +262,8 @@ int Monitors::terminate(const uint32_t tgid, const uint32_t tid, const int32_t t
         /* pebs stop */
         delete mon[target].pebs_ctx;
         delete mon[target].lbr_ctx;
+        mon[target].pebs_ctx = nullptr;
+        mon[target].lbr_ctx = nullptr;
 
         /* Save end time */
         if (mon[target].end_exec_ts.tv_sec == 0 && mon[target].end_exec_ts.tv_nsec == 0) {

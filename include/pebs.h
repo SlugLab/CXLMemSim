@@ -30,6 +30,7 @@ public:
     uint32_t seq{};
     size_t rdlen{};
     size_t mplen{};
+    bool sample_has_phys_addr{};
     perf_event_mmap_page *mp;
     PEBS(pid_t, uint64_t);
     ~PEBS();

@@ -17,6 +17,7 @@
 #include <cctype>
 #include <cerrno>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -388,9 +389,9 @@ int main(int argc, char *argv[]) {
     SPDLOG_DEBUG("cpu_freq:{}", frequency);
     SPDLOG_DEBUG("num_of_cha:{}", ncha);
     SPDLOG_DEBUG("num_of_cpu:{}", ncpu);
-    for (auto j : cpuset) {
-        helper.used_cpu.push_back(cpuset[j]);
-        helper.used_cha.push_back(cpuset[j]);
+    for (auto cpu_id : cpuset) {
+        helper.used_cpu.push_back(cpu_id);
+        helper.used_cha.push_back(cpu_id);
     }
     monitors = new Monitors{tnum, &use_cpuset};
 
@@ -432,11 +433,10 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
     /** In case of process, use SIGSTOP. */
-    if (auto res = monitors->enable(t_process, t_process, true, pebsperiod, tnum); res == -1) {
-        SPDLOG_ERROR("Failed to enable monitor");
-        exit(0);
-    } else if (res < 0) {
-        SPDLOG_DEBUG("pid({}) not found. might be already terminated.", t_process);
+    if (auto res = monitors->enable(t_process, t_process, true, pebsperiod, tnum); res < 0) {
+        SPDLOG_ERROR("Failed to enable monitor for pid {} (code {})", t_process, res);
+        kill(t_process, SIGTERM);
+        return 1;
     }
     cur_processes++;
     SPDLOG_DEBUG("pid of CXLMemSim = {}, cur process={}", t_process, cur_processes);
@@ -452,7 +452,7 @@ int main(int argc, char *argv[]) {
 
     /** Get CPU information */
     if (!get_cpu_info(&monitors->mon[0].before->cpuinfo)) {
-        SPDLOG_DEBUG("Failed to obtain CPU information.");
+        SPDLOG_WARN("Failed to obtain CPU information. PMU model detection will use the generic fallback.");
     }
     auto perf_config =
         helper.detect_model(monitors->mon[0].before->cpuinfo.cpu_model, pmu_name, pmu_config1, pmu_config2);
@@ -503,11 +503,11 @@ int main(int argc, char *argv[]) {
                 /* read PEBS and LBR samples */
                 if (mon.is_process) {
                     /* read PEBS sample */
-                    if (mon.pebs_ctx->read(controller, &mon.after->pebs) < 0) {
+                    if (mon.pebs_ctx && mon.pebs_ctx->read(controller, &mon.after->pebs) < 0) {
                         SPDLOG_ERROR("[{}:{}:{}] Warning: Failed PEBS read", i, mon.tgid, mon.tid);
                     }
                     /* read LBR sample */
-                    if (mon.lbr_ctx->read(controller, &mon.after->lbr) < 0) {
+                    if (mon.lbr_ctx && mon.lbr_ctx->read(controller, &mon.after->lbr) < 0) {
                         SPDLOG_ERROR("[{}:{}:{}] Warning: Failed LBR read", i, mon.tgid, mon.tid);
                     }
                 }

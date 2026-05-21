@@ -11,6 +11,9 @@
 
 #include "incore.h"
 #include "helper.h"
+
+#include <cstring>
+
 extern Helper helper;
 void pcm_cpuid(const unsigned leaf, CPUID_INFO *info) {
     __asm__ __volatile__("cpuid"
@@ -64,7 +67,6 @@ Incore::Incore(const pid_t pid, const int cpu, struct PerfConfig *perf_config) :
 }
 
 bool get_cpu_info(struct CPUInfo *cpu_info) {
-    char buffer[1024];
     union {
         char cbuf[16];
         int ibuf[16 / sizeof(int)];
@@ -73,22 +75,30 @@ bool get_cpu_info(struct CPUInfo *cpu_info) {
 
     pcm_cpuid(0, &cpuinfo);
 
-    memset(buffer, 0, 1024);
     memset(buf.cbuf, 0, 16);
     buf.ibuf[0] = cpuinfo.array[1];
     buf.ibuf[1] = cpuinfo.array[3];
     buf.ibuf[2] = cpuinfo.array[2];
+    std::strncpy(cpu_info->vendor_id, buf.cbuf, sizeof(cpu_info->vendor_id) - 1);
 
-    if (strncmp(buf.cbuf, "GenuineIntel", 12) != 0) {
-        SPDLOG_ERROR("We only Support Intel CPU\n");
+    const bool is_intel = std::strncmp(buf.cbuf, "GenuineIntel", 12) == 0;
+    const bool is_amd = std::strncmp(buf.cbuf, "AuthenticAMD", 12) == 0;
+    if (!is_intel && !is_amd) {
+        SPDLOG_ERROR("Unsupported CPU vendor: {}\n", buf.cbuf);
         return false;
     }
 
     cpu_info->max_cpuid = cpuinfo.array[0];
 
     pcm_cpuid(1, &cpuinfo);
-    cpu_info->cpu_family = (((cpuinfo.array[0]) >> 8) & 0xf) | ((cpuinfo.array[0] & 0xf00000) >> 16);
-    cpu_info->cpu_model = (((cpuinfo.array[0]) & 0xf0) >> 4) | ((cpuinfo.array[0] & 0xf0000) >> 12);
+    const uint32_t eax = cpuinfo.array[0];
+    const uint32_t base_family = (eax >> 8) & 0xf;
+    const uint32_t base_model = (eax >> 4) & 0xf;
+    const uint32_t ext_family = (eax >> 20) & 0xff;
+    const uint32_t ext_model = (eax >> 16) & 0xf;
+
+    cpu_info->cpu_family = base_family == 0xf ? base_family + ext_family : base_family;
+    cpu_info->cpu_model = (base_family == 0x6 || base_family == 0xf) ? base_model + (ext_model << 4) : base_model;
     cpu_info->cpu_stepping = cpuinfo.array[0] & 0x0f;
 
     if (cpuinfo.reg.ecx & (1UL << 31UL)) {
@@ -97,13 +107,13 @@ bool get_cpu_info(struct CPUInfo *cpu_info) {
                      "or availability of virtual hardware features.\n");
     }
 
-    if (cpu_info->cpu_family != 6) {
+    if (is_intel && cpu_info->cpu_family != 6) {
         SPDLOG_ERROR("It doesn't support this CPU. CPU Family: %u\n", cpu_info->cpu_family);
         return false;
     }
 
-    SPDLOG_DEBUG("MAX_CPUID={}, CPUFAMILY={}, CPUMODEL={}, CPUSTEPPING={}\n", cpu_info->max_cpuid, cpu_info->cpu_family,
-                 cpu_info->cpu_model, cpu_info->cpu_stepping);
+    SPDLOG_DEBUG("VENDOR={}, MAX_CPUID={}, CPUFAMILY={}, CPUMODEL={}, CPUSTEPPING={}\n", cpu_info->vendor_id,
+                 cpu_info->max_cpuid, cpu_info->cpu_family, cpu_info->cpu_model, cpu_info->cpu_stepping);
 
     return true;
 }

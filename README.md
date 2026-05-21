@@ -106,6 +106,17 @@ The memory pool is managed by `SharedMemoryManager`. It can use POSIX shared mem
 
 The server CLI uses local parse-result structs in `src/main_server.cc`, `src/main.cc`, and `src/rob.cc`, so command-line parsing is handled in-tree.
 
+## CPU PMU Compatibility
+
+The application-level simulator uses Linux `perf_event_open()` for sampling. Intel systems use PEBS for load-miss samples and Intel CHA PMUs when the CPU model has a known uncore path. AMD systems use the AMD IBS op PMU when `/sys/bus/event_source/devices/ibs_op/type` is available, then fall back to generic hardware cache-miss sampling if IBS or physical-address sampling is unavailable. Intel CHA counters and LBR accounting are optional on non-Intel systems; unsupported PMU paths are logged and disabled instead of aborting the run.
+
+If monitor setup fails, check the CPU PMU support exposed by the kernel and the perf permission level:
+
+```bash
+cat /proc/sys/kernel/perf_event_paranoid
+ls /sys/bus/event_source/devices/
+```
+
 ## Coherency and Distributed Memory
 
 The distributed path is implemented in:

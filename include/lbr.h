@@ -49,7 +49,8 @@ struct lbr_sample {
     uint32_t tid;
     uint64_t timestamp;
     uint32_t cpu;
-    uint64_t nr2;
+    uint32_t cpu_reserved;
+    uint64_t nr;
     lbr lbrs[32];
     cntr counters[32];
 };
@@ -63,6 +64,7 @@ public:
     size_t rdlen{};
     size_t mplen{};
     bool use_pe2 = false;
+    bool sample_has_branch_counters = false;
     perf_event_mmap_page *mp;
     explicit LBR(pid_t, uint64_t);
     ~LBR();

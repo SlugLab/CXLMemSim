@@ -73,8 +73,7 @@ public:
           injected_delay(other.injected_delay), before(nullptr), // Will be set after copying elements
           after(nullptr), // Will be set after copying elements
           total_delay(other.total_delay), start_exec_ts(other.start_exec_ts), end_exec_ts(other.end_exec_ts),
-          is_process(other.is_process), pebs_ctx(other.pebs_ctx ? new PEBS(*other.pebs_ctx) : nullptr),
-          lbr_ctx(other.lbr_ctx ? new LBR(*other.lbr_ctx) : nullptr) {
+          is_process(other.is_process), pebs_ctx(nullptr), lbr_ctx(nullptr) {
         status.store(other.status.load());
         std::copy(std::begin(other.elem), std::end(other.elem), std::begin(elem));
         before = &elem[0];

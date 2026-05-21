@@ -15,6 +15,7 @@
 #include <monitor.h>
 #endif
 #include <signal.h>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -106,19 +107,44 @@ PerfConfig Helper::detect_model(uint32_t model, const std::vector<std::string> &
     while (model_ctx[i].model != CPU_MDL_END) {
         if (model_ctx[i].model == model) {
             this->perf_conf = model_ctx[i].perf_conf;
-            for (int j = 0; j < 4; ++j) {
-                this->perf_conf.cha[j] = std::make_tuple(perf_name[j], perf_conf1[j], perf_conf2[j]);
+            for (size_t j = 0; j < this->perf_conf.cha.size(); ++j) {
+                const std::string name = j < perf_name.size() ? perf_name[j] : "cha_pmu_" + std::to_string(j);
+                const uint64_t config = j < perf_conf1.size() ? perf_conf1[j] : 0;
+                const uint64_t config1 = j < perf_conf2.size() ? perf_conf2[j] : 0;
+                this->perf_conf.cha[j] = std::make_tuple(name, config, config1);
             }
-            for (int j = 0; j < 4; ++j) {
-                this->perf_conf.cpu[j] = std::make_tuple(perf_name[j + 4], perf_conf1[j + 4], perf_conf2[j + 4]);
+            for (size_t j = 0; j < this->perf_conf.cpu.size(); ++j) {
+                const size_t src_idx = j + this->perf_conf.cha.size();
+                const std::string name =
+                    src_idx < perf_name.size() ? perf_name[src_idx] : "cpu_pmu_" + std::to_string(j);
+                const uint64_t config = src_idx < perf_conf1.size() ? perf_conf1[src_idx] : 0;
+                const uint64_t config1 = src_idx < perf_conf2.size() ? perf_conf2[src_idx] : 0;
+                this->perf_conf.cpu[j] = std::make_tuple(name, config, config1);
             }
             this->path = model_ctx[i].perf_conf.path_format_cha_type;
             return this->perf_conf;
         }
         i++;
     }
-    SPDLOG_ERROR("Failed to execute. This CPU model is not supported. Refer to perfmon or pcm to add support\n");
-    throw;
+    SPDLOG_WARN("CPU model {} is not in the Intel CHA table. CHA counters are disabled; CPU PMU counters will use "
+                "the supplied raw configs when perf accepts them.",
+                model);
+    this->perf_conf = {};
+    for (size_t j = 0; j < this->perf_conf.cha.size(); ++j) {
+        const std::string name = j < perf_name.size() ? perf_name[j] : "cha_pmu_" + std::to_string(j);
+        const uint64_t config = j < perf_conf1.size() ? perf_conf1[j] : 0;
+        const uint64_t config1 = j < perf_conf2.size() ? perf_conf2[j] : 0;
+        this->perf_conf.cha[j] = std::make_tuple(name, config, config1);
+    }
+    for (size_t j = 0; j < this->perf_conf.cpu.size(); ++j) {
+        const size_t src_idx = j + this->perf_conf.cha.size();
+        const std::string name = src_idx < perf_name.size() ? perf_name[src_idx] : "cpu_pmu_" + std::to_string(j);
+        const uint64_t config = src_idx < perf_conf1.size() ? perf_conf1[src_idx] : 0;
+        const uint64_t config1 = src_idx < perf_conf2.size() ? perf_conf2[src_idx] : 0;
+        this->perf_conf.cpu[j] = std::make_tuple(name, config, config1);
+    }
+    this->path.clear();
+    return this->perf_conf;
 }
 Helper::Helper() {
     cpu = num_of_cpu();
@@ -168,21 +194,33 @@ int PMUInfo::start_all_pmcs() {
 }
 PMUInfo::PMUInfo(pid_t pid, Helper *helper, PerfConfig *perf_config) : helper(helper) {
 #if CXLMEMSIM_HAS_LINUX_PERF
-    for (auto i : helper->used_cpu) {
-        this->chas.emplace_back(i, perf_config);
-    }
-    // unfreeze counters
-    int r = this->unfreeze_counters_cha_all();
-    if (r < 0) {
-        SPDLOG_DEBUG("unfreeze_counters_cha_all failed.\n");
-        throw;
+    if (!perf_config->path_format_cha_type.empty()) {
+        for (auto i : helper->used_cha) {
+            try {
+                this->chas.emplace_back(i, perf_config);
+            } catch (const std::exception &e) {
+                SPDLOG_WARN("Skipping CHA PMU {}: {}", i, e.what());
+            }
+        }
+        // unfreeze counters
+        int r = this->unfreeze_counters_cha_all();
+        if (r < 0) {
+            SPDLOG_WARN("unfreeze_counters_cha_all failed; CHA counters are disabled.");
+            this->chas.clear();
+        }
+    } else {
+        SPDLOG_WARN("CHA PMU path is unavailable for this CPU; CHA counters are disabled.");
     }
 
     for (auto i : helper->used_cpu) {
-        this->cpus.emplace_back(pid, i, perf_config);
+        try {
+            this->cpus.emplace_back(pid, i, perf_config);
+        } catch (const std::exception &e) {
+            SPDLOG_WARN("Skipping CPU PMU {}: {}", i, e.what());
+        }
     }
 
-    r = this->start_all_pmcs();
+    int r = this->start_all_pmcs();
     if (r < 0) {
         SPDLOG_ERROR("start_all_pmcs failed\n");
     }
@@ -237,8 +275,8 @@ int PMUInfo::freeze_counters_cha_all() const {
 }
 PMUInfo::~PMUInfo() {
 #if CXLMEMSIM_HAS_LINUX_PERF
+    stop_all_pmcs();
     this->cpus.clear();
     this->chas.clear();
 #endif
-    stop_all_pmcs();
 }
