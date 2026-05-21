@@ -397,20 +397,25 @@ int main(int argc, char *argv[]) {
     controller->insert_end_point(ep);
 
     // Load topology if file exists
-    if (access(topology.c_str(), F_OK) == 0) {
-        SPDLOG_INFO("Loading topology from {}", topology);
-        // Read topology file
-        std::ifstream topo_file(topology);
-        if (topo_file.is_open()) {
-            std::string topo_content((std::istreambuf_iterator<char>(topo_file)),
-                                   std::istreambuf_iterator<char>());
-            controller->construct_topo(topo_content);
-            topo_file.close();
+    try {
+        if (access(topology.c_str(), F_OK) == 0) {
+            SPDLOG_INFO("Loading topology from {}", topology);
+            // Read topology file
+            std::ifstream topo_file(topology);
+            if (topo_file.is_open()) {
+                std::string topo_content((std::istreambuf_iterator<char>(topo_file)),
+                                       std::istreambuf_iterator<char>());
+                controller->construct_topo(topo_content);
+                topo_file.close();
+            }
+        } else {
+            SPDLOG_WARN("Topology file {} not found, using default topology", topology);
+            // Create a default topology: one switch with the expander
+            controller->construct_topo("(1);");
         }
-    } else {
-        SPDLOG_WARN("Topology file {} not found, using default topology", topology);
-        // Create a default topology: one switch with the expander
-        controller->construct_topo("(1);");
+    } catch (const std::exception &e) {
+        SPDLOG_ERROR("Failed to load topology '{}': {}", topology, e.what());
+        return 1;
     }
     
     SPDLOG_INFO("========================================");

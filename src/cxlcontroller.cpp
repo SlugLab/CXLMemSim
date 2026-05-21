@@ -13,18 +13,80 @@
 #include "lbr.h"
 #include "../include/distributed_server.h"
 
+#include <cctype>
+#include <charconv>
+#include <stdexcept>
+#include <string>
+#include <system_error>
+#include <vector>
+
+namespace {
+
+bool parse_size_token(const std::string &token, size_t &value) {
+    if (token.empty()) {
+        return false;
+    }
+
+    size_t parsed = 0;
+    const auto *first = token.data();
+    const auto *last = token.data() + token.size();
+    auto [ptr, ec] = std::from_chars(first, last, parsed);
+    if (ec != std::errc() || ptr != last) {
+        return false;
+    }
+
+    value = parsed;
+    return true;
+}
+
+void skip_optional_branch_length(const std::vector<std::string> &tokens, size_t &index) {
+    if (index + 2 < tokens.size() && tokens[index + 1] == ":") {
+        index += 2;
+    }
+}
+
+} // namespace
+
 void CXLController::insert_end_point(CXLMemExpander *end_point) { this->cur_expanders.emplace_back(end_point); }
 
 void CXLController::construct_topo(std::string_view newick_tree) {
     auto tokens = tokenize(newick_tree);
     std::vector<CXLSwitch *> stk;
     stk.push_back(this);
+
+    size_t next_named_expander = 0;
+    size_t topology_endpoints = 0;
+
+    auto add_local_expander = [&](size_t expander_number, const std::string &token) {
+        if (stk.empty()) {
+            throw std::invalid_argument("Topology endpoint '" + token + "' appears after the root is closed");
+        }
+        if (expander_number == 0 || expander_number > this->cur_expanders.size()) {
+            throw std::invalid_argument("Topology endpoint '" + token +
+                                        "' is out of range; valid local endpoints are 1.." +
+                                        std::to_string(this->cur_expanders.size()));
+        }
+
+        auto *expander = this->cur_expanders[expander_number - 1];
+        if (!expander) {
+            throw std::invalid_argument("Topology endpoint '" + token + "' resolves to a null expander");
+        }
+
+        stk.back()->expanders.emplace_back(expander);
+        device_map[num_end_points] = expander;
+        num_end_points++;
+        topology_endpoints++;
+    };
+
     for (size_t t = 0; t < tokens.size(); t++) {
         const auto &token = tokens[t];
         if (token == "(" && num_switches == 0) {
             num_switches++;
         } else if (token == "(") {
             /** if is not on the top level */
+            if (stk.empty()) {
+                throw std::invalid_argument("Topology opens a child switch after the root is closed");
+            }
             auto cur = new CXLSwitch(num_switches++);
             stk.back()->switches.push_back(cur);
             stk.push_back(cur);
@@ -35,22 +97,52 @@ void CXLController::construct_topo(std::string_view newick_tree) {
                 throw std::invalid_argument("Unbalanced number of parentheses");
             }
         } else if (token == "," || token == ";") {
-        } else if (token == "R" && t + 4 < tokens.size() &&
-                   tokens[t+1] == ":" && tokens[t+3] == ":") {
+        } else if (token == "R" && t + 4 < tokens.size() && tokens[t + 1] == ":" && tokens[t + 3] == ":") {
             // R:node_id:exp_id - creates RemoteCXLExpander
-            uint32_t remote_node = static_cast<uint32_t>(atoi(tokens[t+2].c_str()));
+            size_t remote_node_value = 0;
+            if (!parse_size_token(tokens[t + 2], remote_node_value)) {
+                throw std::invalid_argument("Invalid remote node id in topology token 'R:" + tokens[t + 2] + "'");
+            }
+            uint32_t remote_node = static_cast<uint32_t>(remote_node_value);
             // Use default link config; can be overridden later
             FabricLinkConfig link_cfg{100.0, 25.0, 32};
             uint64_t default_capacity = 1024ULL * 1024 * 1024; // 1GB default
             uint64_t default_base = remote_node * default_capacity;
-            auto* remote = add_remote_endpoint(remote_node, default_base, default_capacity, link_cfg);
-            stk.back()->expanders.emplace_back(remote);
+            auto *remote = add_remote_endpoint(remote_node, default_base, default_capacity, link_cfg);
+            if (!stk.empty() && stk.back() != this) {
+                stk.back()->expanders.emplace_back(remote);
+            }
+            topology_endpoints++;
             t += 4; // Skip R:node_id:exp_id (5 tokens total: R, :, node_id, :, exp_id)
+        } else if (token == "CPU") {
+            // QEMU sample topology files use CPU:<distance> as a Newick label.
+            // It is not a CXL memory endpoint, so ignore it and its branch length.
+            skip_optional_branch_length(tokens, t);
+        } else if (token == "CXL") {
+            // QEMU sample topology files use CXL:<distance> without an explicit
+            // local endpoint id. Map each named CXL leaf to the next configured
+            // local expander.
+            if (next_named_expander >= this->cur_expanders.size()) {
+                throw std::invalid_argument("Topology contains more CXL leaves than configured local expanders");
+            }
+            add_local_expander(next_named_expander + 1, token);
+            next_named_expander++;
+            skip_optional_branch_length(tokens, t);
         } else {
-            stk.back()->expanders.emplace_back(this->cur_expanders[atoi(token.c_str()) - 1]);
-            device_map[num_end_points] = this->cur_expanders[atoi(token.c_str()) - 1];
-            num_end_points++;
+            size_t expander_number = 0;
+            if (!parse_size_token(token, expander_number)) {
+                throw std::invalid_argument("Unsupported topology token '" + token +
+                                            "'; use 1-based endpoint ids such as '(1);' or QEMU labels like "
+                                            "'(CPU:0,(CXL:100));'");
+            }
+
+            add_local_expander(expander_number, token);
+            skip_optional_branch_length(tokens, t);
         }
+    }
+
+    if (topology_endpoints == 0 && !this->cur_expanders.empty()) {
+        throw std::invalid_argument("Topology did not reference any CXL memory endpoints");
     }
 }
 
@@ -385,9 +477,15 @@ std::vector<std::string> CXLController::tokenize(const std::string_view &s) {
     std::vector<std::string> res;
     std::string tmp;
     for (char c : s) {
-        if (c == '(' || c == ')' || c == ':' || c == ',') {
+        if (std::isspace(static_cast<unsigned char>(c))) {
             if (!tmp.empty()) {
                 res.emplace_back(std::move(tmp));
+                tmp.clear();
+            }
+        } else if (c == '(' || c == ')' || c == ':' || c == ',' || c == ';') {
+            if (!tmp.empty()) {
+                res.emplace_back(std::move(tmp));
+                tmp.clear();
             }
             res.emplace_back(1, c);
         } else {

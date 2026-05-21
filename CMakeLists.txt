@@ -28,10 +28,7 @@ if(CXLMEMSIM_BUILD_MICROBENCHMARKS)
 endif()
 
 list(APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR})
-
-find_package(cxxopts REQUIRED)
 find_package(spdlog REQUIRED)
-
 execute_process(COMMAND uname -r OUTPUT_VARIABLE arch OUTPUT_STRIP_TRAILING_WHITESPACE)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fPIC -pthread")
 
@@ -63,8 +60,8 @@ endif()
 
 # Create a static library of CXL core functionality
 add_library(cxlmemsim STATIC ${SOURCE_FILES})
-target_include_directories(cxlmemsim PUBLIC include ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
-target_link_libraries(cxlmemsim cxxopts::cxxopts spdlog::spdlog_header_only)
+target_include_directories(cxlmemsim PUBLIC include ${spdlog_INCLUDE_DIR})
+target_link_libraries(cxlmemsim spdlog::spdlog_header_only)
 
 # Build latency calculator
 add_executable(cxlmemsim_latency src/calculateLatency.cc)
@@ -90,18 +87,18 @@ endif()
 # Server library (shared between server executable and tests)
 set(SERVER_LIB_SOURCES src/shared_memory_manager.cc src/shm_communication.cpp src/distributed_server.cpp src/tcp_communication.cpp src/rdma_communication.cpp src/hdm_decoder.cpp src/coherency_engine.cpp)
 add_library(cxlmemsim_server_lib STATIC ${SERVER_LIB_SOURCES})
-target_include_directories(cxlmemsim_server_lib PUBLIC include src ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
-target_link_libraries(cxlmemsim_server_lib cxlmemsim cxxopts::cxxopts spdlog::spdlog_header_only ${RT_LIB} ${RDMA_LIBS})
+target_include_directories(cxlmemsim_server_lib PUBLIC include src ${spdlog_INCLUDE_DIR})
+target_link_libraries(cxlmemsim_server_lib cxlmemsim spdlog::spdlog_header_only ${RT_LIB} ${RDMA_LIBS})
 
 # Build server (uses server library + main)
 add_executable(cxlmemsim_server src/main_server.cc)
-target_include_directories(cxlmemsim_server PRIVATE include src ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
-target_link_libraries(cxlmemsim_server cxlmemsim_server_lib cxlmemsim cxxopts::cxxopts spdlog::spdlog_header_only ${RT_LIB} ${ATOMIC_LIB})
+target_include_directories(cxlmemsim_server PRIVATE include src ${spdlog_INCLUDE_DIR})
+target_link_libraries(cxlmemsim_server cxlmemsim_server_lib cxlmemsim spdlog::spdlog_header_only ${RT_LIB} ${ATOMIC_LIB})
 
 # Distributed SHM test
 add_executable(test_distributed_shm tests/test_distributed_shm.cpp)
-target_include_directories(test_distributed_shm PRIVATE include src ${cxxopts_INCLUDE_DIR} ${spdlog_INCLUDE_DIR})
-target_link_libraries(test_distributed_shm cxlmemsim_server_lib cxlmemsim cxxopts::cxxopts spdlog::spdlog_header_only ${RT_LIB} ${ATOMIC_LIB})
+target_include_directories(test_distributed_shm PRIVATE include src ${spdlog_INCLUDE_DIR})
+target_link_libraries(test_distributed_shm cxlmemsim_server_lib cxlmemsim spdlog::spdlog_header_only ${RT_LIB} ${ATOMIC_LIB})
 
 # Installation targets
 install(TARGETS cxlmemsim_server

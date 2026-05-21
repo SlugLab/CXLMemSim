@@ -301,9 +301,13 @@ cmake --build . -j
 Build the QEMU tree with the CXL Type 2 support:
 
 ```bash
-cd lib/qemu/build
-meson setup --reconfigure
-ninja
+./script/build_qemu.sh
+```
+
+Build the QEMU tree with vendored hetGPU integrated:
+
+```bash
+HETGPU_BUILD=1 ./script/build_qemu.sh
 ```
 
 Build the guest CUDA shim:
