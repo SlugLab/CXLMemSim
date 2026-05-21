@@ -143,7 +143,17 @@ def main() -> None:
         systemctl_stop(unit)
 
     manifest = ARTIFACT / "cache_fraction_manifest.json"
-    manifest.write_text(json.dumps(summary, indent=2))
+    if manifest.exists():
+        try:
+            existing = json.loads(manifest.read_text())
+        except json.JSONDecodeError:
+            existing = []
+    else:
+        existing = []
+    updated_caches = {entry["cache_size"] for entry in summary}
+    combined = [entry for entry in existing if entry.get("cache_size") not in updated_caches]
+    combined.extend(summary)
+    manifest.write_text(json.dumps(combined, indent=2))
     print(f"[manifest] {manifest}")
 
 

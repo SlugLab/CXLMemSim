@@ -104,7 +104,7 @@ def plot(rows: list[dict], out_prefix: pathlib.Path, copy_baselines: dict[tuple[
     for row in pointer_rows:
         grouped[(row["N"], row["graph"], row["device_fraction"])].append(row)
 
-    fig, axes = plt.subplots(len(graph_sizes), len(graphs), figsize=(11, 4.2 * len(graph_sizes)),
+    fig, axes = plt.subplots(len(graph_sizes), len(graphs), figsize=(11.5, 4.6 * len(graph_sizes)),
                              squeeze=False, sharex=True, sharey=False)
     colors = plt.cm.viridis([i / max(1, len(fractions) - 1) for i in range(len(fractions))])
 
@@ -136,14 +136,16 @@ def plot(rows: list[dict], out_prefix: pathlib.Path, copy_baselines: dict[tuple[
             )
             ax.set_title(f"{graph.replace('_', ' ').title()}, N={n}")
             ax.set_xlabel("CXL Type-2 cache size")
+            ax.tick_params(axis="x", labelbottom=True)
             ax.grid(True, which="both", alpha=0.25)
             if col_idx == 0:
                 ax.set_ylabel("BFS throughput (nodes/s)")
 
     handles, labels = axes[0][0].get_legend_handles_labels()
-    fig.legend(handles, labels, frameon=False, ncols=min(4, len(labels)), loc="upper center")
-    fig.suptitle("Large Graph BFS cache-size and device-fraction sweep", y=0.995)
-    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    fig.legend(handles, labels, frameon=False, ncols=min(4, len(labels)),
+               loc="upper center", bbox_to_anchor=(0.5, 0.995))
+    fig.suptitle("Large Graph BFS Cache-Size and Device-Fraction Sweep", y=0.955)
+    fig.tight_layout(rect=(0, 0, 1, 0.91))
 
     for ext in ("pdf", "png"):
         fig.savefig(out_prefix.with_suffix(f".{ext}"), dpi=200)

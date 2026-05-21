@@ -40,3 +40,6 @@
 [submodule "workloads/lulesh"]
 	path = workloads/lulesh
 	url = https://github.com/sg0/LULESH
+[submodule "workloads/faiss"]
+	path = workloads/faiss
+	url = https://github.com/facebookresearch/faiss
