@@ -686,7 +686,11 @@ DCDStatus CXLController::dcd_release_capacity(uint64_t base, uint64_t size, uint
     if (!dcd_device) {
         return DCDStatus::INVALID_REQUEST;
     }
-    return dcd_device->release_capacity(base, size, tag, timestamp);
+    auto status = dcd_device->release_capacity(base, size, tag, timestamp);
+    if (status == DCDStatus::OK && gfam_device) {
+        gfam_device->revoke_extent(base, size);
+    }
+    return status;
 }
 
 bool CXLController::dcd_is_allocated(uint64_t addr, uint64_t size) const {

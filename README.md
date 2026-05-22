@@ -401,6 +401,8 @@ The launcher reads the following runtime variables:
 | `CXL_DCD_ENABLE` | `0` | Enables DCD reporting in integration wrappers. |
 | `CXL_GFAM_ENABLE` | `0` | Enables GFAM reporting in integration wrappers. |
 | `CXL_GFAM_HOST_ID` | `0` | Host ID passed to fabric-aware integrations. |
+| `CXL_MEMSIM_EARLY_INIT` | `0` | Connect QEMU's CXL Type 3 device to CXLMemSim during device realize instead of waiting for the first memory access. |
+| `CXL_MEMSIM_FABRIC_REFRESH_NS` | `1000000000` | Minimum interval between QEMU-side DCD/GFAM query refreshes. Set to `0` to disable periodic refreshes. |
 
 QEMU's `shm` transport uses the PGAS shared-memory protocol, so the packaged launcher maps `CXL_TRANSPORT_MODE=shm` to the server's `--comm-mode pgas-shm`.
 
@@ -421,7 +423,16 @@ CXL_MEMSIM_PORT=9999 \
 qemu_launch_cxl.sh
 ```
 
-When QEMU connects to `cxlmemsim_server`, the Type 3 device now queries the DCD and GFAM protocol state. If DCD is enabled, QEMU logs the dynamic allocated, total, and free capacity reported by the server. If GFAM is enabled, QEMU logs host, mapping, operation, denied-access, and average-latency counters. Server-side DCD or GFAM denials are returned to QEMU as memory transaction errors instead of being silently treated as successful reads or writes.
+When QEMU connects to `cxlmemsim_server`, the Type 3 device queries the DCD and GFAM protocol state. If DCD is enabled, QEMU logs the dynamic allocated, total, and free capacity reported by the server. If GFAM is enabled, QEMU logs host, mapping, operation, denied-access, and average-latency counters. Server-side DCD or GFAM denials are returned to QEMU as memory transaction errors instead of being silently treated as successful reads or writes.
+
+For DCD, QEMU still describes the CXL device topology that the guest sees at boot. The CXLMemSim server owns the dynamic behavior. Keep the QEMU `volatile-dc-memdev` size and `num-dc-regions` aligned with the server `--capacity`, `--dcd-granularity-mb`, and `--dcd-initial-capacity` settings. With `CXL_DCD_ENABLE=1`, QEMU validates the server-reported dynamic capacity during Type 3 initialization and warns if the boot-time CXL layout does not match. Guest DCD accept/release mailbox commands then call the CXLMemSim DCD protocol before QEMU updates its local accepted-extent bitmap.
+
+The Type 3 device also exposes QEMU properties for explicit launch files: `memsim-dcd=on`, `memsim-gfam=on`, and `memsim-gfam-host-id=N`. Environment variables override these properties for existing launch scripts. Existing switch CCI and FM-API DCD commands use the same Type 3 synchronization path; future VCS switching support should call those helpers instead of maintaining a second allocator in QEMU.
+
+For the RFC VCS switch path, use `qemu_integration/launch_qemu_vcs_dcd_gfam.sh`.
+It starts CXLMemSim with DCD/GFAM enabled, creates a two-USP
+`cxl-vcs-switch`, hides the physical DCD endpoints at boot, and exposes the
+switch mailbox CCI at `target=vcs0` for FMAPI bind/unbind testing.
 
 Inside the guest, quick checks are:
 

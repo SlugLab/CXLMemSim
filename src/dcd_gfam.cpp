@@ -261,6 +261,16 @@ DCDStatus GFAMDevice::revoke_access(uint32_t host_id, uint64_t base, uint64_t si
     return DCDStatus::OK;
 }
 
+void GFAMDevice::revoke_extent(uint64_t base, uint64_t size) {
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+
+    mappings_.erase(std::remove_if(mappings_.begin(), mappings_.end(),
+                                   [base, size](const GFAMMapping &mapping) {
+                                       return mapping.base == base && mapping.size == size;
+                                   }),
+                    mappings_.end());
+}
+
 bool GFAMDevice::mapping_covers(const GFAMMapping &mapping, uint64_t addr, uint64_t size) const {
     return range_contains(mapping.base, mapping.size, addr, size);
 }

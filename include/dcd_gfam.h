@@ -140,6 +140,7 @@ public:
 
     DCDStatus grant_access(uint32_t host_id, uint64_t base, uint64_t size, uint32_t permissions);
     DCDStatus revoke_access(uint32_t host_id, uint64_t base, uint64_t size);
+    void revoke_extent(uint64_t base, uint64_t size);
 
     GFAMAccessResult record_access(uint32_t host_id, uint64_t addr, uint64_t size, bool is_write, bool is_atomic,
                                    uint64_t timestamp);

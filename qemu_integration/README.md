@@ -50,6 +50,26 @@ export CXL_MEMSIM_PORT=9999
 ./launch_qemu_cxl.sh
 ```
 
+### VCS, DCD, and GFAM startup
+
+Use `launch_qemu_vcs_dcd_gfam.sh` when testing the RFC VCS switch path with
+CXLMemSim-owned DCD/GFAM behavior:
+
+```bash
+export DISK_IMAGE=/path/to/qemu.img
+export CXL_MEMSIM_PORT=9999
+export CXL_CAPACITY_MB=10240
+./launch_qemu_vcs_dcd_gfam.sh
+```
+
+The script starts `build/cxlmemsim_server` if the TCP port is not already
+listening, enables DCD and GFAM on the server, exports the matching QEMU
+environment variables, and boots a two-USP `cxl-vcs-switch` topology. The
+hidden `cxl-type3` DCD devices are attached to the switch only after FMAPI
+`Bind vPPB` commands. Keep `CXL_CAPACITY_MB`, `CXL_DC_SIZE`, and
+`CXL_FMW_SIZE` aligned so QEMU's boot-time dynamic-capacity window matches the
+CXLMemSim server-reported capacity.
+
 ## Features
 
 - **Cacheline-granular access**: All memory operations are performed at 64-byte cacheline granularity
