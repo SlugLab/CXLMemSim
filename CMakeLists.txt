@@ -3,6 +3,12 @@ project(CXLMemSim VERSION 0.1.0)
 
 option(CXLMEMSIM_BUILD_MICROBENCHMARKS "Build microbenchmarks" ON)
 option(CXLMEMSIM_ENABLE_RDMA "Enable RDMA transport when libraries are available" ON)
+option(CXLMEMSIM_ENABLE_SLUGALLOCATOR "Enable cxltime SlugAllocator compiler instrumentation integration" ON)
+
+if(CXLMEMSIM_ENABLE_SLUGALLOCATOR)
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+    include(SlugAllocator)
+endif()
 
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     add_compile_options (-fdiagnostics-color=always)
