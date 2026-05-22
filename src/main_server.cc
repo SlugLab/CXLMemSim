@@ -1382,13 +1382,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             total_reads++;
 
             // Propagate stats through CXL topology (switches/expanders)
-            controller->counter.inc_local();
-            for (auto &sw : controller->switches) {
-                sw->insert(req.timestamp, (uint64_t)thread_id, req.addr, req.addr, 0);
-            }
-            for (auto &ep : controller->expanders) {
-                ep->insert(req.timestamp, (uint64_t)thread_id, req.addr, req.addr, ep->id);
-            }
+            controller->record_cxl_access(req.timestamp, (uint64_t)thread_id, req.addr, false);
 
             log_periodic_stats("READ", total_reads.load());
         } else { // WRITE
@@ -1468,13 +1462,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             total_writes++;
 
             // Propagate stats through CXL topology (switches/expanders)
-            controller->counter.inc_local();
-            for (auto &sw : controller->switches) {
-                sw->insert(req.timestamp, (uint64_t)thread_id, req.addr, req.addr, 0);
-            }
-            for (auto &ep : controller->expanders) {
-                ep->insert(req.timestamp, (uint64_t)thread_id, req.addr, req.addr, ep->id);
-            }
+            controller->record_cxl_access(req.timestamp, (uint64_t)thread_id, req.addr, true);
 
             log_periodic_stats("WRITE", total_writes.load());
         }
@@ -2139,10 +2127,7 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
 
             total_reads++;
 
-            // PGAS server mode may be used with a minimal topology file whose
-            // switch objects are not fully materialized. Keep the authoritative
-            // operation counters independent from that optional topology walk.
-            controller->counter.inc_local();
+            controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, false);
 
             log_periodic_stats("PGAS_READ", total_reads.load());
             __atomic_thread_fence(__ATOMIC_RELEASE);
@@ -2173,10 +2158,7 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
             slot->latency_ns = (uint64_t)(base_latency + fabric_latency_ns);
             total_writes++;
 
-            // PGAS server mode may be used with a minimal topology file whose
-            // switch objects are not fully materialized. Keep the authoritative
-            // operation counters independent from that optional topology walk.
-            controller->counter.inc_local();
+            controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, true);
 
             log_periodic_stats("PGAS_WRITE", total_writes.load());
             __atomic_thread_fence(__ATOMIC_RELEASE);

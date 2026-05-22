@@ -447,6 +447,8 @@ public:
     void set_epoch(int epoch) override;
     void free_stats(double size) override;
     int insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint64_t virt_addr, int index) override;
+    int record_access(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint64_t virt_addr, int index,
+                      bool is_write);
     double calculate_latency(const std::vector<std::tuple<uint64_t, uint64_t>> &elem,
                              double dramlatency) override; // traverse the tree to calculate the latency
     double calculate_bandwidth(const std::vector<std::tuple<uint64_t, uint64_t>> &elem) override;
@@ -532,6 +534,8 @@ public:
                                     const std::vector<std::tuple<uint64_t, uint64_t>> &accesses,
                                     const thread_info &t_info, double dramlatency);
     int insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint64_t virt_addr, int index) override;
+    int record_access(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint64_t virt_addr, int index,
+                      bool is_write);
     void delete_entry(uint64_t addr, uint64_t length) override;
     virtual std::tuple<double, std::vector<uint64_t>> calculate_congestion();
     void set_epoch(int epoch) override;

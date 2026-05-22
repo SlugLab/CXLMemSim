@@ -310,6 +310,56 @@ int CXLMemExpander::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr,
     }
     return 0;
 }
+
+int CXLMemExpander::record_access(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint64_t virt_addr, int index,
+                                  bool is_write) {
+    if (index != this->id) {
+        return 0;
+    }
+
+    (void)virt_addr;
+    last_timestamp = last_timestamp > timestamp ? last_timestamp : timestamp;
+    process_queued_requests(timestamp);
+
+    CXLRequest req{};
+    req.timestamp = timestamp;
+    req.address = phys_addr;
+    req.tid = tid;
+    req.is_read = !is_write;
+    req.is_write = is_write;
+    req.issue_time = timestamp;
+    req.complete_time = timestamp;
+
+    if (!can_accept_request()) {
+        this->counter.inc_hit_old();
+        return 0;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        request_queue_.push_back(req);
+    }
+
+    for (auto it = this->occupation.cbegin(); it != this->occupation.cend(); ++it) {
+        if (it->address == phys_addr) {
+            this->occupation.erase(it);
+            break;
+        }
+    }
+
+    this->occupation.emplace_back(timestamp, phys_addr, is_write ? 0 : 1);
+    this->address_cache.insert(phys_addr);
+    this->invalidate_cache();
+
+    if (is_write) {
+        this->counter.inc_store();
+        return 1;
+    }
+
+    this->counter.inc_load();
+    return 2;
+}
+
 std::vector<std::tuple<uint64_t, uint64_t>> CXLMemExpander::get_access(uint64_t timestamp) {
     last_counter = CXLMemExpanderEvent(counter);
 
@@ -638,6 +688,44 @@ int CXLSwitch::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint
         }
     }
     // 0
+    return 0;
+}
+
+int CXLSwitch::record_access(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint64_t virt_addr, int index,
+                             bool is_write) {
+    SPDLOG_DEBUG("CXLSwitch record_access phys_addr={}, virt_addr={}, index={}, is_write={} for switch id:{}",
+                 phys_addr, virt_addr, index, is_write, this->id);
+
+    for (auto &expander : this->expanders) {
+        if (expander == nullptr) {
+            continue;
+        }
+        int ret = expander->record_access(timestamp, tid, phys_addr, virt_addr, index, is_write);
+        if (ret == 1) {
+            this->counter.inc_store();
+            return 1;
+        }
+        if (ret == 2) {
+            this->counter.inc_load();
+            return 2;
+        }
+    }
+
+    for (auto &sw : this->switches) {
+        if (sw == nullptr) {
+            continue;
+        }
+        int ret = sw->record_access(timestamp, tid, phys_addr, virt_addr, index, is_write);
+        if (ret == 1) {
+            this->counter.inc_store();
+            return 1;
+        }
+        if (ret == 2) {
+            this->counter.inc_load();
+            return 2;
+        }
+    }
+
     return 0;
 }
 
