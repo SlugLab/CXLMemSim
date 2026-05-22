@@ -324,7 +324,7 @@ template <> struct std::formatter<CXLController> {
 
         result += "CXLController:\n";
         // iterate through the topology map
-        uint64_t total_capacity = 0;
+        uint64_t cxl_capacity = 0;
 
         std::function<void(const CXLSwitch *)> dfs_capacity = [&](const CXLSwitch *node) {
             if (!node)
@@ -333,7 +333,7 @@ template <> struct std::formatter<CXLController> {
             // Traverse expanders and sum their capacity
             for (const auto *expander : node->expanders) {
                 if (expander) {
-                    total_capacity += expander->capacity;
+                    cxl_capacity += expander->capacity;
                 }
             }
 
@@ -344,7 +344,9 @@ template <> struct std::formatter<CXLController> {
         };
         dfs_capacity(&controller);
 
-        result += std::format("Total system memory capacity: {}GB\n", total_capacity);
+        result += std::format("Configured memory capacity: {}GB\n", controller.capacity + cxl_capacity);
+        result += std::format("  Local memory capacity: {}GB\n", controller.capacity);
+        result += std::format("  CXL expander capacity: {}GB\n", cxl_capacity);
 
         result += std::format("  Page Type: {}\n", [](page_type pt) {
             switch (pt) {
@@ -368,11 +370,11 @@ template <> struct std::formatter<CXLController> {
 
         result += "Topology:\n";
 
-        std::function<void(const CXLSwitch *, int)> print_switch = [&result, &print_switch](const CXLSwitch *sw,
-                                                                                            int depth) {
+        std::function<void(const CXLSwitch *, int)> print_switch = [&controller, &result,
+                                                                    &print_switch](const CXLSwitch *sw, int depth) {
             std::string indent(depth * 2, ' ');
 
-            result += std::format("{}Switch:\n", indent);
+            result += std::format("{}Switch id={}:\n", indent, sw->id);
             result += std::format("{}  Events:\n", indent);
             result += std::format("{}    Load: {}\n", indent, sw->counter.load.get());
             result += std::format("{}    Store: {}\n", indent, sw->counter.store.get());
@@ -383,7 +385,17 @@ template <> struct std::formatter<CXLController> {
             }
 
             for (const auto &endpoint : sw->expanders) {
-                result += std::format("{}Expander:\n", indent + "  ");
+                std::string endpoint_name = std::format("internal_id={}", endpoint->id);
+                for (size_t idx = 0; idx < controller.cur_expanders.size(); ++idx) {
+                    if (controller.cur_expanders[idx] == endpoint) {
+                        endpoint_name = std::format("endpoint={} internal_id={}", idx + 1, endpoint->id);
+                        break;
+                    }
+                }
+                result += std::format("{}Expander {} capacity={}GB read_bw={}GB/s write_bw={}GB/s "
+                                      "read_lat={}ns write_lat={}ns:\n",
+                                      indent + "  ", endpoint_name, endpoint->capacity, endpoint->bandwidth.read,
+                                      endpoint->bandwidth.write, endpoint->latency.read, endpoint->latency.write);
                 result += std::format("{}  Events:\n", indent + "  ");
                 result += std::format("{}    Load: {}\n", indent + "  ", endpoint->counter.load.get());
                 result += std::format("{}    Store: {}\n", indent + "  ", endpoint->counter.store.get());

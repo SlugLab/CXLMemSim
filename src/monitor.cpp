@@ -26,6 +26,7 @@
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <string_view>
 #if CXLMEMSIM_HAS_LINUX_PERF
 #include <sys/syscall.h>
 #endif
@@ -122,6 +123,11 @@ std::chrono::milliseconds xctrace_stop_grace() {
     return std::chrono::milliseconds(5000);
 }
 
+bool xctrace_debug_enabled() {
+    const char *debug_env = std::getenv("CXLMEMSIM_XCTRACE_DEBUG");
+    return debug_env && std::strcmp(debug_env, "1") == 0;
+}
+
 std::optional<std::filesystem::path> find_xctrace() {
     const char *xctrace_env = std::getenv("CXLMEMSIM_XCTRACE");
     if (xctrace_env && xctrace_env[0] != '\0' && access(xctrace_env, X_OK) == 0) {
@@ -173,20 +179,40 @@ pid_t start_xctrace_recording(pid_t target_pid, std::string *output_path) {
     return recorder_pid;
 }
 
+bool reap_child_if_done(pid_t child_pid) {
+    int status = 0;
+    const pid_t result = waitpid(child_pid, &status, WNOHANG);
+    return result == child_pid || (result < 0 && errno == ECHILD);
+}
+
+void wait_for_child_exit(pid_t child_pid) {
+    int status = 0;
+    while (waitpid(child_pid, &status, 0) < 0) {
+        if (errno == EINTR) {
+            continue;
+        }
+        return;
+    }
+}
+
 void stop_xctrace_recording(pid_t recorder_pid) {
-    if (recorder_pid <= 0 || kill(recorder_pid, 0) != 0) {
+    if (recorder_pid <= 0) {
+        return;
+    }
+    if (reap_child_if_done(recorder_pid)) {
         return;
     }
 
     const auto deadline = std::chrono::steady_clock::now() + xctrace_stop_grace();
     while (std::chrono::steady_clock::now() < deadline) {
-        if (kill(recorder_pid, 0) != 0) {
+        if (reap_child_if_done(recorder_pid)) {
             return;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     kill(recorder_pid, SIGINT);
+    wait_for_child_exit(recorder_pid);
 }
 
 std::filesystem::path make_xctrace_export_path(const std::filesystem::path &trace_path, std::string_view schema) {
@@ -233,7 +259,12 @@ bool export_xctrace_table(const std::string &trace_path, std::string_view schema
         std::_Exit(127);
     }
 
-    if (!wait_for_child(export_pid) || !std::filesystem::exists(output)) {
+    const bool child_status_ok = wait_for_child(export_pid);
+    const bool output_ok = std::filesystem::exists(output) && std::filesystem::file_size(output) > 0;
+    if (!child_status_ok && xctrace_debug_enabled()) {
+        SPDLOG_INFO("xctrace export for schema {} returned a non-zero child status", schema);
+    }
+    if (!output_ok) {
         return false;
     }
 
@@ -257,6 +288,49 @@ std::string lower_copy(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(),
                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     return value;
+}
+
+uint64_t count_occurrences(std::string_view text, std::string_view needle) {
+    if (needle.empty()) {
+        return 0;
+    }
+
+    uint64_t count = 0;
+    size_t pos = 0;
+    while ((pos = text.find(needle, pos)) != std::string_view::npos) {
+        count++;
+        pos += needle.size();
+    }
+    return count;
+}
+
+std::optional<std::string> find_metric_string_id(std::string_view xml, std::string_view metric_name) {
+    const std::string needle = std::format("fmt=\"{}\"", metric_name);
+    const size_t fmt_pos = xml.find(needle);
+    if (fmt_pos == std::string_view::npos) {
+        return std::nullopt;
+    }
+
+    const size_t tag_start = xml.rfind("<string ", fmt_pos);
+    const size_t tag_end = xml.find('>', fmt_pos);
+    if (tag_start == std::string_view::npos || tag_end == std::string_view::npos || tag_start > tag_end) {
+        return std::nullopt;
+    }
+
+    const std::string_view tag = xml.substr(tag_start, tag_end - tag_start);
+    constexpr std::string_view id_marker = "id=\"";
+    const size_t id_pos = tag.find(id_marker);
+    if (id_pos == std::string_view::npos) {
+        return std::nullopt;
+    }
+
+    const size_t id_start = id_pos + id_marker.size();
+    const size_t id_end = tag.find('"', id_start);
+    if (id_end == std::string_view::npos || id_end == id_start) {
+        return std::nullopt;
+    }
+
+    return std::string(tag.substr(id_start, id_end - id_start));
 }
 
 XctraceSummary parse_counting_mode_samples(const std::string &xml) {
@@ -285,19 +359,31 @@ XctraceSummary parse_counting_mode_samples(const std::string &xml) {
 }
 
 uint64_t parse_metric_table_cycle_rows(const std::string &xml) {
+    const std::string lower_xml = lower_copy(xml);
+    const std::optional<std::string> cycle_metric_id = find_metric_string_id(lower_xml, "cycle");
+    const std::string cycle_ref =
+        cycle_metric_id ? std::format("<string ref=\"{}\"/>", *cycle_metric_id) : std::string{};
+
     uint64_t cycle_rows = 0;
     size_t pos = 0;
-    while ((pos = xml.find("<row", pos)) != std::string::npos) {
-        const size_t row_end = xml.find("</row>", pos);
+    while ((pos = lower_xml.find("<row", pos)) != std::string::npos) {
+        const size_t row_end = lower_xml.find("</row>", pos);
         if (row_end == std::string::npos) {
             break;
         }
 
-        const std::string row = lower_copy(xml.substr(pos, row_end - pos));
-        if (row.find("fmt=\"cycle\"") != std::string::npos || row.find(">cycle</string>") != std::string::npos) {
+        const std::string_view row(lower_xml.data() + pos, row_end - pos);
+        const bool is_cycle_metric = row.find("fmt=\"cycle\"") != std::string_view::npos ||
+                                     row.find(">cycle</string>") != std::string_view::npos ||
+                                     (!cycle_ref.empty() && row.find(cycle_ref) != std::string_view::npos);
+        if (is_cycle_metric && row.find("<sentinel") != std::string_view::npos) {
             cycle_rows++;
         }
         pos = row_end + std::string_view("</row>").size();
+    }
+
+    if (cycle_rows == 0) {
+        cycle_rows = count_occurrences(lower_xml, "<sentinel");
     }
     return cycle_rows;
 }
@@ -307,7 +393,13 @@ XctraceSummary summarize_xctrace(const std::string &trace_path) {
 
     std::filesystem::path samples_xml_path;
     if (export_xctrace_table(trace_path, "CountingModeSamples", &samples_xml_path)) {
-        summary = parse_counting_mode_samples(read_text_file(samples_xml_path));
+        const std::string samples_xml = read_text_file(samples_xml_path);
+        summary = parse_counting_mode_samples(samples_xml);
+        if (xctrace_debug_enabled()) {
+            SPDLOG_INFO("xctrace CountingModeSamples export {} bytes -> samples={}, misses={}, backtraces={}",
+                        samples_xml.size(), summary.sample_count, summary.miss_sample_count,
+                        summary.backtrace_sample_count);
+        }
         if (!std::getenv("CXLMEMSIM_XCTRACE_KEEP_XML")) {
             std::filesystem::remove(samples_xml_path);
         }
@@ -316,8 +408,13 @@ XctraceSummary summarize_xctrace(const std::string &trace_path) {
     if (summary.sample_count == 0) {
         std::filesystem::path metrics_xml_path;
         if (export_xctrace_table(trace_path, "MetricTable", &metrics_xml_path)) {
-            summary.sample_count = parse_metric_table_cycle_rows(read_text_file(metrics_xml_path));
+            const std::string metrics_xml = read_text_file(metrics_xml_path);
+            summary.sample_count = parse_metric_table_cycle_rows(metrics_xml);
             summary.backtrace_sample_count = summary.sample_count;
+            if (xctrace_debug_enabled()) {
+                SPDLOG_INFO("xctrace MetricTable export {} bytes -> cycle rows={}", metrics_xml.size(),
+                            summary.sample_count);
+            }
             if (!std::getenv("CXLMEMSIM_XCTRACE_KEEP_XML")) {
                 std::filesystem::remove(metrics_xml_path);
             }
