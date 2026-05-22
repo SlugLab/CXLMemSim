@@ -411,6 +411,26 @@ int CXLController::insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, 
     return res;
 }
 
+void CXLController::record_cxl_access(uint64_t timestamp, uint64_t tid, uint64_t addr, bool is_write) {
+    this->counter.inc_remote();
+
+    int endpoint_id = 0;
+    if (!this->cur_expanders.empty() && this->cur_expanders.front() != nullptr) {
+        endpoint_id = this->cur_expanders.front()->id;
+    }
+
+    int ret = CXLSwitch::record_access(timestamp, tid, addr, addr, endpoint_id, is_write);
+    if (ret == 0) {
+        for (auto *expander : this->cur_expanders) {
+            if (expander == nullptr || expander->id != endpoint_id) {
+                continue;
+            }
+            expander->record_access(timestamp, tid, addr, addr, endpoint_id, is_write);
+            break;
+        }
+    }
+}
+
 int CXLController::insert(uint64_t timestamp, uint64_t tid, lbr lbrs[32], cntr counters[32]) {
     // LBR
     for (int i = 0; i < 32; i++) {

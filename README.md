@@ -117,6 +117,40 @@ cat /proc/sys/kernel/perf_event_paranoid
 ls /sys/bus/event_source/devices/
 ```
 
+## Compiler Observability with cxltime SlugAllocator
+
+On macOS, CXLMemSim cannot rely on Linux PEBS/LBR or physical-address PMU sampling. The sibling `cxltime` checkout provides `SlugAllocator`, an LLVM pass plus runtime that instruments basic-block entries and IR memory operations (`load`, `store`, atomics, and memory intrinsics). CXLMemSim can build those tools and run instrumented workloads directly against `cxlmemsim_server`.
+
+Build the SlugAllocator pass/runtime from CXLMemSim:
+
+```bash
+cmake -S . -B build \
+  -DCXLMEMSIM_ENABLE_SLUGALLOCATOR=ON \
+  -DCXLMEMSIM_CXLTIME_ROOT=/Users/yiweiyang/Documents/Lanxin/cxltime
+cmake --build build --target slugallocator_tools
+```
+
+Compile a workload with the pass:
+
+```bash
+./script/cxlmemsim_slug.py compile \
+  --cxltime-root /Users/yiweiyang/Documents/Lanxin/cxltime \
+  -o app.slug app.c -- -O1 -g
+```
+
+Run the CXL server and send Slug memory events to it:
+
+```bash
+./build/cxlmemsim_server --comm-mode=tcp --port=9999 --capacity=256
+
+./script/cxlmemsim_slug.py run \
+  --trace slug.csv \
+  --port 9999 \
+  -- ./app.slug
+```
+
+Useful runtime variables are `SLUG_TRACE`, `SLUG_CXL_HOST`, `SLUG_CXL_PORT`, `SLUG_REGION_BASE`, `SLUG_REGION_SIZE`, `SLUG_CXL_ADDR_BASE`, and `SLUG_TRACE_ALL=0` for region-only tracing. Without `SLUG_CXL_PORT`, the runtime only records CSV/statistics; with it, every instrumented memory access is split into cacheline-sized read/write requests and sent to CXLMemSim's TCP protocol.
+
 ## Coherency and Distributed Memory
 
 The distributed path is implemented in:

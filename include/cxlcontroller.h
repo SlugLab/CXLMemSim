@@ -264,6 +264,7 @@ public:
     void insert_one(thread_info &t_info, lbr &lbr);
     int insert(uint64_t timestamp, uint64_t tid, lbr lbrs[32], cntr counters[32]);
     int insert(uint64_t timestamp, uint64_t tid, uint64_t phys_addr, uint64_t virt_addr, int index) override;
+    void record_cxl_access(uint64_t timestamp, uint64_t tid, uint64_t addr, bool is_write);
     void delete_entry(uint64_t addr, uint64_t length) override;
     void perform_migration();
     std::optional<uint64_t> access_cache(uint64_t addr, uint64_t timestamp) { return lru_cache.get(addr, timestamp); }
