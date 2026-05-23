@@ -1616,6 +1616,7 @@ bool DistributedTCPTransport::send_message(uint32_t dst_node, const dist_message
     tcp_msg.request.size = sizeof(dist_message_t);
     tcp_msg.request.timestamp = msg.header.timestamp;
     tcp_msg.request.host_id = static_cast<uint8_t>(local_node_id_);
+    tcp_msg.request.auth_token = tcp_get_auth_token();
 
     // Serialize the dist_message into the data field (truncated to fit)
     size_t copy_size = std::min(sizeof(tcp_msg.request.data), sizeof(dist_message_t));

@@ -18,9 +18,23 @@ struct TCPRequest {
     uint64_t size;
     uint64_t timestamp;
     uint8_t host_id;
+    uint64_t auth_token;
     uint64_t virtual_addr;
     uint8_t data[TCP_CACHELINE_SIZE];
 } __attribute__((packed));
+
+// Returns a FNV-1a hash of CXL_CLUSTER_SECRET env var, or 0 if unset.
+static inline uint64_t tcp_get_auth_token() {
+    const char *secret = std::getenv("CXL_CLUSTER_SECRET");
+    if (!secret || secret[0] == '\0')
+        return 0;
+    uint64_t hash = 14695981039346656037ULL;
+    for (const char *p = secret; *p; ++p) {
+        hash ^= static_cast<uint8_t>(*p);
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
 
 struct TCPResponse {
     uint8_t status;
