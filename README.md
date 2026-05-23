@@ -463,17 +463,54 @@ For DCD, QEMU still describes the CXL device topology that the guest sees at boo
 
 The Type 3 device also exposes QEMU properties for explicit launch files: `memsim-dcd=on`, `memsim-gfam=on`, and `memsim-gfam-host-id=N`. Environment variables override these properties for existing launch scripts. Existing switch CCI and FM-API DCD commands use the same Type 3 synchronization path; future VCS switching support should call those helpers instead of maintaining a second allocator in QEMU.
 
-For the RFC VCS switch path, use `qemu_integration/launch_qemu_vcs_dcd_gfam.sh`.
-It starts CXLMemSim with DCD/GFAM enabled, creates a two-USP
-`cxl-vcs-switch`, hides the physical DCD endpoints at boot, and exposes the
-switch mailbox CCI at `target=vcs0` for FMAPI bind/unbind testing.
+For the Zettai RFC VCS switch path, use
+`qemu_integration/launch_qemu_vcs_dcd_gfam.sh`. It starts CXLMemSim with
+DCD/GFAM enabled, creates a two-USP `zettai` switch, hides the physical DCD
+endpoints at boot, and exposes the switch mailbox CCI at `target=zettai0` for
+FMAPI bind/unbind testing.
 
 Inside the guest, quick checks are:
 
 ```bash
 lspci | grep -i cxl
+lspci -nn | grep -i '7a74:a123'
 dmesg | grep -i cxl
 ls /sys/bus/cxl/devices
+```
+
+Linux keeps the kernel CXL class names (`mem0`, `port0`, `endpoint0`,
+`region0`) even when QEMU uses the `zettai` switch object. To use Zettai names
+inside the guest without rebuilding Linux, copy or mount
+`qemu_integration/zettai_linux_aliases.sh` into the guest and run:
+
+```bash
+sudo ./zettai_linux_aliases.sh
+ls -l /run/zettai/cxl
+cat /run/zettai/topology.txt
+```
+
+For a real kernel-level rename, patch the Linux CXL driver tree under
+`drivers/cxl/`; this repository only carries QEMU's copied Linux headers, not a
+full Linux kernel source tree.
+
+For a full DCD/GFAM smoke test, launch QEMU with a QMP socket and zero initial
+DCD capacity, bind a hidden endpoint from the host, add a DCD extent, then run
+the guest region test:
+
+```bash
+# host
+QEMU_EXTRA_ARGS="-qmp unix:/tmp/zettai-qmp.sock,server=on,wait=off" \
+CXL_DCD_INITIAL_CAPACITY_MB=0 \
+qemu_integration/launch_qemu_vcs_dcd_gfam.sh
+
+# host, after the guest reaches Linux
+python3 qemu_integration/zettai_host_dcd_gfam_test.py --bind --add --query
+
+# guest
+sudo ./zettai_guest_dcd_gfam_test.sh
+
+# host, after the guest memory touch
+python3 qemu_integration/zettai_host_dcd_gfam_test.py --query
 ```
 
 ## Running CXLMemSim Server

@@ -1,118 +1,77 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# CXL NUMA Configuration Script
-# This script automatically configures CXL memory as NUMA node 1 at boot
+# Guest-side CXL setup helper.
+#
+# Default mode is suitable for volatile CXL Dynamic Capacity Device (DCD)
+# memory: create a CXL RAM region and then create a device-dax instance from
+# that region. Legacy pmem namespace creation is still available through
+# CXL_CREATE_NDCTL_NAMESPACE=1.
 
-set -e
+set -euo pipefail
 
-LOG_FILE="/var/log/cxl_numa_setup.log"
-CXL_REGION_SIZE="256M"
-MAX_RETRIES=10
-RETRY_DELAY=2
+LOG_FILE=${LOG_FILE:-/var/log/cxl_numa_setup.log}
+REGION_SIZE=${REGION_SIZE:-${CXL_REGION_SIZE:-256M}}
+INTERLEAVE_GRANULARITY=${INTERLEAVE_GRANULARITY:-1024}
+CXL_REGION_TYPE=${CXL_REGION_TYPE:-ram}
+CXL_MEMDEV=${CXL_MEMDEV:-${ZETTAI_MEMDEV:-}}
+CXL_DECODER=${CXL_DECODER:-${ZETTAI_DECODER:-}}
+CXL_CREATE_DAX=${CXL_CREATE_DAX:-${ZETTAI_CREATE_DAX:-1}}
+CXL_DAX_MODE=${CXL_DAX_MODE:-devdax}
+CXL_TOUCH_DAX=${CXL_TOUCH_DAX:-${ZETTAI_TOUCH_DAX:-0}}
+CXL_CREATE_NDCTL_NAMESPACE=${CXL_CREATE_NDCTL_NAMESPACE:-0}
+CXL_CONFIGURE_NET=${CXL_CONFIGURE_NET:-0}
+CXL_NET_IFACE=${CXL_NET_IFACE:-enp0s2}
+CXL_NET_ADDR=${CXL_NET_ADDR:-192.168.100.10/24}
+CXL_NET_GW=${CXL_NET_GW:-192.168.100.1}
+MAX_RETRIES=${MAX_RETRIES:-20}
+RETRY_DELAY=${RETRY_DELAY:-2}
+
+usage() {
+    cat <<'EOF'
+Usage: setup_cxl_numa.sh
+
+Run inside the Linux guest after CXL devices are visible. For a Zettai VCS DCD
+topology, bind a hidden endpoint and add dynamic capacity from the host first.
+
+Environment:
+  REGION_SIZE / CXL_REGION_SIZE  Region size, default: 256M
+  CXL_REGION_TYPE                CXL region type, default: ram
+  INTERLEAVE_GRANULARITY         cxl create-region granularity, default: 1024
+  CXL_MEMDEV / ZETTAI_MEMDEV     Override memdev, e.g. mem0
+  CXL_DECODER / ZETTAI_DECODER   Override root decoder, e.g. decoder0.0
+  CXL_CREATE_DAX                 Create/use a dax device, default: 1
+  CXL_DAX_MODE                   devdax, system-ram, or none; default: devdax
+  CXL_TOUCH_DAX                  mmap and touch /dev/daxX.Y, default: 0
+  CXL_CREATE_NDCTL_NAMESPACE     Legacy ndctl namespace path, default: 0
+  CXL_CONFIGURE_NET              Configure static guest network, default: 0
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    usage
+    exit 0
+fi
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE" >&2
 }
 
-wait_for_cxl_device() {
-    local retries=0
-    while [ $retries -lt $MAX_RETRIES ]; do
-        if cxl list -M 2>/dev/null | grep -q "mem0"; then
-            log "CXL device mem0 detected"
-            return 0
-        fi
-        log "Waiting for CXL device... (attempt $((retries+1))/$MAX_RETRIES)"
-        sleep $RETRY_DELAY
-        retries=$((retries+1))
-    done
-    log "ERROR: CXL device not found after $MAX_RETRIES attempts"
-    return 1
-}
-
-setup_cxl_region() {
-    log "Creating CXL region..."
-    
-    # Check if region already exists
-    if cxl list -R 2>/dev/null | grep -q "region0"; then
-        log "Region0 already exists, skipping creation"
-        return 0
+need() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        log "ERROR: Missing required command: $1"
+        exit 1
     fi
-    
-    # Create CXL region
-    if cxl create-region -m -d decoder0.0 -w 1 mem0 -s "$CXL_REGION_SIZE" 2>&1 | tee -a "$LOG_FILE"; then
-        log "CXL region created successfully"
-        return 0
+}
+
+json_query() {
+    if command -v jq >/dev/null 2>&1; then
+        jq -r "$1" 2>/dev/null || true
     else
-        log "ERROR: Failed to create CXL region"
-        return 1
+        cat >/dev/null
     fi
 }
 
-setup_dax_namespace() {
-    log "Setting up DAX namespace..."
-    
-    # Check if namespace already exists
-    if ndctl list -N 2>/dev/null | grep -q "namespace"; then
-        log "Namespace already exists"
-        return 0
-    fi
-    
-    # Wait a bit for region to be fully initialized
-    sleep 2
-    
-    # Create DAX namespace
-    if ndctl create-namespace -m dax -r region0 2>&1 | tee -a "$LOG_FILE"; then
-        log "DAX namespace created successfully"
-        return 0
-    else
-        # Try to reconfigure if it fails
-        log "Initial namespace creation failed, trying to reconfigure..."
-        ndctl destroy-namespace all -f 2>/dev/null || true
-        sleep 1
-        if ndctl create-namespace -m dax -r region0 2>&1 | tee -a "$LOG_FILE"; then
-            log "DAX namespace created after reconfiguration"
-            return 0
-        else
-            log "WARNING: Could not create DAX namespace"
-            return 1
-        fi
-    fi
-}
-
-configure_numa_node() {
-    log "Configuring NUMA node..."
-    
-    # Find the DAX device
-    local dax_device=$(ls /sys/bus/dax/devices/ 2>/dev/null | head -n1)
-    
-    if [ -z "$dax_device" ]; then
-        log "WARNING: No DAX device found"
-        return 1
-    fi
-    
-    # Online the memory as NUMA node 1
-    if [ -f "/sys/bus/dax/devices/$dax_device/target_node" ]; then
-        local target_node=$(cat "/sys/bus/dax/devices/$dax_device/target_node")
-        log "Target NUMA node: $target_node"
-        
-        # Try to online the memory
-        if daxctl reconfigure-device --mode=system-ram "$dax_device" 2>&1 | tee -a "$LOG_FILE"; then
-            log "Memory onlined as system RAM"
-        else
-            log "WARNING: Could not online memory as system RAM"
-        fi
-    fi
-    
-    # Verify NUMA configuration
-    numactl --hardware 2>&1 | tee -a "$LOG_FILE"
-    
-    return 0
-}
-
-main() {
-    log "Starting CXL NUMA configuration..."
-    
-    # Load required kernel modules
+load_modules() {
     modprobe cxl_core 2>/dev/null || true
     modprobe cxl_pci 2>/dev/null || true
     modprobe cxl_acpi 2>/dev/null || true
@@ -121,40 +80,261 @@ main() {
     modprobe dax 2>/dev/null || true
     modprobe device_dax 2>/dev/null || true
     modprobe kmem 2>/dev/null || true
-    
-    # Wait for CXL device to appear
-    if ! wait_for_cxl_device; then
-        log "Aborting: CXL device not available"
-        exit 1
-    fi
-    
-    # Setup CXL region
-    if ! setup_cxl_region; then
-        log "Warning: CXL region setup failed, continuing anyway"
-    fi
-    
-    # Setup DAX namespace
-    if ! setup_dax_namespace; then
-        log "Warning: DAX namespace setup failed, continuing anyway"
-    fi
-    
-    # Configure NUMA node
-    #if ! configure_numa_node; then
-    #    log "Warning: NUMA node configuration incomplete"
-    #fi
-    
-    log "CXL NUMA configuration completed"
-    
-    # Display final configuration
-    log "Final CXL configuration:"
-    cxl list 2>&1 | tee -a "$LOG_FILE"
-    log "Final NUMA configuration:"
-    numactl --hardware 2>&1 | tee -a "$LOG_FILE"
 }
 
-# Run main function
-main
-#dhcpcd
-ip link set enp0s2 up
-ip addr add 192.168.100.10/24 dev enp0s2
-ip route add default via 192.168.100.1
+detect_memdev() {
+    if [[ -n "$CXL_MEMDEV" ]]; then
+        echo "$CXL_MEMDEV"
+        return 0
+    fi
+
+    local memdev=""
+    memdev=$(cxl list -M 2>/dev/null |
+        json_query '.. | objects | select(has("memdev")) | .memdev' |
+        head -1)
+    if [[ -z "$memdev" ]]; then
+        memdev=$(cxl list -M 2>/dev/null |
+            sed -n 's/.*"memdev"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+            head -1)
+    fi
+    echo "$memdev"
+}
+
+wait_for_cxl_device() {
+    local retries=0
+
+    while [[ $retries -lt $MAX_RETRIES ]]; do
+        CXL_MEMDEV=$(detect_memdev)
+        if [[ -n "$CXL_MEMDEV" ]]; then
+            log "CXL memdev detected: $CXL_MEMDEV"
+            return 0
+        fi
+        log "Waiting for CXL memdev... (attempt $((retries + 1))/$MAX_RETRIES)"
+        sleep "$RETRY_DELAY"
+        retries=$((retries + 1))
+    done
+
+    cat >&2 <<'EOF'
+No CXL memdev is visible in the guest.
+
+For a Zettai VCS DCD topology, this usually means the endpoint is still hidden
+behind the switch. From the host, bind a vPPB and add dynamic capacity first:
+
+  python3 qemu_integration/zettai_host_dcd_gfam_test.py --bind --add --query
+
+Then rerun setup_cxl_numa.sh in the guest.
+EOF
+    log "ERROR: CXL memdev not found after $MAX_RETRIES attempts"
+    return 1
+}
+
+detect_decoder() {
+    if [[ -n "$CXL_DECODER" ]]; then
+        echo "$CXL_DECODER"
+        return 0
+    fi
+
+    local decoder=""
+    decoder=$(cxl list -B -D 2>/dev/null |
+        json_query '.. | objects | select(has("decoder")) |
+                    select(.decoder | test("^decoder0\\.")) |
+                    select((.volatile_capable == true) or (.pmem_capable == true)) |
+                    select((.max_available_extent // 0) > 0) |
+                    .decoder' |
+        head -1)
+    if [[ -z "$decoder" ]]; then
+        decoder=$(cxl list -B -D 2>/dev/null |
+            sed -n 's/.*"decoder"[[:space:]]*:[[:space:]]*"\(decoder0\.[^"]*\)".*/\1/p' |
+            head -1)
+    fi
+    echo "$decoder"
+}
+
+detect_region() {
+    local region=""
+
+    region=$(cxl list -R 2>/dev/null |
+        json_query '.. | objects | select(has("region")) | .region' |
+        head -1)
+    if [[ -z "$region" ]]; then
+        region=$(cxl list -R 2>/dev/null |
+            sed -n 's/.*"region"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+            head -1)
+    fi
+    echo "$region"
+}
+
+detect_daxdev() {
+    local region=$1
+    local daxdev=""
+
+    daxdev=$(daxctl list -r "$region" 2>/dev/null |
+        json_query '.. | objects | select(has("chardev")) | .chardev' |
+        head -1)
+    if [[ -z "$daxdev" ]]; then
+        daxdev=$(daxctl list -r "$region" 2>/dev/null |
+            sed -n 's/.*"chardev"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+            head -1)
+    fi
+    echo "$daxdev"
+}
+
+setup_cxl_region() {
+    local region=""
+
+    region=$(detect_region)
+    if [[ -n "$region" ]]; then
+        log "Using existing CXL region: $region"
+        echo "$region"
+        return 0
+    fi
+
+    CXL_DECODER=$(detect_decoder)
+    if [[ -z "$CXL_DECODER" ]]; then
+        log "ERROR: Could not find usable root decoder; set CXL_DECODER=decoderX.Y"
+        return 1
+    fi
+
+    log "Creating CXL $CXL_REGION_TYPE region: memdev=$CXL_MEMDEV decoder=$CXL_DECODER size=$REGION_SIZE"
+    cxl create-region -m -t "$CXL_REGION_TYPE" -d "$CXL_DECODER" \
+        -w 1 -g "$INTERLEAVE_GRANULARITY" -s "$REGION_SIZE" "$CXL_MEMDEV" \
+        2>&1 | tee -a "$LOG_FILE" >&2
+    udevadm settle 2>/dev/null || true
+
+    region=$(detect_region)
+    if [[ -z "$region" ]]; then
+        log "ERROR: Region creation did not produce a CXL region"
+        return 1
+    fi
+
+    log "Created CXL region: $region"
+    echo "$region"
+}
+
+setup_ndctl_namespace() {
+    local region=$1
+
+    if [[ "$CXL_CREATE_NDCTL_NAMESPACE" != 1 ]]; then
+        return 0
+    fi
+    if ! command -v ndctl >/dev/null 2>&1; then
+        log "ndctl is not installed; skipping legacy namespace creation"
+        return 0
+    fi
+    if ndctl list -N 2>/dev/null | grep -q '"dev":"namespace'; then
+        log "NVDIMM namespace already exists"
+        return 0
+    fi
+
+    log "Creating legacy ndctl dax namespace on $region"
+    ndctl create-namespace -m dax -r "$region" 2>&1 | tee -a "$LOG_FILE" || true
+}
+
+setup_dax_device() {
+    local region=$1
+    local daxdev=""
+
+    if [[ "$CXL_CREATE_DAX" != 1 || "$CXL_DAX_MODE" == "none" ]]; then
+        return 0
+    fi
+    if ! command -v daxctl >/dev/null 2>&1; then
+        log "daxctl is not installed; skipping DAX device setup"
+        return 0
+    fi
+
+    daxdev=$(detect_daxdev "$region")
+    if [[ -z "$daxdev" ]]; then
+        log "Creating device-dax instance for $region"
+        daxctl create-device -r "$region" 2>&1 | tee -a "$LOG_FILE" || true
+        udevadm settle 2>/dev/null || true
+        daxdev=$(detect_daxdev "$region")
+    fi
+
+    if [[ -z "$daxdev" ]]; then
+        log "WARNING: No DAX chardev found for $region"
+        return 0
+    fi
+
+    log "Using DAX device: /dev/$daxdev"
+
+    if [[ "$CXL_DAX_MODE" == "system-ram" ]]; then
+        log "Reconfiguring $daxdev as system-ram"
+        daxctl reconfigure-device --mode=system-ram "$daxdev" \
+            2>&1 | tee -a "$LOG_FILE" || true
+        return 0
+    fi
+
+    if [[ "$CXL_TOUCH_DAX" == 1 ]]; then
+        touch_dax "/dev/$daxdev"
+    fi
+}
+
+touch_dax() {
+    local path=$1
+
+    log "Touching $path to generate CXL.mem/GFAM traffic"
+    python3 - "$path" <<'PY' 2>&1 | tee -a "$LOG_FILE"
+import mmap
+import os
+import sys
+
+path = sys.argv[1]
+size = os.path.getsize(path)
+if size <= 0:
+    size = 256 * 1024 * 1024
+
+fd = os.open(path, os.O_RDWR | getattr(os, "O_SYNC", 0))
+try:
+    mm = mmap.mmap(fd, size, mmap.MAP_SHARED,
+                   mmap.PROT_READ | mmap.PROT_WRITE)
+    checksum = 0
+    for off in range(0, size, 4096):
+        mm[off:off + 1] = b"Z"
+    for off in range(0, size, 4096):
+        checksum += mm[off]
+    mm.close()
+    print(f"touched {size} bytes via {path}; checksum={checksum}")
+finally:
+    os.close(fd)
+PY
+}
+
+configure_network() {
+    if [[ "$CXL_CONFIGURE_NET" != 1 ]]; then
+        return 0
+    fi
+
+    ip link set "$CXL_NET_IFACE" up
+    ip addr add "$CXL_NET_ADDR" dev "$CXL_NET_IFACE" 2>/dev/null || true
+    ip route add default via "$CXL_NET_GW" 2>/dev/null || true
+}
+
+main() {
+    local region=""
+
+    need cxl
+    log "Starting guest CXL setup"
+    log "CXL topology before setup:"
+    cxl list -B -D -P -M -u 2>&1 | tee -a "$LOG_FILE" || true
+
+    load_modules
+    wait_for_cxl_device
+    region=$(setup_cxl_region)
+    setup_ndctl_namespace "$region"
+    setup_dax_device "$region"
+    configure_network
+
+    log "Final CXL configuration:"
+    cxl list 2>&1 | tee -a "$LOG_FILE" || true
+    if command -v daxctl >/dev/null 2>&1; then
+        log "Final DAX configuration:"
+        daxctl list 2>&1 | tee -a "$LOG_FILE" || true
+    fi
+    if command -v numactl >/dev/null 2>&1; then
+        log "Final NUMA configuration:"
+        numactl --hardware 2>&1 | tee -a "$LOG_FILE" || true
+    fi
+    log "Guest CXL setup completed"
+}
+
+main "$@"
