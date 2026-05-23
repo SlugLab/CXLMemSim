@@ -167,10 +167,16 @@ int TCPServer::accept_connection() {
 }
 
 void TCPServer::handle_client() {
+    const uint64_t expected_token = tcp_get_auth_token();
     while (running_ && connected_) {
         TCPMessage recv_msg, send_msg;
 
         if (receive_message(recv_msg) < 0) {
+            break;
+        }
+
+        if (expected_token != 0 && recv_msg.request.auth_token != expected_token) {
+            std::cerr << "TCP auth failed: invalid token, closing connection" << std::endl;
             break;
         }
 
