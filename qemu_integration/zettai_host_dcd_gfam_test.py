@@ -107,6 +107,8 @@ def main():
                         help="Query CXLMemSim DCD/GFAM counters")
     parser.add_argument("--ignore-bind-error", action="store_true",
                         help="Continue if bind fails, useful when already bound")
+    parser.add_argument("--ignore-add-error", action="store_true",
+                        help="Continue if DCD add fails, useful when an add is already pending")
     args = parser.parse_args()
 
     if not (args.bind or args.add or args.query):
@@ -132,18 +134,23 @@ def main():
                     print(f"Ignoring bind error: {err}", file=sys.stderr)
 
             if args.add:
-                qmp.execute("cxl-add-dynamic-capacity", {
-                    "path": args.dcd_path,
-                    "host-id": args.host_id,
-                    "selection-policy": "prescriptive",
-                    "region": args.region,
-                    "extents": [{
-                        "offset": args.offset,
-                        "len": args.length,
-                    }],
-                })
-                print(f"Added DCD capacity: offset={args.offset} "
-                      f"length={args.length}")
+                try:
+                    qmp.execute("cxl-add-dynamic-capacity", {
+                        "path": args.dcd_path,
+                        "host-id": args.host_id,
+                        "selection-policy": "prescriptive",
+                        "region": args.region,
+                        "extents": [{
+                            "offset": args.offset,
+                            "len": args.length,
+                        }],
+                    })
+                    print(f"Added DCD capacity: offset={args.offset} "
+                          f"length={args.length}")
+                except RuntimeError as err:
+                    if not args.ignore_add_error:
+                        raise
+                    print(f"Ignoring add error: {err}", file=sys.stderr)
 
     if args.query:
         query_memsim(args.server_host, args.server_port)
