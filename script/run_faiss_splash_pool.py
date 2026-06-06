@@ -8,7 +8,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPLASH = (ROOT / "../Splash").resolve()
 FAISS_SRC = ROOT / "workloads/faiss"
 FAISS_BUILD = ROOT / "build/faiss_cpu"
 BENCH_SRC = ROOT / "tools/faiss_splash/faiss_cpu_splash.cpp"
@@ -16,15 +15,56 @@ BENCH_BIN = FAISS_BUILD / "faiss_cpu_splash"
 ARTIFACT = ROOT / "artifact/faiss_splash"
 
 
+def resolve_splash_root(explicit=None):
+    candidates = []
+    if explicit:
+        candidates.append(Path(explicit))
+    if os.environ.get("SPLASH_ROOT"):
+        candidates.append(Path(os.environ["SPLASH_ROOT"]))
+    candidates.extend([ROOT / "../splash", ROOT / "../Splash"])
+
+    for candidate in candidates:
+        root = candidate.expanduser().resolve()
+        if (root / "src/libpgas/include/pgas/cxl_backend.h").exists():
+            return root
+    return candidates[0].expanduser().resolve()
+
+
+SPLASH = resolve_splash_root()
+
+
+def resolve_splash_build(splash_root, explicit=None):
+    candidates = []
+    if explicit:
+        candidates.append(Path(explicit))
+    if os.environ.get("SPLASH_BUILD"):
+        candidates.append(Path(os.environ["SPLASH_BUILD"]))
+    candidates.extend([splash_root / "build", ROOT / "build/splash"])
+
+    for candidate in candidates:
+        build = candidate.expanduser().resolve()
+        if (build / "libcxl_backend.a").exists() or (build / "cxl_shmem_server").exists():
+            return build
+    return candidates[0].expanduser().resolve()
+
+
+SPLASH_BUILD = resolve_splash_build(SPLASH)
+
+
 def run(cmd, **kwargs):
     print("+", " ".join(str(x) for x in cmd), flush=True)
     subprocess.run(cmd, check=True, **kwargs)
 
 
+def prepend_ld_preload(env, preload_path):
+    existing = env.get("LD_PRELOAD")
+    env["LD_PRELOAD"] = f"{preload_path}:{existing}" if existing else str(preload_path)
+
+
 def configure_and_build_faiss(jobs):
     FAISS_BUILD.mkdir(parents=True, exist_ok=True)
-    cache = FAISS_BUILD / "CMakeCache.txt"
-    if not cache.exists():
+    configured = (FAISS_BUILD / "Makefile").exists() or (FAISS_BUILD / "build.ninja").exists()
+    if not configured:
         run([
             "cmake", "-S", str(FAISS_SRC), "-B", str(FAISS_BUILD),
             "-DCMAKE_BUILD_TYPE=Release",
@@ -48,7 +88,7 @@ def find_one(patterns):
 
 def build_benchmark():
     libfaiss = find_one(["faiss/libfaiss.a", "faiss/libfaiss.so", "**/libfaiss.a", "**/libfaiss.so"])
-    splash_backend = SPLASH / "build/libcxl_backend.a"
+    splash_backend = SPLASH_BUILD / "libcxl_backend.a"
     if not splash_backend.exists():
         raise FileNotFoundError(f"missing {splash_backend}; build Splash first")
     run([
@@ -67,7 +107,7 @@ def build_benchmark():
 def start_pool(args, log_path):
     log = open(log_path, "w", encoding="utf-8")
     if args.pool_provider == "splash":
-        server = SPLASH / "build/cxl_shmem_server"
+        server = SPLASH_BUILD / "cxl_shmem_server"
         if not server.exists():
             log.close()
             raise FileNotFoundError(f"missing {server}; build Splash first")
@@ -130,7 +170,25 @@ def bench_cmd(args, storage, node):
 def run_node(args, storage, node, out_dir):
     env = os.environ.copy()
     env["PGAS_LOCAL_NODE"] = str(node)
-    env["PGAS_NUM_NODES"] = "2"
+    env["PGAS_NUM_NODES"] = str(args.num_nodes)
+    env["PGAS_CXLMEMSIM_MAX_NODES"] = str(args.num_nodes)
+    env["CXL_SHMEM_SLOT"] = str(node)
+    if args.pgas_base:
+        env["PGAS_BASE"] = args.pgas_base
+    if args.pgas_size_mb:
+        env["PGAS_SIZE"] = str(args.pgas_size_mb * 1024 * 1024)
+    if args.malloc_threshold:
+        env["PGAS_MALLOC_THRESHOLD"] = str(args.malloc_threshold)
+    if args.pgas_preload:
+        prepend_ld_preload(env, args.pgas_preload)
+        env["PGAS_ENABLED"] = "1"
+        env["PGAS_MALLOC_REDIRECT"] = "1"
+        env.setdefault("PGAS_CXLMEMSIM_EAGER_CONNECT", "0")
+        if not args.enable_preload_interceptor:
+            env.setdefault("PGAS_NO_INTERCEPTOR", "1")
+        for i in range(args.num_nodes):
+            env.setdefault(f"PGAS_CXLMEMSIM_{i}", f"{args.server_host}:{args.server_port_base + i}:{i}")
+
     log_path = out_dir / f"{storage}_node{node}.log"
     with open(log_path, "w", encoding="utf-8") as log:
         proc = subprocess.run(bench_cmd(args, storage, node), stdout=log, stderr=subprocess.STDOUT, env=env, cwd=ROOT)
@@ -161,6 +219,8 @@ def parse_results(log_paths, csv_path):
 
 
 def main():
+    global SPLASH, SPLASH_BUILD
+
     parser = argparse.ArgumentParser(description="Run FAISS CPU against native DRAM and Splash/CXLMemSim SHMEM pool.")
     parser.add_argument("--nb", type=int, default=10000)
     parser.add_argument("--nq", type=int, default=64)
@@ -172,15 +232,32 @@ def main():
     parser.add_argument("--latency-ns", type=int, default=100)
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
+    parser.add_argument("--num-nodes", type=int, default=16)
     parser.add_argument("--pool-name", default="/faiss_cxl_pool")
     parser.add_argument("--pool-provider", choices=["splash", "cxlmemsim"], default="splash")
+    parser.add_argument("--splash-root", default=str(SPLASH))
+    parser.add_argument("--splash-build", default=str(SPLASH_BUILD))
+    parser.add_argument("--pgas-preload", default=None, help="Path to Splash libpgas_preload.so for FAISS child runs.")
+    parser.add_argument("--pgas-base", default="0x100000000")
+    parser.add_argument("--pgas-size-mb", type=int, default=4096)
+    parser.add_argument("--malloc-threshold", type=int, default=65536)
+    parser.add_argument("--server-host", default="127.0.0.1")
+    parser.add_argument("--server-port-base", type=int, default=9000)
+    parser.add_argument("--enable-preload-interceptor", action="store_true")
     parser.add_argument("--skip-build", action="store_true")
     args = parser.parse_args()
+
+    SPLASH = resolve_splash_root(args.splash_root)
+    SPLASH_BUILD = resolve_splash_build(SPLASH, args.splash_build)
 
     if not FAISS_SRC.exists():
         raise FileNotFoundError(f"missing FAISS checkout at {FAISS_SRC}")
     if not SPLASH.exists():
         raise FileNotFoundError(f"missing Splash checkout at {SPLASH}")
+    if args.num_nodes < 1 or args.num_nodes > 16:
+        raise ValueError("--num-nodes must be between 1 and Splash PGAS_MAX_NODES (16)")
+    if args.pgas_preload and not Path(args.pgas_preload).exists():
+        raise FileNotFoundError(f"missing PGAS preload library at {args.pgas_preload}")
 
     ARTIFACT.mkdir(parents=True, exist_ok=True)
     out_dir = ARTIFACT / time.strftime("run_%Y%m%d_%H%M%S")
@@ -191,14 +268,14 @@ def main():
         build_benchmark()
 
     logs = []
-    for node in (0, 1):
+    for node in range(args.num_nodes):
         logs.append(run_node(args, "native", node, out_dir))
 
     proc = None
     pool_log = None
     try:
         proc, pool_log = start_pool(args, out_dir / f"{args.pool_provider}_pool.log")
-        for node in (0, 1):
+        for node in range(args.num_nodes):
             logs.append(run_node(args, "cxl-pool", node, out_dir))
     finally:
         stop_proc(proc, pool_log)

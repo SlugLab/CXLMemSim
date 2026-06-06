@@ -32,6 +32,7 @@
 #include <netinet/in.h>
 #include <shared_mutex>
 #include <signal.h>
+#include <set>
 #include <spdlog/cfg/env.h>
 #include <spdlog/spdlog.h>
 #include <sstream>
@@ -69,7 +70,12 @@ constexpr uint8_t OP_GFAM_MAP = 11;
 // Grant host access; value=host, expected=permission mask
 constexpr uint8_t OP_GFAM_UNMAP = 12; // Revoke host access; value=host
 constexpr uint8_t OP_GFAM_QUERY = 13; // Return GFAM stats in response
-constexpr uint8_t OP_MAX = OP_GFAM_QUERY;
+constexpr uint8_t OP_BI_ENABLE = 14; // Endpoint BI enable notification
+constexpr uint8_t OP_BI_DISABLE = 15; // Endpoint BI disable notification
+constexpr uint8_t OP_BI_INVALIDATE = 16; // Back-invalidate range
+constexpr uint8_t OP_BI_WRITEBACK = 17; // Back-invalidate dirty writeback
+constexpr uint8_t OP_BI_QUERY = 18; // Return BI fabric stats
+constexpr uint8_t OP_MAX = OP_BI_QUERY;
 
 // Server request/response structures (matching qemu_integration)
 struct __attribute__((packed)) ServerRequest {
@@ -166,6 +172,8 @@ private:
     // Back invalidation tracking
     std::map<uint64_t, std::queue<BackInvalidationEntry>> back_invalidation_queue;
     std::shared_mutex back_invalidation_mutex;
+    std::set<int> bi_enabled_clients;
+    std::mutex bi_mutex;
 
     // Statistics
     std::atomic<uint64_t> total_reads{0};
@@ -177,6 +185,10 @@ private:
     std::atomic<uint64_t> coherency_invalidations{0};
     std::atomic<uint64_t> coherency_downgrades{0};
     std::atomic<uint64_t> back_invalidations{0};
+    std::atomic<uint64_t> bi_enable_requests{0};
+    std::atomic<uint64_t> bi_disable_requests{0};
+    std::atomic<uint64_t> bi_invalidate_requests{0};
+    std::atomic<uint64_t> bi_writeback_requests{0};
     std::atomic<uint64_t> total_latency_ns{0}; // accumulated latency for avg calculation
 
     // LSA (Label Storage Area) - shared across all QEMU guests
@@ -259,6 +271,8 @@ private:
     void handle_atomic_request(int thread_id, ServerRequest &req, ServerResponse &resp);
     bool is_capacity_management_op(uint8_t op_type) const;
     void handle_capacity_management_request(int thread_id, const ServerRequest &req, ServerResponse &resp);
+    bool is_bi_op(uint8_t op_type) const;
+    void handle_bi_request(int thread_id, const ServerRequest &req, ServerResponse &resp);
     bool check_fabric_access(int thread_id, const ServerRequest &req, bool is_write, bool is_atomic,
                              double &fabric_latency_ns, ServerResponse &resp);
     uint64_t calculate_total_latency(uint64_t base_latency, double congestion_factor, bool had_coherency_miss,
@@ -1240,6 +1254,11 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
         return;
     }
 
+    if (is_bi_op(req.op_type)) {
+        handle_bi_request(thread_id, req, resp);
+        return;
+    }
+
     // Handle LSA operations
     if (req.op_type == OP_LSA_READ) {
         std::lock_guard<std::mutex> lock(lsa_mutex_);
@@ -1505,6 +1524,118 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
     //             thread_id, cacheline_addr, req.addr - cacheline_addr, req.size);
 }
 
+bool ThreadPerConnectionServer::is_bi_op(uint8_t op_type) const {
+    return op_type == OP_BI_ENABLE || op_type == OP_BI_DISABLE || op_type == OP_BI_INVALIDATE ||
+           op_type == OP_BI_WRITEBACK || op_type == OP_BI_QUERY;
+}
+
+void ThreadPerConnectionServer::handle_bi_request(int thread_id, const ServerRequest &req, ServerResponse &resp) {
+    auto write_u64 = [&resp](size_t offset, uint64_t value) {
+        if (offset + sizeof(value) <= sizeof(resp.data)) {
+            memcpy(resp.data + offset, &value, sizeof(value));
+        }
+    };
+
+    resp.status = 0;
+    resp.latency_ns = static_cast<uint64_t>(controller->dramlatency);
+    resp.old_value = 0;
+
+    switch (req.op_type) {
+    case OP_BI_ENABLE: {
+        std::lock_guard<std::mutex> lock(bi_mutex);
+        bi_enabled_clients.insert(thread_id);
+        bi_enable_requests++;
+        resp.old_value = bi_enabled_clients.size();
+        SPDLOG_INFO("Thread {}: BI enabled for range 0x{:x}+0x{:x}", thread_id, req.addr, req.size);
+        break;
+    }
+    case OP_BI_DISABLE: {
+        std::lock_guard<std::mutex> lock(bi_mutex);
+        bi_enabled_clients.erase(thread_id);
+        bi_disable_requests++;
+        resp.old_value = bi_enabled_clients.size();
+        SPDLOG_INFO("Thread {}: BI disabled", thread_id);
+        break;
+    }
+    case OP_BI_INVALIDATE: {
+        uint64_t size = req.size ? req.size : SHM_CACHELINE_SIZE;
+        uint64_t start = req.addr & SHM_CACHELINE_MASK;
+        uint64_t end = req.addr + size;
+        uint64_t lines = 0;
+
+        if (end < req.addr) {
+            resp.status = 1;
+            break;
+        }
+
+        for (uint64_t line = start; line < end; line += SHM_CACHELINE_SIZE) {
+            register_back_invalidation(line, thread_id, {}, req.timestamp);
+            lines++;
+        }
+        bi_invalidate_requests += lines;
+        resp.old_value = lines;
+        resp.latency_ns = static_cast<uint64_t>(controller->dramlatency + lines * 5);
+        SPDLOG_DEBUG("Thread {}: BI invalidate 0x{:x}+0x{:x} ({} lines)", thread_id, req.addr, size, lines);
+        break;
+    }
+    case OP_BI_WRITEBACK: {
+        uint64_t size = std::min<uint64_t>(req.size ? req.size : SHM_CACHELINE_SIZE, sizeof(req.data));
+        uint64_t cacheline_addr = req.addr & SHM_CACHELINE_MASK;
+        std::vector<uint8_t> dirty_data(req.data, req.data + size);
+
+        if (req.addr > std::numeric_limits<uint64_t>::max() - (size - 1) ||
+            !shm_manager->is_valid_address(req.addr) || !shm_manager->is_valid_address(req.addr + size - 1)) {
+            SPDLOG_ERROR("Thread {}: Invalid BI writeback address 0x{:x}", thread_id, req.addr);
+            resp.status = 1;
+            break;
+        }
+
+        {
+            std::unique_lock<std::shared_mutex> lock(memory_mutex);
+            auto *metadata = shm_manager->get_cacheline_metadata(cacheline_addr);
+            if (!metadata) {
+                SPDLOG_ERROR("Thread {}: Missing BI metadata for cacheline 0x{:x}", thread_id, cacheline_addr);
+                resp.status = 1;
+                break;
+            }
+            std::lock_guard<std::mutex> cacheline_lock(metadata->lock);
+
+            if (!shm_manager->write_cacheline(req.addr, req.data, size)) {
+                SPDLOG_ERROR("Thread {}: BI writeback failed at 0x{:x}", thread_id, req.addr);
+                resp.status = 1;
+                break;
+            }
+
+            metadata->state = MODIFIED;
+            metadata->owner = thread_id;
+            metadata->sharers.clear();
+            metadata->last_access_time = req.timestamp;
+            metadata->version++;
+            msync(metadata, sizeof(CachelineMetadata), MS_SYNC);
+        }
+
+        register_back_invalidation(cacheline_addr, thread_id, dirty_data, req.timestamp);
+        bi_writeback_requests++;
+        resp.old_value = size;
+        resp.latency_ns = static_cast<uint64_t>(controller->dramlatency + 20);
+        break;
+    }
+    case OP_BI_QUERY: {
+        std::lock_guard<std::mutex> lock(bi_mutex);
+        resp.old_value = bi_enabled_clients.size();
+        write_u64(0, back_invalidations.load());
+        write_u64(8, bi_enable_requests.load());
+        write_u64(16, bi_disable_requests.load());
+        write_u64(24, bi_invalidate_requests.load());
+        write_u64(32, bi_writeback_requests.load());
+        break;
+    }
+    default:
+        resp.status = 1;
+        break;
+    }
+}
+
 void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerRequest &req, ServerResponse &resp) {
     uint64_t cacheline_addr = req.addr & ~(63ULL); // 64-byte aligned
 
@@ -1754,7 +1885,8 @@ void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
         ServerResponse resp = {0};
 
         // Clamp size to data buffer limit to prevent out-of-bounds reads
-        if (req.size > sizeof(req.data)) {
+        if ((req.op_type == OP_READ || req.op_type == OP_WRITE || req.op_type == OP_LSA_READ ||
+             req.op_type == OP_LSA_WRITE) && req.size > sizeof(req.data)) {
             SPDLOG_WARN("Thread {}: Clamping request size from {} to {} (data buffer limit)", thread_id,
                         (uint64_t)req.size, sizeof(req.data));
             req.size = sizeof(req.data);
@@ -1804,8 +1936,17 @@ bool ThreadPerConnectionServer::check_and_apply_back_invalidations(uint64_t cach
     while (!it->second.empty()) {
         BackInvalidationEntry &entry = it->second.front();
 
-        // Apply the dirty data if it's newer than our current data
-        if (entry.timestamp > info.last_access_time) {
+        if (entry.dirty_data.empty()) {
+            info.state = INVALID;
+            info.owner = -1;
+            info.sharers.clear();
+            info.last_access_time = std::max(info.last_access_time, entry.timestamp);
+            info.version++;
+            back_invalidations++;
+            had_back_invalidation = true;
+            SPDLOG_DEBUG("Applied BI invalidate for cacheline 0x{:x} from thread {} to thread {}", cacheline_addr,
+                         entry.source_thread_id, requesting_thread_id);
+        } else if (entry.timestamp > info.last_access_time) {
             // Write the dirty data directly to shared memory
             // Calculate the actual address from cacheline base
             uint64_t write_addr = cacheline_addr; // Start of cacheline
