@@ -253,6 +253,19 @@ latency/bandwidth, then exercises the Zettai fabric-memory controls exposed by
 QEMU: `DCD_GET_INFO`, optional DCD add/release when free capacity exists,
 `GFAM_GET_INFO`, and `MHSLD_GET_INFO/SET_HEAD`.
 
+For a bounded CXL.cache command-path check, build the optional static binary
+and run only the prefetch section:
+
+```bash
+make -C guest_libcuda static
+sudo ./guest_libcuda/cxl_bar_benchmark.static \
+  --prefetch-only --prefetch-iters 5
+```
+
+This mode is useful when the guest is reached through a serial shell because it
+avoids the full BAR bandwidth suite while still exercising read- and
+write-intent `CACHE_PREFETCH`.
+
 ## Features
 
 - **Cacheline-granular access**: All memory operations are performed at 64-byte cacheline granularity
