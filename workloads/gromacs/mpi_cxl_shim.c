@@ -33,6 +33,7 @@
 #define CXL_MSG_QUEUE_SIZE 64
 #define CXL_MSG_MAX_INLINE_SIZE 256
 #define CXL_HEADER_SIZE (sizeof(cxl_shm_header_t) + CXL_MAX_RANKS * sizeof(cxl_rank_mailbox_t))
+#define CXL_DIRECT_DEFAULT_MAX_BYTES 4096
 
 // Remotable pointer - offset from shared memory base
 typedef uint64_t cxl_rptr_t;
@@ -41,6 +42,21 @@ typedef uint64_t cxl_rptr_t;
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
+
+static size_t cxl_direct_max_bytes(void) {
+    const char *value = getenv("CXL_DIRECT_MAX_BYTES");
+    if (!value || !*value) {
+        return CXL_DIRECT_DEFAULT_MAX_BYTES;
+    }
+
+    char *end = NULL;
+    unsigned long long parsed = strtoull(value, &end, 0);
+    if (end == value || parsed == 0) {
+        return CXL_DIRECT_DEFAULT_MAX_BYTES;
+    }
+
+    return (size_t)parsed;
+}
 
 // ============================================================================
 // CC RMA-based Point-to-Point: per-sender slot in an MPI_Win backed by CXL
@@ -2623,7 +2639,7 @@ int MPI_Bcast(void *buffer, int count, MPI_Datatype datatype, int root, MPI_Comm
 
     // Try CXL broadcast for COMM_WORLD (only when all ranks share same DAX)
     if (g_cxl.cxl_comm_enabled && g_cxl.all_ranks_local &&
-        comm == MPI_COMM_WORLD && total_size <= 4096 && g_cxl.world_size <= 64) {
+        comm == MPI_COMM_WORLD && total_size <= cxl_direct_max_bytes() && g_cxl.world_size <= 64) {
         atomic_fetch_add(&g_stats.bcast_cxl, 1);
 
         LOAD_ORIGINAL(MPI_Barrier);
@@ -2703,7 +2719,7 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype da
     // Note: Skip if sendbuf is MPI_IN_PLACE to avoid complexity
     if (g_cxl.cxl_comm_enabled && g_cxl.all_ranks_local &&
         comm == MPI_COMM_WORLD && sendbuf != MPI_IN_PLACE &&
-        op == MPI_SUM && total_size <= 4096 && g_cxl.world_size <= 64 &&
+        op == MPI_SUM && total_size <= cxl_direct_max_bytes() && g_cxl.world_size <= 64 &&
         (datatype == MPI_DOUBLE || datatype == MPI_FLOAT || datatype == MPI_INT ||
          datatype == MPI_LONG || datatype == MPI_LONG_LONG)) {
 
@@ -2808,7 +2824,7 @@ int MPI_Allgather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
     // Skip MPI_IN_PLACE to avoid complexity
     if (g_cxl.cxl_comm_enabled && g_cxl.all_ranks_local &&
         comm == MPI_COMM_WORLD && sendbuf != MPI_IN_PLACE &&
-        send_bytes <= 4096 && g_cxl.world_size <= 64) {
+        send_bytes <= cxl_direct_max_bytes() && g_cxl.world_size <= 64) {
 
         LOAD_ORIGINAL(MPI_Barrier);
 
@@ -2875,7 +2891,7 @@ int MPI_Alltoall(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
 
     // CXL-optimized all-to-all for COMM_WORLD (only when all ranks share same DAX)
     if (g_cxl.cxl_comm_enabled && g_cxl.all_ranks_local &&
-        comm == MPI_COMM_WORLD && send_bytes <= 4096 && g_cxl.world_size <= 64) {
+        comm == MPI_COMM_WORLD && send_bytes <= cxl_direct_max_bytes() && g_cxl.world_size <= 64) {
         int n = g_cxl.world_size;
         size_t row_size = send_bytes * n;  // Total data this rank sends
 
@@ -2945,7 +2961,7 @@ int MPI_Gather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
         if (send_size < 0) goto gather_fallback;
         size_t send_bytes = (size_t)sendcount * send_size;
 
-        if (send_bytes <= 4096) {
+        if (send_bytes <= cxl_direct_max_bytes()) {
             LOAD_ORIGINAL(MPI_Barrier);
 
             // Each rank allocates its own contribution buffer
@@ -3011,7 +3027,7 @@ int MPI_Scatter(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
         if (send_size < 0) goto scatter_fallback;
         size_t send_bytes = (size_t)sendcount * send_size;
 
-        if (send_bytes <= 4096) {
+        if (send_bytes <= cxl_direct_max_bytes()) {
             size_t total_size = send_bytes * g_cxl.world_size;
 
             LOAD_ORIGINAL(MPI_Barrier);

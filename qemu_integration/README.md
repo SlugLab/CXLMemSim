@@ -170,6 +170,25 @@ sudo CXL_REGION_TYPE=ram CXL_DAX_MODE=devdax ./setup_cxl_numa.sh
 sudo CXL_REGION_TYPE=ram CXL_DAX_MODE=system-ram ./setup_cxl_numa.sh
 ```
 
+When installing `cxl-numa-setup.service` in a guest, put per-VM settings in
+`/etc/default/cxl-numa-setup`. The setup helper derives a default static IP as
+`192.168.100.(10 + CXL_HOST_ID)/24` when `CXL_CONFIGURE_NET=1` and
+`CXL_NET_ADDR` is not set:
+
+```bash
+# Primary VM
+CXL_CONFIGURE_NET=1
+CXL_HOST_ID=0
+
+# Secondary VM
+CXL_CONFIGURE_NET=1
+CXL_HOST_ID=1
+```
+
+Set `CXL_NET_ADDR` explicitly if the VM should use a different address. The
+helper auto-detects the first non-loopback network interface by default; set
+`CXL_NET_IFACE=enp0s2` or similar to pin it.
+
 For DCD/volatile CXL.mem, use `daxctl`/device-dax or system-ram mode. The old
 `ndctl create-namespace -m dax` path is for pmem-style regions and is disabled
 by default in `setup_cxl_numa.sh`; enable it only with

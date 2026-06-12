@@ -20,9 +20,21 @@ CXL_DAX_MODE=${CXL_DAX_MODE:-devdax}
 CXL_TOUCH_DAX=${CXL_TOUCH_DAX:-${ZETTAI_TOUCH_DAX:-0}}
 CXL_CREATE_NDCTL_NAMESPACE=${CXL_CREATE_NDCTL_NAMESPACE:-0}
 CXL_CONFIGURE_NET=${CXL_CONFIGURE_NET:-0}
-CXL_NET_IFACE=${CXL_NET_IFACE:-enp0s2}
-CXL_NET_ADDR=${CXL_NET_ADDR:-192.168.100.10/24}
+CXL_HOST_ID=${CXL_HOST_ID:-${ZETTAI_HOST_ID:-0}}
+CXL_NET_IFACE=${CXL_NET_IFACE:-auto}
+CXL_NET_BASE=${CXL_NET_BASE:-192.168.100}
+CXL_NET_PREFIX=${CXL_NET_PREFIX:-24}
+CXL_NET_HOST_OFFSET=${CXL_NET_HOST_OFFSET:-10}
+if [[ -z "${CXL_NET_ADDR:-}" ]]; then
+    if [[ "$CXL_HOST_ID" =~ ^[0-9]+$ && "$CXL_NET_HOST_OFFSET" =~ ^[0-9]+$ ]]; then
+        CXL_NET_ADDR="${CXL_NET_BASE}.$((CXL_NET_HOST_OFFSET + CXL_HOST_ID))/${CXL_NET_PREFIX}"
+    else
+        CXL_NET_ADDR="${CXL_NET_BASE}.${CXL_NET_HOST_OFFSET}/${CXL_NET_PREFIX}"
+    fi
+fi
 CXL_NET_GW=${CXL_NET_GW:-192.168.100.1}
+CXL_NET_WAIT_RETRIES=${CXL_NET_WAIT_RETRIES:-10}
+CXL_NET_WAIT_DELAY=${CXL_NET_WAIT_DELAY:-0.2}
 MAX_RETRIES=${MAX_RETRIES:-20}
 RETRY_DELAY=${RETRY_DELAY:-2}
 
@@ -44,6 +56,9 @@ Environment:
   CXL_TOUCH_DAX                  mmap and touch /dev/daxX.Y, default: 0
   CXL_CREATE_NDCTL_NAMESPACE     Legacy ndctl namespace path, default: 0
   CXL_CONFIGURE_NET              Configure static guest network, default: 0
+  CXL_HOST_ID                    Node id used for default IP, default: 0
+  CXL_NET_IFACE                  Interface name or auto, default: auto
+  CXL_NET_ADDR                   Static address, default: 192.168.100.(10+CXL_HOST_ID)/24
 EOF
 }
 
@@ -304,9 +319,68 @@ configure_network() {
         return 0
     fi
 
-    ip link set "$CXL_NET_IFACE" up
-    ip addr add "$CXL_NET_ADDR" dev "$CXL_NET_IFACE" 2>/dev/null || true
-    ip route add default via "$CXL_NET_GW" 2>/dev/null || true
+    if ! command -v ip >/dev/null 2>&1; then
+        log "WARNING: ip command is not installed; skipping network setup"
+        return 0
+    fi
+
+    local iface=""
+    if ! iface=$(wait_for_net_iface); then
+        log "WARNING: no network interface available for CXL_NET_IFACE=$CXL_NET_IFACE; skipping network setup"
+        return 0
+    fi
+
+    log "Configuring guest network: iface=$iface addr=$CXL_NET_ADDR gw=$CXL_NET_GW"
+    if ! ip link set "$iface" up; then
+        log "WARNING: failed to bring $iface up; skipping network setup"
+        return 0
+    fi
+
+    ip addr add "$CXL_NET_ADDR" dev "$iface" 2>/dev/null || true
+    if [[ -n "$CXL_NET_GW" ]]; then
+        ip route add default via "$CXL_NET_GW" 2>/dev/null || true
+    fi
+}
+
+detect_net_iface() {
+    if [[ "$CXL_NET_IFACE" != "auto" ]]; then
+        if ip link show dev "$CXL_NET_IFACE" >/dev/null 2>&1; then
+            echo "$CXL_NET_IFACE"
+            return 0
+        fi
+        return 1
+    fi
+
+    local iface=""
+    iface=$(ip -o link show up 2>/dev/null |
+        awk -F': ' '$2 != "lo" { sub(/@.*/, "", $2); print $2; exit }')
+    if [[ -z "$iface" ]]; then
+        iface=$(ip -o link show 2>/dev/null |
+            awk -F': ' '$2 != "lo" { sub(/@.*/, "", $2); print $2; exit }')
+    fi
+
+    if [[ -n "$iface" ]]; then
+        echo "$iface"
+        return 0
+    fi
+    return 1
+}
+
+wait_for_net_iface() {
+    local retries=0
+    local iface=""
+
+    while [[ $retries -lt $CXL_NET_WAIT_RETRIES ]]; do
+        if iface=$(detect_net_iface); then
+            echo "$iface"
+            return 0
+        fi
+        log "Waiting for guest network interface... (attempt $((retries + 1))/$CXL_NET_WAIT_RETRIES)"
+        sleep "$CXL_NET_WAIT_DELAY"
+        retries=$((retries + 1))
+    done
+
+    return 1
 }
 
 main() {

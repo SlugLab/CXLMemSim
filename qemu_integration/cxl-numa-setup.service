@@ -8,6 +8,7 @@ DefaultDependencies=no
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+EnvironmentFile=-/etc/default/cxl-numa-setup
 ExecStart=/usr/local/bin/setup_cxl_numa.sh
 StandardOutput=journal
 StandardError=journal
