@@ -248,7 +248,7 @@ The command protocol includes:
 - kernel launch,
 - stream and event operations,
 - bulk transfer commands,
-- cache flush, invalidate, and writeback commands,
+- cache flush, invalidate, writeback, and prefetch commands,
 - Type 2 to Type 3 peer-to-peer DMA discovery and transfer commands,
 - coherent shared-memory pool commands,
 - host/device bias commands,
@@ -706,6 +706,26 @@ For an existing CUDA Driver API program:
 ```bash
 LD_PRELOAD=./libcuda.so.1 ./your_cuda_program
 ```
+
+For `../llama.cpp-cxl`, build with ggml-cxl enabled and place only the KV cache on
+the CXL Type 2 device:
+
+```bash
+cmake -S ../llama.cpp-cxl -B ../llama.cpp-cxl/build-cxl -DGGML_CXL=ON
+cmake --build ../llama.cpp-cxl/build-cxl -j --target llama-cli
+
+../llama.cpp-cxl/build-cxl/bin/llama-cli \
+    -m /path/to/model.gguf \
+    --cxl-kv \
+    --cxl-kv-device CXL0 \
+    --cxl-kv-prefetch \
+    -p "prompt"
+```
+
+`--cxl-kv` sets the internal `LLAMA_CXL_KV=1` path, allocates K/V cache tensors
+with the ggml-cxl buffer type, initializes the selected CXL backend for KV-only
+offload, and issues Type 2 cache-prefetch commands for K/V attention views unless
+`--no-cxl-kv-prefetch` is used.
 
 Build all guest-side tests:
 

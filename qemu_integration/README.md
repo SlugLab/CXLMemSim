@@ -199,6 +199,92 @@ Query counters again from the host with:
 python3 ./zettai_host_dcd_gfam_test.py --query
 ```
 
+### Zettai Type2 tmatmul and CXL.mem ioctl test
+
+The Zettai switch CCI device (`7a74:a123`) creates a guest char device such as
+`/dev/zettai_cxl0d003`. The current Linux driver ABI for this device is
+`ioctl()`, not `io_uring_cmd`; `/tmp/zettai-qmp.sock` remains a host-side QMP
+socket used for bind/add/query orchestration.
+
+Build the guest helper:
+
+```bash
+gcc -O2 -Wall -Wextra -o zettai_tmatmul_ctl zettai_tmatmul_ctl.c
+```
+
+Check whether QEMU exposed the tmatmul CSR block:
+
+```bash
+./zettai_tmatmul_ctl --dev /dev/zettai_cxl0d003 --info
+```
+
+If dmesg reports `tmatmul=0` or the tool prints `tmatmul_present=no`, QEMU only
+exposed the switch CCI BAR and tmatmul smoke runs will return `ENODEV`. CXL.mem
+read/write can still be tested by passing a real nonzero HPA base from a CXL
+region or decoder resource:
+
+```bash
+cxl list -R -u
+./zettai_tmatmul_ctl --dev /dev/zettai_cxl0d003 \
+  --mem-write --hpa-base 0xYOUR_REGION_RESOURCE --hpa-size 0x10000000 \
+  --offset 0 --size 4096 --pattern 0x5a
+./zettai_tmatmul_ctl --dev /dev/zettai_cxl0d003 \
+  --mem-read --hpa-base 0xYOUR_REGION_RESOURCE --hpa-size 0x10000000 \
+  --offset 0 --size 64
+```
+
+Once the QEMU Zettai device exposes a BAR large enough for the tmatmul CSR window
+at `BAR0 + 0x1c0000`, run:
+
+```bash
+./zettai_tmatmul_ctl --dev /dev/zettai_cxl0d003 \
+  --smoke --hpa-base 0xYOUR_REGION_RESOURCE --hpa-size 0x10000000
+```
+
+### Zettai benchmark harness
+
+For a repeatable host-side smoke benchmark, use:
+
+```bash
+QEMU_NET_MODE=none \
+KERNEL_IMAGE=/path/to/bzImage \
+DISK_IMAGE=/path/to/rootfs.img \
+./zettai_benchmark.sh --launch --keep-qemu
+```
+
+The harness launches QEMU with a QMP socket, binds `cxl-dcd0`, adds a 256 MiB
+DCD extent, queries CXLMemSim DCD/GFAM counters, and writes logs under
+`build/zettai-bench/`. If QEMU is already running, omit `--launch` and keep the
+same `ZETTAI_QMP_SOCKET` value used by `QEMU_EXTRA_ARGS`.
+
+To include the in-guest DCD region setup and Type2 fabric-memory BAR benchmark,
+provide SSH access to the guest:
+
+```bash
+ZETTAI_GUEST_SSH="ssh root@192.168.122.10" \
+ZETTAI_GUEST_DIR=/root/CXLMemSim/qemu_integration \
+./zettai_benchmark.sh --guest --run-type2-bench
+```
+
+The Type2 benchmark is `guest_libcuda/cxl_bar_benchmark.c`. It discovers the
+`cxl-type2` endpoint (`8086:0d92`), reports BAR register and data-region
+latency/bandwidth, then exercises the Zettai fabric-memory controls exposed by
+QEMU: `DCD_GET_INFO`, optional DCD add/release when free capacity exists,
+`GFAM_GET_INFO`, and `MHSLD_GET_INFO/SET_HEAD`.
+
+For a bounded CXL.cache command-path check, build the optional static binary
+and run only the prefetch section:
+
+```bash
+make -C guest_libcuda static
+sudo ./guest_libcuda/cxl_bar_benchmark.static \
+  --prefetch-only --prefetch-iters 5
+```
+
+This mode is useful when the guest is reached through a serial shell because it
+avoids the full BAR bandwidth suite while still exercising read- and
+write-intent `CACHE_PREFETCH`.
+
 ## Features
 
 - **Cacheline-granular access**: All memory operations are performed at 64-byte cacheline granularity

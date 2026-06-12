@@ -35,12 +35,13 @@ VM_MAXMEM=${VM_MAXMEM:-32G}
 VM_SMP=${VM_SMP:-4}
 DISK_IMAGE=${DISK_IMAGE:-./qemu.img}
 DISK_FORMAT=${DISK_FORMAT:-auto}
-KERNEL_IMAGE=${KERNEL_IMAGE:-./bzImage}
+KERNEL_IMAGE=${KERNEL_IMAGE:-/root/linux-cxl-type2/arch/x86/boot/bzImage}
 KERNEL_APPEND=${KERNEL_APPEND:-"root=/dev/vda rw console=ttyS0,115200 nokaslr"}
 QEMU_DISK_DEVICE=${QEMU_DISK_DEVICE:-"virtio-blk-pci,drive=bootdisk,bus=pcie.0,id=bootdisk0"}
 QEMU_NET_MODE=${QEMU_NET_MODE:-none}
 QEMU_NETDEV=${QEMU_NETDEV:-}
 QEMU_NET_DEVICE=${QEMU_NET_DEVICE:-"virtio-net-pci,netdev=net0"}
+QEMU_STDIO_SIGNAL=${QEMU_STDIO_SIGNAL:-off}
 
 if [[ ! -x "$QEMU_BINARY" ]]; then
     echo "QEMU binary not found or not executable: $QEMU_BINARY" >&2
@@ -135,6 +136,13 @@ if [[ -n "$QEMU_NETDEV" ]]; then
     fi
     net_args=(-netdev "$QEMU_NETDEV" -device "$QEMU_NET_DEVICE")
 fi
+
+console_args=(
+    -display none
+    -chardev "stdio,id=char0,signal=$QEMU_STDIO_SIGNAL,mux=on"
+    -serial chardev:char0
+    -mon chardev=char0,mode=readline
+)
 
 mkdir -p "$RUN_DIR"
 truncate -s "$CXL_DC_SIZE" "$RUN_DIR/cxl-dcd0.raw"
@@ -286,5 +294,5 @@ exec "$QEMU_BINARY" \
     -device cxl-type3,volatile-dc-memdev=cxl-mem1,lsa=cxl-lsa1,id=cxl-dcd1,sn=102,num-dc-regions=8,vcs=zettai0,dsppb=1,memsim-dcd=on,memsim-gfam=on,memsim-gfam-host-id=1 \
     -device cxl-type3,volatile-dc-memdev=cxl-mem2,lsa=cxl-lsa2,id=cxl-dcd2,sn=103,num-dc-regions=8,vcs=zettai0,dsppb=2,memsim-dcd=on,memsim-gfam=on,memsim-gfam-host-id=2 \
     -device cxl-type3,volatile-dc-memdev=cxl-mem3,lsa=cxl-lsa3,id=cxl-dcd3,sn=104,num-dc-regions=8,vcs=zettai0,dsppb=3,memsim-dcd=on,memsim-gfam=on,memsim-gfam-host-id=3 \
-    -nographic \
+    "${console_args[@]}" \
     "${extra_args[@]}"

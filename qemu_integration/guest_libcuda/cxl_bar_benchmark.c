@@ -11,6 +11,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdint.h>
@@ -42,6 +43,25 @@ typedef struct {
 
 static int g_num_devices = 0;
 static cxl_dev_t g_devs[MAX_DEVICES];
+static int g_prefetch_only = 0;
+static int g_prefetch_iters = 5000;
+
+static int parse_positive_int(const char *value, int fallback) {
+    char *end = NULL;
+    long parsed;
+
+    if (!value || *value == '\0')
+        return fallback;
+    errno = 0;
+    parsed = strtol(value, &end, 10);
+    if (errno != 0 || !end || *end != '\0' || parsed <= 0 || parsed > 1000000)
+        return fallback;
+    return (int)parsed;
+}
+
+static void usage(const char *argv0) {
+    fprintf(stderr, "Usage: %s [--prefetch-only] [--prefetch-iters N]\n", argv0);
+}
 
 static uint16_t read_pci_id(const char *bdf, const char *which) {
     char path[256], buf[32];
@@ -101,7 +121,9 @@ static void enable_device(const char *bdf) {
     snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/enable", bdf);
     int fd = open(path, O_WRONLY);
     if (fd >= 0) {
-        write(fd, "1", 1);
+        if (write(fd, "1", 1) != 1) {
+            fprintf(stderr, "  Cannot enable %s: %s\n", bdf, strerror(errno));
+        }
         close(fd);
     }
 }
@@ -118,9 +140,11 @@ static int discover_devices(void) {
             continue;
         if (read_pci_id(ent->d_name, "device") != CXL_TYPE2_DEVICE)
             continue;
+        if (strlen(ent->d_name) >= sizeof(g_devs[g_num_devices].bdf))
+            continue;
 
         cxl_dev_t *d = &g_devs[g_num_devices];
-        strncpy(d->bdf, ent->d_name, sizeof(d->bdf) - 1);
+        strcpy(d->bdf, ent->d_name);
         enable_device(d->bdf);
 
         d->bar2_size = bar_range(d->bdf, 2);
@@ -180,6 +204,49 @@ static double time_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec * 1e9 + ts.tv_nsec;
+}
+
+static inline uint64_t read_reg64(cxl_dev_t *d, size_t off) { return *(volatile uint64_t *)(d->bar2 + off); }
+
+static inline void write_reg64(cxl_dev_t *d, size_t off, uint64_t val) { *(volatile uint64_t *)(d->bar2 + off) = val; }
+
+static int issue_command(cxl_dev_t *d, uint32_t cmd) {
+    volatile uint32_t *cmd_reg = (volatile uint32_t *)(d->bar2 + CXL_GPU_REG_CMD);
+    volatile uint32_t *status_reg = (volatile uint32_t *)(d->bar2 + CXL_GPU_REG_CMD_STATUS);
+    volatile uint32_t *result_reg = (volatile uint32_t *)(d->bar2 + CXL_GPU_REG_CMD_RESULT);
+
+    *cmd_reg = cmd;
+    __sync_synchronize();
+
+    for (int timeout = 100000; timeout > 0; timeout--) {
+        uint32_t st = *status_reg;
+
+        if (st == CXL_GPU_CMD_STATUS_COMPLETE) {
+            return (int)*result_reg;
+        }
+        if (st == CXL_GPU_CMD_STATUS_ERROR) {
+            return -(int)*result_reg;
+        }
+    }
+
+    return -ETIMEDOUT;
+}
+
+static void measure_command_latency(cxl_dev_t *d, uint32_t cmd, const char *name, int iters) {
+    double t0;
+    double t1;
+    int rc = 0;
+
+    t0 = time_ns();
+    for (int i = 0; i < iters; i++) {
+        rc = issue_command(d, cmd);
+        if (rc != CXL_GPU_SUCCESS) {
+            printf("  %-20s failed: rc=%d\n", name, rc);
+            return;
+        }
+    }
+    t1 = time_ns();
+    printf("  %-20s %7.1f ns/op  (%d ops)\n", name, (t1 - t0) / iters, iters);
 }
 
 /*  Benchmark: Register Latency  */
@@ -394,6 +461,51 @@ static void bench_cmd_latency(cxl_dev_t *d) {
     (void)result_reg;
 }
 
+/*  Benchmark: CXL.cache Prefetch Command  */
+
+static void bench_cache_prefetch(cxl_dev_t *d, uint32_t caps) {
+    const uint64_t addr = 0;
+    const uint64_t size = 4096;
+    int rc;
+
+    if (!(caps & CXL_GPU_CAP_CACHE_COHERENT)) {
+        printf("\n--- CXL.cache Prefetch: skipped (cache-coherent cap not set) ---\n");
+        return;
+    }
+
+    printf("\n--- CXL.cache Prefetch (device %s) ---\n", d->bdf);
+
+    write_reg64(d, CXL_GPU_REG_PARAM0, addr);
+    write_reg64(d, CXL_GPU_REG_PARAM1, size);
+    write_reg64(d, CXL_GPU_REG_PARAM2, 0);
+    rc = issue_command(d, CXL_GPU_CMD_CACHE_PREFETCH);
+    if (rc == CXL_GPU_SUCCESS) {
+        printf("  read prefetch:       addr=0x%" PRIx64 " size=%" PRIu64 " rc=%d result=%" PRIu64 "\n", addr, size,
+               rc, read_reg64(d, CXL_GPU_REG_RESULT0));
+        write_reg64(d, CXL_GPU_REG_PARAM0, addr);
+        write_reg64(d, CXL_GPU_REG_PARAM1, size);
+        write_reg64(d, CXL_GPU_REG_PARAM2, 0);
+        measure_command_latency(d, CXL_GPU_CMD_CACHE_PREFETCH, "CACHE_PREFETCH_R", g_prefetch_iters);
+    } else {
+        printf("  read prefetch failed: rc=%d\n", rc);
+    }
+
+    write_reg64(d, CXL_GPU_REG_PARAM0, addr);
+    write_reg64(d, CXL_GPU_REG_PARAM1, size);
+    write_reg64(d, CXL_GPU_REG_PARAM2, 1);
+    rc = issue_command(d, CXL_GPU_CMD_CACHE_PREFETCH);
+    if (rc == CXL_GPU_SUCCESS) {
+        printf("  write prefetch:      addr=0x%" PRIx64 " size=%" PRIu64 " rc=%d result=%" PRIu64 "\n", addr, size,
+               rc, read_reg64(d, CXL_GPU_REG_RESULT0));
+        write_reg64(d, CXL_GPU_REG_PARAM0, addr);
+        write_reg64(d, CXL_GPU_REG_PARAM1, size);
+        write_reg64(d, CXL_GPU_REG_PARAM2, 1);
+        measure_command_latency(d, CXL_GPU_CMD_CACHE_PREFETCH, "CACHE_PREFETCH_W", g_prefetch_iters);
+    } else {
+        printf("  write prefetch failed: rc=%d\n", rc);
+    }
+}
+
 /*  Benchmark: Stride / Random Access Pattern  */
 
 static void bench_access_patterns(cxl_dev_t *d) {
@@ -450,6 +562,114 @@ static void bench_access_patterns(cxl_dev_t *d) {
         double t1 = time_ns();
         (void)sink;
         printf("  random 8B:          %7.1f ns/access  (%d accesses)\n", (t1 - t0) / accesses, accesses);
+    }
+}
+
+/*  Benchmark: DCD / GFAM / MH-SLD Fabric Memory Controls  */
+
+static void bench_fabric_memory(cxl_dev_t *d, uint32_t caps) {
+    uint64_t dcd_total = 0;
+    uint64_t dcd_alloc = 0;
+    uint64_t dcd_free = 0;
+    uint64_t dcd_extents = 0;
+    uint64_t gfam_hosts = 0;
+    uint64_t gfam_mappings = 0;
+    uint64_t gfam_allowed = 0;
+    uint64_t gfam_denied = 0;
+    uint64_t mhsld_heads = 0;
+    uint64_t mhsld_head_id = 0;
+    int rc;
+
+    if (!(caps & (CXL_GPU_CAP_DCD | CXL_GPU_CAP_GFAM | CXL_GPU_CAP_MHSLD))) {
+        printf("\n--- Fabric Memory Controls: skipped (no DCD/GFAM/MH-SLD caps) ---\n");
+        return;
+    }
+
+    printf("\n--- Fabric Memory Controls (device %s) ---\n", d->bdf);
+
+    if (caps & CXL_GPU_CAP_DCD) {
+        rc = issue_command(d, CXL_GPU_CMD_DCD_GET_INFO);
+        if (rc == CXL_GPU_SUCCESS) {
+            dcd_total = read_reg64(d, CXL_GPU_REG_RESULT0);
+            dcd_alloc = read_reg64(d, CXL_GPU_REG_RESULT1);
+            dcd_free = read_reg64(d, CXL_GPU_REG_RESULT2);
+            dcd_extents = read_reg64(d, CXL_GPU_REG_RESULT3);
+            printf("  DCD command info: total=%" PRIu64 " alloc=%" PRIu64 " free=%" PRIu64 " extents=%" PRIu64 "\n",
+                   dcd_total, dcd_alloc, dcd_free, dcd_extents);
+            printf("  DCD status regs:  total=%" PRIu64 " alloc=%" PRIu64 " free=%" PRIu64 " extents=%" PRIu64 "\n",
+                   read_reg64(d, CXL_GPU_REG_DCD_TOTAL), read_reg64(d, CXL_GPU_REG_DCD_ALLOCATED),
+                   read_reg64(d, CXL_GPU_REG_DCD_FREE), read_reg64(d, CXL_GPU_REG_DCD_EXTENTS));
+            measure_command_latency(d, CXL_GPU_CMD_DCD_GET_INFO, "DCD_GET_INFO", 5000);
+        } else {
+            printf("  DCD_GET_INFO failed: rc=%d\n", rc);
+        }
+
+        if (dcd_free >= 1024 * 1024) {
+            write_reg64(d, CXL_GPU_REG_PARAM0, UINT64_MAX);
+            write_reg64(d, CXL_GPU_REG_PARAM1, 1024 * 1024);
+            write_reg64(d, CXL_GPU_REG_PARAM2, 0);
+            rc = issue_command(d, CXL_GPU_CMD_DCD_ADD);
+            if (rc == CXL_GPU_SUCCESS) {
+                uint64_t base = read_reg64(d, CXL_GPU_REG_RESULT0);
+                uint64_t size = read_reg64(d, CXL_GPU_REG_RESULT1);
+                uint64_t tag = read_reg64(d, CXL_GPU_REG_RESULT2);
+
+                printf("  DCD add/release:  base=0x%" PRIx64 " size=%" PRIu64 " tag=%" PRIu64 "\n", base, size, tag);
+                write_reg64(d, CXL_GPU_REG_PARAM0, base);
+                write_reg64(d, CXL_GPU_REG_PARAM1, size);
+                write_reg64(d, CXL_GPU_REG_PARAM2, tag);
+                rc = issue_command(d, CXL_GPU_CMD_DCD_RELEASE);
+                if (rc != CXL_GPU_SUCCESS) {
+                    printf("  DCD_RELEASE failed after add: rc=%d\n", rc);
+                }
+            } else {
+                printf("  DCD_ADD skipped/failed: rc=%d\n", rc);
+            }
+        } else {
+            printf("  DCD add/release:  skipped (no free DCD capacity)\n");
+        }
+    }
+
+    if (caps & CXL_GPU_CAP_GFAM) {
+        rc = issue_command(d, CXL_GPU_CMD_GFAM_GET_INFO);
+        if (rc == CXL_GPU_SUCCESS) {
+            gfam_hosts = read_reg64(d, CXL_GPU_REG_RESULT0);
+            gfam_mappings = read_reg64(d, CXL_GPU_REG_RESULT1);
+            gfam_allowed = read_reg64(d, CXL_GPU_REG_RESULT2);
+            gfam_denied = read_reg64(d, CXL_GPU_REG_RESULT3);
+            printf("  GFAM command info: hosts=%" PRIu64 " mappings=%" PRIu64 " allowed=%" PRIu64 " denied=%" PRIu64
+                   "\n",
+                   gfam_hosts, gfam_mappings, gfam_allowed, gfam_denied);
+            printf("  GFAM status regs:  hosts=%" PRIu64 " mappings=%" PRIu64 " denied=%" PRIu64 "\n",
+                   read_reg64(d, CXL_GPU_REG_GFAM_HOSTS), read_reg64(d, CXL_GPU_REG_GFAM_MAPPINGS),
+                   read_reg64(d, CXL_GPU_REG_GFAM_DENIED));
+            measure_command_latency(d, CXL_GPU_CMD_GFAM_GET_INFO, "GFAM_GET_INFO", 5000);
+        } else {
+            printf("  GFAM_GET_INFO failed: rc=%d\n", rc);
+        }
+    }
+
+    if (caps & CXL_GPU_CAP_MHSLD) {
+        rc = issue_command(d, CXL_GPU_CMD_MHSLD_GET_INFO);
+        if (rc == CXL_GPU_SUCCESS) {
+            mhsld_heads = read_reg64(d, CXL_GPU_REG_RESULT0);
+            mhsld_head_id = read_reg64(d, CXL_GPU_REG_RESULT1);
+            printf("  MH-SLD command info: heads=%" PRIu64 " local=%" PRIu64 " reads=%" PRIu64 " writes=%" PRIu64 "\n",
+                   mhsld_heads, mhsld_head_id, read_reg64(d, CXL_GPU_REG_RESULT2), read_reg64(d, CXL_GPU_REG_RESULT3));
+            printf("  MH-SLD status regs:  heads=%" PRIu64 " local=%" PRIu64 " conflicts=%" PRIu64
+                   " invalidations=%" PRIu64 "\n",
+                   read_reg64(d, CXL_GPU_REG_MHSLD_HEADS), read_reg64(d, CXL_GPU_REG_MHSLD_HEAD_ID),
+                   read_reg64(d, CXL_GPU_REG_MHSLD_CONFLICTS), read_reg64(d, CXL_GPU_REG_MHSLD_INV));
+            measure_command_latency(d, CXL_GPU_CMD_MHSLD_GET_INFO, "MHSLD_GET_INFO", 5000);
+        } else {
+            printf("  MHSLD_GET_INFO failed: rc=%d\n", rc);
+        }
+
+        if (mhsld_heads > 0) {
+            write_reg64(d, CXL_GPU_REG_PARAM0, mhsld_head_id);
+            rc = issue_command(d, CXL_GPU_CMD_MHSLD_SET_HEAD);
+            printf("  MH-SLD set-head:  head=%" PRIu64 " rc=%d\n", mhsld_head_id, rc);
+        }
     }
 }
 
@@ -539,10 +759,33 @@ static void bench_dual_device(void) {
 
 /*  Main  */
 
-int main(void) {
+int main(int argc, char **argv) {
+    g_prefetch_iters = parse_positive_int(getenv("CXL_BAR_PREFETCH_ITERS"), g_prefetch_iters);
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--prefetch-only") == 0) {
+            g_prefetch_only = 1;
+        } else if (strcmp(argv[i], "--prefetch-iters") == 0) {
+            if (i + 1 >= argc) {
+                usage(argv[0]);
+                return 2;
+            }
+            g_prefetch_iters = parse_positive_int(argv[++i], g_prefetch_iters);
+        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            usage(argv[0]);
+            return 0;
+        } else {
+            usage(argv[0]);
+            return 2;
+        }
+    }
+
     printf("==========================================================\n");
     printf("  CXL Type 2 BAR Memory Bandwidth Benchmark\n");
     printf("==========================================================\n\n");
+    if (g_prefetch_only) {
+        printf("Mode: CXL.cache prefetch only (%d latency iterations)\n\n", g_prefetch_iters);
+    }
 
     printf("Discovering CXL Type 2 devices (vendor=0x%04x device=0x%04x)...\n", CXL_TYPE2_VENDOR, CXL_TYPE2_DEVICE);
     if (discover_devices() == 0) {
@@ -559,14 +802,22 @@ int main(void) {
         uint32_t caps = *(volatile uint32_t *)(d->bar2 + CXL_GPU_REG_CAPS);
         printf("\n  Device %d status=0x%x caps=0x%x\n", i, status, caps);
 
+        if (g_prefetch_only) {
+            bench_cache_prefetch(d, caps);
+            continue;
+        }
+
         bench_register_latency(d);
         bench_cmd_latency(d);
+        bench_cache_prefetch(d, caps);
+        bench_fabric_memory(d, caps);
         bench_data_region_bw(d);
         bench_access_patterns(d);
         bench_bar4_bulk_bw(d);
     }
 
-    bench_dual_device();
+    if (!g_prefetch_only)
+        bench_dual_device();
 
     printf("\n==========================================================\n");
     printf("  Benchmark complete\n");
