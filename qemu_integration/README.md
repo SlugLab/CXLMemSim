@@ -158,12 +158,13 @@ Inside the guest after the bind has hotplugged `mem0`:
 sudo ./zettai_guest_dcd_gfam_test.sh
 ```
 
-The Zettai guest helper is a thin wrapper around `setup_cxl_numa.sh`. The
-common setup script selects a root decoder such as `decoder0.0`, creates a
-single-way CXL `ram` region on `mem0`, creates a device-dax instance when
-possible, and can write through `/dev/daxX.Y` so CXLMemSim GFAM read/write
-counters move. You can run it directly when you do not need the DCD/GFAM smoke
-touch:
+The Zettai guest helper is a thin wrapper around `setup_cxl_numa.sh` and pins
+`CXL_REGION_TYPE=ram` for volatile DCD capacity. The common setup script
+otherwise auto-detects whether `mem0` exposes `ram_size` or `pmem_size`, selects
+a matching root decoder such as `decoder0.0`, creates a single-way CXL region,
+and creates a device-dax path when possible. It can write through `/dev/daxX.Y`
+so CXLMemSim GFAM read/write counters move. You can run it directly when you do
+not need the DCD/GFAM smoke touch:
 
 ```bash
 sudo CXL_REGION_TYPE=ram CXL_DAX_MODE=devdax ./setup_cxl_numa.sh
@@ -189,10 +190,9 @@ Set `CXL_NET_ADDR` explicitly if the VM should use a different address. The
 helper auto-detects the first non-loopback network interface by default; set
 `CXL_NET_IFACE=enp0s2` or similar to pin it.
 
-For DCD/volatile CXL.mem, use `daxctl`/device-dax or system-ram mode. The old
-`ndctl create-namespace -m dax` path is for pmem-style regions and is disabled
-by default in `setup_cxl_numa.sh`; enable it only with
-`CXL_CREATE_NDCTL_NAMESPACE=1`.
+For DCD/volatile CXL.mem, use `daxctl`/device-dax or system-ram mode. For
+pmem-only memdevs, the helper creates a pmem region and uses `ndctl
+create-namespace -m devdax` when `CXL_CREATE_DAX=1`.
 Query counters again from the host with:
 
 ```bash

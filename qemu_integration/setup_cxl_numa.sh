@@ -2,23 +2,24 @@
 
 # Guest-side CXL setup helper.
 #
-# Default mode is suitable for volatile CXL Dynamic Capacity Device (DCD)
-# memory: create a CXL RAM region and then create a device-dax instance from
-# that region. Legacy pmem namespace creation is still available through
-# CXL_CREATE_NDCTL_NAMESPACE=1.
+# Default mode auto-detects whether the guest memdev exposes volatile RAM or
+# persistent memory capacity. Volatile CXL Dynamic Capacity Device (DCD) memory
+# creates a CXL RAM region and device-dax instance. PMEM creates a pmem region
+# and an ndctl devdax namespace when DAX setup is requested.
 
 set -euo pipefail
 
 LOG_FILE=${LOG_FILE:-/var/log/cxl_numa_setup.log}
 REGION_SIZE=${REGION_SIZE:-${CXL_REGION_SIZE:-256M}}
 INTERLEAVE_GRANULARITY=${INTERLEAVE_GRANULARITY:-1024}
-CXL_REGION_TYPE=${CXL_REGION_TYPE:-ram}
+CXL_REGION_TYPE=${CXL_REGION_TYPE:-auto}
 CXL_MEMDEV=${CXL_MEMDEV:-${ZETTAI_MEMDEV:-}}
 CXL_DECODER=${CXL_DECODER:-${ZETTAI_DECODER:-}}
 CXL_CREATE_DAX=${CXL_CREATE_DAX:-${ZETTAI_CREATE_DAX:-1}}
 CXL_DAX_MODE=${CXL_DAX_MODE:-devdax}
 CXL_TOUCH_DAX=${CXL_TOUCH_DAX:-${ZETTAI_TOUCH_DAX:-0}}
 CXL_CREATE_NDCTL_NAMESPACE=${CXL_CREATE_NDCTL_NAMESPACE:-0}
+CXL_NDCTL_NAMESPACE_MODE=${CXL_NDCTL_NAMESPACE_MODE:-devdax}
 CXL_CONFIGURE_NET=${CXL_CONFIGURE_NET:-0}
 CXL_HOST_ID=${CXL_HOST_ID:-${ZETTAI_HOST_ID:-0}}
 CXL_NET_IFACE=${CXL_NET_IFACE:-auto}
@@ -47,14 +48,15 @@ topology, bind a hidden endpoint and add dynamic capacity from the host first.
 
 Environment:
   REGION_SIZE / CXL_REGION_SIZE  Region size, default: 256M
-  CXL_REGION_TYPE                CXL region type, default: ram
+  CXL_REGION_TYPE                CXL region type: auto, ram, or pmem; default: auto
   INTERLEAVE_GRANULARITY         cxl create-region granularity, default: 1024
   CXL_MEMDEV / ZETTAI_MEMDEV     Override memdev, e.g. mem0
   CXL_DECODER / ZETTAI_DECODER   Override root decoder, e.g. decoder0.0
   CXL_CREATE_DAX                 Create/use a dax device, default: 1
   CXL_DAX_MODE                   devdax, system-ram, or none; default: devdax
   CXL_TOUCH_DAX                  mmap and touch /dev/daxX.Y, default: 0
-  CXL_CREATE_NDCTL_NAMESPACE     Legacy ndctl namespace path, default: 0
+  CXL_CREATE_NDCTL_NAMESPACE     Force ndctl namespace creation, default: 0
+  CXL_NDCTL_NAMESPACE_MODE       ndctl namespace mode for pmem, default: devdax
   CXL_CONFIGURE_NET              Configure static guest network, default: 0
   CXL_HOST_ID                    Node id used for default IP, default: 0
   CXL_NET_IFACE                  Interface name or auto, default: auto
@@ -115,6 +117,61 @@ detect_memdev() {
     echo "$memdev"
 }
 
+detect_memdev_region_type() {
+    local listing=""
+    local region_type=""
+
+    listing=$(cxl list -M -m "$CXL_MEMDEV" 2>/dev/null || cxl list -M 2>/dev/null || true)
+
+    if command -v jq >/dev/null 2>&1; then
+        region_type=$(echo "$listing" |
+            jq -r --arg memdev "$CXL_MEMDEV" '
+                def has_capacity($field):
+                    (.[$field] // 0) as $value |
+                    if ($value | type) == "number" then
+                        $value > 0
+                    else
+                        ($value | tostring) != "" and
+                        ($value | tostring) != "0" and
+                        (($value | tostring) | startswith("0.00 ") | not)
+                    end;
+                .. | objects | select(.memdev? == $memdev) |
+                if has_capacity("ram_size") then "ram"
+                elif has_capacity("pmem_size") then "pmem"
+                else empty
+                end' |
+            head -1)
+    fi
+
+    if [[ -z "$region_type" ]]; then
+        if echo "$listing" | grep -q '"ram_size"[[:space:]]*:[[:space:]]*[^,}]*[1-9]'; then
+            region_type="ram"
+        elif echo "$listing" | grep -q '"pmem_size"[[:space:]]*:[[:space:]]*[^,}]*[1-9]'; then
+            region_type="pmem"
+        fi
+    fi
+
+    echo "$region_type"
+}
+
+resolve_region_type() {
+    if [[ "$CXL_REGION_TYPE" != "auto" ]]; then
+        if [[ "$CXL_REGION_TYPE" != "ram" && "$CXL_REGION_TYPE" != "pmem" ]]; then
+            log "ERROR: CXL_REGION_TYPE must be auto, ram, or pmem"
+            return 1
+        fi
+        return 0
+    fi
+
+    CXL_REGION_TYPE=$(detect_memdev_region_type)
+    if [[ -z "$CXL_REGION_TYPE" ]]; then
+        CXL_REGION_TYPE="pmem"
+        log "WARNING: Could not detect memdev capacity type; defaulting CXL_REGION_TYPE=$CXL_REGION_TYPE"
+    else
+        log "Auto-selected CXL_REGION_TYPE=$CXL_REGION_TYPE for memdev=$CXL_MEMDEV"
+    fi
+}
+
 wait_for_cxl_device() {
     local retries=0
 
@@ -144,19 +201,23 @@ EOF
 }
 
 detect_decoder() {
+    local region_type=${1:-$CXL_REGION_TYPE}
+
     if [[ -n "$CXL_DECODER" ]]; then
         echo "$CXL_DECODER"
         return 0
     fi
 
     local decoder=""
-    decoder=$(cxl list -B -D 2>/dev/null |
-        json_query '.. | objects | select(has("decoder")) |
-                    select(.decoder | test("^decoder0\\.")) |
-                    select((.volatile_capable == true) or (.pmem_capable == true)) |
-                    select((.max_available_extent // 0) > 0) |
-                    .decoder' |
-        head -1)
+    if command -v jq >/dev/null 2>&1; then
+        decoder=$(cxl list -B -D 2>/dev/null |
+            jq -r --arg type "$region_type" '.. | objects | select(has("decoder")) |
+                        select(.decoder | test("^decoder0\\.")) |
+                        select(if $type == "ram" then .volatile_capable == true else .pmem_capable == true end) |
+                        select((.max_available_extent // .size // 1) != 0) |
+                        .decoder' 2>/dev/null |
+            head -1)
+    fi
     if [[ -z "$decoder" ]]; then
         decoder=$(cxl list -B -D 2>/dev/null |
             sed -n 's/.*"decoder"[[:space:]]*:[[:space:]]*"\(decoder0\.[^"]*\)".*/\1/p' |
@@ -182,12 +243,18 @@ detect_region() {
 detect_daxdev() {
     local region=$1
     local daxdev=""
+    local listing=""
 
-    daxdev=$(daxctl list -r "$region" 2>/dev/null |
+    listing=$(daxctl list -r "$region" 2>/dev/null || true)
+    if [[ -z "$listing" && "$region" =~ ^region[0-9]+$ ]]; then
+        listing=$(daxctl list -r "${region#region}" 2>/dev/null || true)
+    fi
+
+    daxdev=$(echo "$listing" |
         json_query '.. | objects | select(has("chardev")) | .chardev' |
         head -1)
     if [[ -z "$daxdev" ]]; then
-        daxdev=$(daxctl list -r "$region" 2>/dev/null |
+        daxdev=$(echo "$listing" |
             sed -n 's/.*"chardev"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
             head -1)
     fi
@@ -204,9 +271,11 @@ setup_cxl_region() {
         return 0
     fi
 
-    CXL_DECODER=$(detect_decoder)
+    resolve_region_type
+
+    CXL_DECODER=$(detect_decoder "$CXL_REGION_TYPE")
     if [[ -z "$CXL_DECODER" ]]; then
-        log "ERROR: Could not find usable root decoder; set CXL_DECODER=decoderX.Y"
+        log "ERROR: Could not find $CXL_REGION_TYPE-capable root decoder; set CXL_DECODER=decoderX.Y"
         return 1
     fi
 
@@ -228,21 +297,40 @@ setup_cxl_region() {
 
 setup_ndctl_namespace() {
     local region=$1
+    local require_dax=0
 
-    if [[ "$CXL_CREATE_NDCTL_NAMESPACE" != 1 ]]; then
+    if [[ "$CXL_REGION_TYPE" == "pmem" && "$CXL_CREATE_DAX" == 1 && "$CXL_DAX_MODE" != "none" ]]; then
+        require_dax=1
+    fi
+    if [[ "$CXL_CREATE_NDCTL_NAMESPACE" != 1 && "$require_dax" != 1 ]]; then
+        return 0
+    fi
+    if [[ "$require_dax" == 1 && -n "$(detect_daxdev "$region")" ]]; then
+        log "DAX device already exists for $region"
         return 0
     fi
     if ! command -v ndctl >/dev/null 2>&1; then
-        log "ndctl is not installed; skipping legacy namespace creation"
+        if [[ "$require_dax" == 1 ]]; then
+            log "ERROR: ndctl is required to create a devdax namespace for pmem region $region"
+            return 1
+        fi
+        log "ndctl is not installed; skipping namespace creation"
         return 0
     fi
-    if ndctl list -N 2>/dev/null | grep -q '"dev":"namespace'; then
-        log "NVDIMM namespace already exists"
+    if ndctl list -N -r "$region" 2>/dev/null | grep -q '"dev":"namespace'; then
+        log "NVDIMM namespace already exists for $region"
         return 0
     fi
 
-    log "Creating legacy ndctl dax namespace on $region"
-    ndctl create-namespace -m dax -r "$region" 2>&1 | tee -a "$LOG_FILE" || true
+    log "Creating ndctl $CXL_NDCTL_NAMESPACE_MODE namespace on $region"
+    if ! ndctl create-namespace -m "$CXL_NDCTL_NAMESPACE_MODE" -r "$region" 2>&1 | tee -a "$LOG_FILE"; then
+        if [[ "$require_dax" == 1 ]]; then
+            log "ERROR: Failed to create ndctl namespace for pmem region $region"
+            return 1
+        fi
+        return 0
+    fi
+    udevadm settle 2>/dev/null || true
 }
 
 setup_dax_device() {
@@ -259,6 +347,10 @@ setup_dax_device() {
 
     daxdev=$(detect_daxdev "$region")
     if [[ -z "$daxdev" ]]; then
+        if [[ "$CXL_REGION_TYPE" == "pmem" ]]; then
+            log "WARNING: No DAX chardev found for pmem region $region after ndctl namespace setup"
+            return 0
+        fi
         log "Creating device-dax instance for $region"
         daxctl create-device -r "$region" 2>&1 | tee -a "$LOG_FILE" || true
         udevadm settle 2>/dev/null || true
@@ -393,6 +485,7 @@ main() {
 
     load_modules
     wait_for_cxl_device
+    resolve_region_type
     region=$(setup_cxl_region)
     setup_ndctl_namespace "$region"
     setup_dax_device "$region"

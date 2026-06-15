@@ -168,6 +168,8 @@ private:
     // Thread management
     std::vector<std::thread> client_threads;
     std::mutex thread_list_mutex;
+    std::set<int> client_fds;
+    std::mutex client_fds_mutex;
 
     // Back invalidation tracking
     std::map<uint64_t, std::queue<BackInvalidationEntry>> back_invalidation_queue;
@@ -219,9 +221,9 @@ private:
 public:
     ThreadPerConnectionServer(int port, CXLController *ctrl, size_t capacity_mb, const std::string &backing_file = "",
                               CommMode mode = CommMode::TCP, const std::string &pgas_shm_name = "/cxlmemsim_pgas")
-        : port(port), controller(ctrl), running(true), next_thread_id(0), backing_file_(backing_file), comm_mode(mode),
+        : server_fd(-1), port(port), controller(ctrl), running(true), next_thread_id(0), comm_mode(mode),
           pgas_shm_name_(pgas_shm_name), pgas_shm_fd_(-1), pgas_shm_header_(nullptr), pgas_memory_(nullptr),
-          pgas_memory_size_(0) {
+          pgas_memory_size_(0), backing_file_(backing_file) {
         congestion_info.active_requests = 0;
         congestion_info.total_bandwidth_used = 0;
         congestion_info.last_reset = std::chrono::steady_clock::now();
@@ -284,14 +286,24 @@ private:
     bool check_and_apply_back_invalidations(uint64_t cacheline_addr, int requesting_thread_id, CachelineInfo &info);
 };
 
-static ThreadPerConnectionServer *g_server = nullptr;
+static volatile sig_atomic_t g_shutdown_requested = 0;
 
 // Signal handler for graceful shutdown
 void signal_handler(int sig) {
-    if (g_server) {
-        SPDLOG_INFO("Shutting down server...");
-        g_server->stop();
-    }
+    (void)sig;
+    g_shutdown_requested = 1;
+}
+
+static bool shutdown_requested() { return g_shutdown_requested != 0; }
+
+static void install_signal_handlers() {
+    struct sigaction action {};
+    action.sa_handler = signal_handler;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = 0;
+
+    sigaction(SIGINT, &action, nullptr);
+    sigaction(SIGTERM, &action, nullptr);
 }
 
 struct TCPPeerInfo {
@@ -743,8 +755,7 @@ int main(int argc, char *argv[]) {
     SPDLOG_INFO("========================================");
 
     // Set up signal handlers
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+    install_signal_handlers();
 
     // Handle distributed mode separately
     if (comm_mode == CommMode::DISTRIBUTED) {
@@ -813,7 +824,7 @@ int main(int argc, char *argv[]) {
             // Wait for shutdown signal
             uint64_t last_total = 0;
             int stats_interval = 0;
-            while (dist_server.is_running()) {
+            while (dist_server.is_running() && !shutdown_requested()) {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
 
                 // Periodic stats logging (every 10 seconds if there's activity)
@@ -832,6 +843,9 @@ int main(int argc, char *argv[]) {
                 }
             }
 
+            if (shutdown_requested()) {
+                SPDLOG_INFO("Shutdown requested, stopping distributed node {}", node_id);
+            }
             dist_server.stop();
             SPDLOG_INFO("Distributed node {} stopped", node_id);
 
@@ -845,7 +859,6 @@ int main(int argc, char *argv[]) {
 
     try {
         ThreadPerConnectionServer server(port, controller, capacity, backing_file, comm_mode, pgas_shm_name);
-        g_server = &server;
 
         if (!server.start()) {
             SPDLOG_ERROR("Failed to start server");
@@ -853,6 +866,7 @@ int main(int argc, char *argv[]) {
         }
 
         server.run();
+        server.stop();
     } catch (const std::exception &e) {
         SPDLOG_ERROR("Server error: {}", e.what());
         return 1;
@@ -955,15 +969,19 @@ void ThreadPerConnectionServer::run() {
     }
 
     // TCP accept loop (only reached if comm_mode == TCP)
-    while (running) {
+    while (running && !shutdown_requested()) {
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
 
         int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
         if (client_fd < 0) {
-            if (running) {
-                SPDLOG_ERROR("Failed to accept connection");
+            if (!running || shutdown_requested()) {
+                break;
             }
+            if (errno == EINTR) {
+                continue;
+            }
+            SPDLOG_ERROR("Failed to accept connection: {}", strerror(errno));
             continue;
         }
 
@@ -971,10 +989,13 @@ void ThreadPerConnectionServer::run() {
         int thread_id = next_thread_id++;
 
         {
+            std::lock_guard<std::mutex> fd_lock(client_fds_mutex);
+            client_fds.insert(client_fd);
+        }
+        {
             std::lock_guard<std::mutex> lock(thread_list_mutex);
             // Pass thread_id to handle_client
             client_threads.emplace_back(&ThreadPerConnectionServer::handle_client, this, client_fd, thread_id);
-            client_threads.back().detach(); // Detach to allow independent execution
         }
 
         SPDLOG_INFO("Accepted new client connection, assigned thread ID {}", thread_id);
@@ -982,10 +1003,38 @@ void ThreadPerConnectionServer::run() {
 }
 
 void ThreadPerConnectionServer::stop() {
-    running = false;
+    bool was_running = running.exchange(false);
+    if (!was_running) {
+        return;
+    }
 
     if (comm_mode == CommMode::TCP) {
-        close(server_fd);
+        if (server_fd >= 0) {
+            shutdown(server_fd, SHUT_RDWR);
+            close(server_fd);
+            server_fd = -1;
+        }
+    }
+
+    std::vector<int> fds_to_close;
+    {
+        std::lock_guard<std::mutex> lock(client_fds_mutex);
+        fds_to_close.assign(client_fds.begin(), client_fds.end());
+        client_fds.clear();
+    }
+    for (int fd : fds_to_close) {
+        shutdown(fd, SHUT_RDWR);
+        close(fd);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(thread_list_mutex);
+        for (auto &thread : client_threads) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+        client_threads.clear();
     }
 
     // Print final server operation statistics
@@ -1815,7 +1864,7 @@ void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
         SPDLOG_INFO("Thread {}: Client connected (fd={})", thread_id, client_fd);
     }
 
-    while (running) {
+    while (running && !shutdown_requested()) {
         ServerRequest req;
         ssize_t received = recv(client_fd, &req, sizeof(req), MSG_WAITALL);
 
@@ -1825,7 +1874,11 @@ void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
                 SPDLOG_DEBUG("Thread {}: Client disconnected (probe connection?)", thread_id);
             } else if (received < 0) {
                 int err = errno;
-                if (err == ECONNRESET) {
+                if (!running || shutdown_requested()) {
+                    break;
+                } else if (err == EINTR) {
+                    continue;
+                } else if (err == ECONNRESET) {
                     SPDLOG_INFO("Thread {}: Connection reset by peer", thread_id);
                 } else if (err == ETIMEDOUT) {
                     SPDLOG_INFO("Thread {}: Connection timed out", thread_id);
@@ -1875,7 +1928,9 @@ void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
 
             ssize_t sent = send(client_fd, &shm_resp, sizeof(shm_resp), 0);
             if (sent != sizeof(shm_resp)) {
-                SPDLOG_ERROR("Thread {}: Failed to send shared memory info", thread_id);
+                if (running && !shutdown_requested()) {
+                    SPDLOG_ERROR("Thread {}: Failed to send shared memory info", thread_id);
+                }
                 break;
             }
             continue;
@@ -1896,12 +1951,21 @@ void ThreadPerConnectionServer::handle_client(int client_fd, int thread_id) {
 
         ssize_t sent = send(client_fd, &resp, sizeof(resp), 0);
         if (sent != sizeof(resp)) {
-            SPDLOG_ERROR("Thread {}: Failed to send response", thread_id);
+            if (running && !shutdown_requested()) {
+                SPDLOG_ERROR("Thread {}: Failed to send response", thread_id);
+            }
             break;
         }
     }
 
-    close(client_fd);
+    bool should_close = false;
+    {
+        std::lock_guard<std::mutex> lock(client_fds_mutex);
+        should_close = client_fds.erase(client_fd) > 0;
+    }
+    if (should_close) {
+        close(client_fd);
+    }
     SPDLOG_INFO("Thread {}: Connection closed", thread_id);
 }
 
@@ -1997,7 +2061,7 @@ void ThreadPerConnectionServer::run_shm_mode() {
 }
 
 void ThreadPerConnectionServer::handle_shm_requests() {
-    while (running) {
+    while (running && !shutdown_requested()) {
         uint32_t client_id;
         ShmRequest shm_req;
 
@@ -2164,7 +2228,7 @@ void ThreadPerConnectionServer::run_pgas_shm_mode() {
 
     for (int i = 0; i < num_workers; i++) {
         workers.emplace_back([this]() {
-            while (running) {
+            while (running && !shutdown_requested()) {
                 int processed = poll_pgas_shm_requests();
                 if (processed == 0) {
                     // No requests - sleep briefly to reduce CPU usage
@@ -2185,7 +2249,7 @@ void ThreadPerConnectionServer::run_pgas_shm_mode() {
 }
 
 int ThreadPerConnectionServer::poll_pgas_shm_requests() {
-    if (!pgas_shm_header_ || !running)
+    if (!pgas_shm_header_ || !running || shutdown_requested())
         return 0;
 
     int processed = 0;

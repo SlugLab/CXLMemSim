@@ -16,10 +16,14 @@ set -euo pipefail
 
 case "$*" in
     "list -M"*)
-        echo '[{"memdev":"mem0"}]'
+        if [[ "${CXL_TEST_MEM_KIND:-ram}" == "pmem" ]]; then
+            echo '[{"memdev":"mem0","pmem_size":1073741824}]'
+        else
+            echo '[{"memdev":"mem0","ram_size":1073741824}]'
+        fi
         ;;
     "list -B -D"*)
-        echo '[{"decoder":"decoder0.0","volatile_capable":true,"max_available_extent":268435456}]'
+        echo '[{"decoder":"decoder0.0","volatile_capable":true,"pmem_capable":true,"max_available_extent":268435456}]'
         ;;
     "list -R"*)
         if [[ -f "$CXL_TEST_STATE/region_created" ]]; then
@@ -29,6 +33,7 @@ case "$*" in
         fi
         ;;
     create-region*)
+        printf '%s\n' "$*" >>"$CXL_TEST_STATE/cxl.calls"
         touch "$CXL_TEST_STATE/region_created"
         echo '{"region":"region0"}'
         ;;
@@ -48,7 +53,11 @@ set -euo pipefail
 
 case "${1:-}" in
     list)
-        echo '[{"chardev":"dax0.0"}]'
+        if [[ "${CXL_TEST_MEM_KIND:-ram}" == "pmem" && ! -f "$CXL_TEST_STATE/namespace_created" ]]; then
+            echo '[]'
+        else
+            echo '[{"chardev":"dax0.0"}]'
+        fi
         ;;
     create-device)
         echo '{"chardev":"dax0.0"}'
@@ -58,6 +67,30 @@ case "${1:-}" in
         ;;
     *)
         echo "unexpected daxctl invocation: $*" >&2
+        exit 2
+        ;;
+esac
+STUB
+
+cat >"$STUB_DIR/ndctl" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "$*" in
+    "list -N -r region0"*)
+        if [[ -f "$CXL_TEST_STATE/namespace_created" ]]; then
+            echo '[{"dev":"namespace0.0","mode":"devdax"}]'
+        else
+            echo '[]'
+        fi
+        ;;
+    create-namespace*)
+        printf '%s\n' "$*" >>"$CXL_TEST_STATE/ndctl.calls"
+        touch "$CXL_TEST_STATE/namespace_created"
+        echo '{"dev":"namespace0.0","mode":"devdax"}'
+        ;;
+    *)
+        echo "unexpected ndctl invocation: $*" >&2
         exit 2
         ;;
 esac
@@ -121,4 +154,31 @@ if ! grep -q 'addr add 192.168.100.11/24 dev enp0s2' "$STATE_DIR/ip.calls"; then
     exit 1
 fi
 
-echo "OK: setup_cxl_numa secondary network defaults"
+if ! grep -q 'create-region -m -t ram ' "$STATE_DIR/cxl.calls"; then
+    echo "FAIL: ram memdev should create a ram region" >&2
+    cat "$STATE_DIR/cxl.calls" >&2
+    exit 1
+fi
+
+rm -f "$STATE_DIR/region_created" "$STATE_DIR/namespace_created" "$STATE_DIR/cxl.calls" "$STATE_DIR/ndctl.calls"
+
+LOG_FILE="$LOG_FILE" \
+MAX_RETRIES=1 \
+RETRY_DELAY=0 \
+CXL_TEST_MEM_KIND=pmem \
+CXL_CONFIGURE_NET=0 \
+bash "$SCRIPT" >"$TMP_DIR/script-pmem.stdout" 2>"$TMP_DIR/script-pmem.stderr"
+
+if ! grep -q 'create-region -m -t pmem ' "$STATE_DIR/cxl.calls"; then
+    echo "FAIL: pmem-only memdev should create a pmem region" >&2
+    cat "$STATE_DIR/cxl.calls" >&2
+    exit 1
+fi
+
+if ! grep -q 'create-namespace -m devdax -r region0' "$STATE_DIR/ndctl.calls"; then
+    echo "FAIL: pmem region should create an ndctl devdax namespace" >&2
+    cat "$STATE_DIR/ndctl.calls" >&2
+    exit 1
+fi
+
+echo "OK: setup_cxl_numa auto region type and network defaults"

@@ -655,6 +655,17 @@ void DistributedMemoryServer::stop() {
         tcp_server_fd_ = -1;
     }
 
+    std::vector<int> fds_to_close;
+    {
+        std::lock_guard<std::mutex> lock(client_fds_mutex_);
+        fds_to_close.assign(client_fds_.begin(), client_fds_.end());
+        client_fds_.clear();
+    }
+    for (int fd : fds_to_close) {
+        shutdown(fd, SHUT_RDWR);
+        close(fd);
+    }
+
     // Wait for threads
     if (tcp_accept_thread_.joinable()) {
         tcp_accept_thread_.join();
@@ -2732,6 +2743,12 @@ void DistributedMemoryServer::tcp_accept_loop() {
 
         int client_fd = accept(tcp_server_fd_, (struct sockaddr *)&client_addr, &addr_len);
         if (client_fd < 0) {
+            if (!running_) {
+                break;
+            }
+            if (errno == EINTR) {
+                continue;
+            }
             if (running_) {
                 SPDLOG_ERROR("Failed to accept TCP client: {}", strerror(errno));
             }
@@ -2748,9 +2765,12 @@ void DistributedMemoryServer::tcp_accept_loop() {
 
         // Start client handler thread
         {
+            std::lock_guard<std::mutex> fd_lock(client_fds_mutex_);
+            client_fds_.insert(client_fd);
+        }
+        {
             std::lock_guard<std::mutex> lock(client_threads_mutex_);
             client_threads_.emplace_back(&DistributedMemoryServer::handle_tcp_client, this, client_fd, client_id);
-            client_threads_.back().detach();
         }
     }
 
@@ -2772,7 +2792,11 @@ void DistributedMemoryServer::handle_tcp_client(int client_fd, int client_id) {
                 SPDLOG_DEBUG("Node {} client {} disconnected", node_id_, client_id);
             } else if (received < 0) {
                 int err = errno;
-                if (err == ECONNRESET) {
+                if (!running_) {
+                    break;
+                } else if (err == EINTR) {
+                    continue;
+                } else if (err == ECONNRESET) {
                     SPDLOG_INFO("Node {} client {}: Connection reset", node_id_, client_id);
                 } else if (err != EAGAIN && err != EWOULDBLOCK) {
                     SPDLOG_ERROR("Node {} client {}: recv failed: {} ({})", node_id_, client_id, strerror(err), err);
@@ -2868,11 +2892,20 @@ void DistributedMemoryServer::handle_tcp_client(int client_fd, int client_id) {
 
         // Send response
         if (send(client_fd, &resp, sizeof(resp), MSG_NOSIGNAL) != sizeof(resp)) {
-            SPDLOG_ERROR("Node {} client {}: Failed to send response: {}", node_id_, client_id, strerror(errno));
+            if (running_) {
+                SPDLOG_ERROR("Node {} client {}: Failed to send response: {}", node_id_, client_id, strerror(errno));
+            }
             break;
         }
     }
 
-    close(client_fd);
+    bool should_close = false;
+    {
+        std::lock_guard<std::mutex> lock(client_fds_mutex_);
+        should_close = client_fds_.erase(client_fd) > 0;
+    }
+    if (should_close) {
+        close(client_fd);
+    }
     SPDLOG_INFO("Node {} client {} connection closed", node_id_, client_id);
 }

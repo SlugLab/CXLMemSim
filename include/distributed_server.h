@@ -723,6 +723,8 @@ private:
     std::thread tcp_accept_thread_;
     std::vector<std::thread> client_threads_;
     std::mutex client_threads_mutex_;
+    std::set<int> client_fds_;
+    std::mutex client_fds_mutex_;
 
     /* TCP server for QEMU guests */
     int tcp_server_fd_;
