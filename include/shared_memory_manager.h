@@ -22,6 +22,8 @@
 #include <unistd.h>
 #include <vector>
 
+class SsdStreamingBackend;
+
 // Cacheline size
 #define SHM_CACHELINE_SIZE (64)
 #define SHM_CACHELINE_MASK (~(SHM_CACHELINE_SIZE - 1))
@@ -50,6 +52,24 @@ struct CachelineMetadata {
 };
 
 class SharedMemoryManager {
+public:
+    enum class BackingMode {
+        SharedMemory,
+        FileMmap,
+        SsdStream,
+    };
+
+    struct SsdStreamingConfig {
+        std::string backing_path;
+        uint64_t capacity_bytes = 0;
+        size_t page_size = 4096;
+        size_t io_chunk_size = 64 * 1024;
+        size_t cache_pages = 4096;
+        size_t read_ahead_pages = 16;
+        bool use_io_uring = true;
+        bool use_odirect = true;
+    };
+
 private:
     // Shared memory info
     std::string shm_name;
@@ -58,8 +78,13 @@ private:
     size_t shm_size;
     size_t capacity_mb;
     // Optional file backing instead of POSIX shm
+    BackingMode backing_mode = BackingMode::SharedMemory;
     bool use_file_backing = false;
     std::string backing_file_path;
+    SsdStreamingConfig ssd_config;
+#ifdef CXLMEMSIM_HAS_SSD_STREAMING_BACKEND
+    std::unique_ptr<SsdStreamingBackend> ssd_backend;
+#endif
 
     // Memory layout:
     // [Header][Cacheline Data Area][Metadata Area]
@@ -78,6 +103,7 @@ private:
         // Base physical address for CXL memory
     };
 
+    SharedMemoryHeader header_storage{};
     SharedMemoryHeader *header;
     uint8_t *data_area;
     // Pointer to cacheline data area
@@ -97,6 +123,7 @@ private:
 public:
     explicit SharedMemoryManager(size_t capacity_mb, const std::string &shm_name = "/cxlmemsim_pgas");
     SharedMemoryManager(size_t capacity_mb, const std::string &shm_name, bool use_file, const std::string &file_path);
+    SharedMemoryManager(size_t capacity_mb, const std::string &shm_name, const SsdStreamingConfig &ssd_config);
     ~SharedMemoryManager();
 
     // Initialize shared memory
@@ -116,9 +143,22 @@ public:
     uint8_t *get_cacheline_data(uint64_t cacheline_addr);
     bool read_cacheline(uint64_t addr, uint8_t *buffer, size_t size);
     bool write_cacheline(uint64_t addr, const uint8_t *data, size_t size);
+    bool atomic_fetch_add_uint64(uint64_t addr, uint64_t value, uint64_t *old_value);
+    bool atomic_compare_exchange_uint64(uint64_t addr, uint64_t expected, uint64_t desired, uint64_t *old_value);
+    bool flush();
+    bool flush_cacheline(uint64_t addr, size_t size);
 
     // Direct access to data area (for msync)
     void *get_data_area() { return data_area; }
+    bool has_direct_data_area() const { return data_area != nullptr; }
+    bool is_ssd_streaming() const { return backing_mode == BackingMode::SsdStream; }
+
+    // Streaming hint placeholders. Backends that do not support hints treat them as no-ops.
+    bool prefetch(uint64_t addr, size_t size);
+    bool evict_after(uint64_t addr, size_t size);
+    bool pin(uint64_t addr, size_t size);
+    bool unpin(uint64_t addr, size_t size);
+    void set_streaming(bool enabled);
 
     // Metadata access (uses local cache)
     CachelineMetadata *get_cacheline_metadata(uint64_t cacheline_addr);
@@ -135,11 +175,14 @@ public:
     uint64_t addr_to_cacheline(uint64_t addr) const { return addr & SHM_CACHELINE_MASK; }
 
     uint64_t cacheline_to_index(uint64_t cacheline_addr) const {
+        if (!header || header->num_cachelines == 0) {
+            return 0;
+        }
         if (header && header->base_addr == 0) {
             // Accept any address, use modulo to map to available cachelines
             return (cacheline_addr / SHM_CACHELINE_SIZE) % header->num_cachelines;
         }
-        return header ? (cacheline_addr - header->base_addr) / SHM_CACHELINE_SIZE : 0;
+        return (cacheline_addr - header->base_addr) / SHM_CACHELINE_SIZE;
     }
 
     // Statistics
@@ -154,9 +197,12 @@ public:
 private:
     bool create_shared_memory();
     bool create_file_backing();
+    bool create_ssd_streaming_backend();
     bool map_shared_memory();
     void initialize_header();
     void initialize_data_area();
+    size_t data_capacity_bytes() const;
+    bool address_to_backend_offset(uint64_t addr, size_t access_size, uint64_t *offset) const;
 };
 
 #endif // SHARED_MEMORY_MANAGER_H

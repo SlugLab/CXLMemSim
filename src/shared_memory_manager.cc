@@ -5,37 +5,52 @@
  */
 
 #include "../include/shared_memory_manager.h"
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdexcept>
+#include <type_traits>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#ifdef CXLMEMSIM_HAS_SSD_STREAMING_BACKEND
+#include "../include/ssd_streaming_backend.h"
+#endif
+
 #define MAGIC_NUMBER 0x43584C4D454D5348ULL // "CXLMEMSH"
 #define FORMAT_VERSION 1
 
+#ifdef CXLMEMSIM_HAS_SSD_STREAMING_BACKEND
+namespace {
+template <typename Fn> bool call_backend_bool(Fn &&fn) {
+    if constexpr (std::is_void_v<std::invoke_result_t<Fn>>) {
+        fn();
+        return true;
+    } else {
+        return static_cast<bool>(fn());
+    }
+}
+} // namespace
+#endif
+
 SharedMemoryManager::SharedMemoryManager(size_t capacity_mb, const std::string &shm_name)
-    : capacity_mb(capacity_mb), shm_name(shm_name), shm_fd(-1), shm_base(nullptr), shm_size(0), header(nullptr),
-      data_area(nullptr) {
+    : shm_name(shm_name), shm_fd(-1), shm_base(nullptr), shm_size(0), capacity_mb(capacity_mb),
+      backing_mode(BackingMode::SharedMemory), header(nullptr), data_area(nullptr) {
 
     // Calculate sizes
     shm_size = capacity_mb * 1024 * 1024;
-
-    // Reserve some space for header
-    size_t header_size = sizeof(SharedMemoryHeader);
-    size_t data_size = shm_size - header_size;
 
     SPDLOG_INFO("SharedMemoryManager: Capacity {}MB, Total size: {} bytes", capacity_mb, shm_size);
 }
 
 SharedMemoryManager::SharedMemoryManager(size_t capacity_mb, const std::string &shm_name, bool use_file,
                                          const std::string &file_path)
-    : capacity_mb(capacity_mb), shm_name(shm_name), shm_fd(-1), shm_base(nullptr), shm_size(0), header(nullptr),
-      data_area(nullptr) {
+    : shm_name(shm_name), shm_fd(-1), shm_base(nullptr), shm_size(0), capacity_mb(capacity_mb),
+      backing_mode(use_file ? BackingMode::FileMmap : BackingMode::SharedMemory), header(nullptr), data_area(nullptr) {
     shm_size = capacity_mb * 1024 * 1024;
     use_file_backing = use_file;
     backing_file_path = file_path;
@@ -45,12 +60,35 @@ SharedMemoryManager::SharedMemoryManager(size_t capacity_mb, const std::string &
     }
 }
 
+SharedMemoryManager::SharedMemoryManager(size_t capacity_mb, const std::string &shm_name,
+                                         const SsdStreamingConfig &ssd_config)
+    : shm_name(shm_name), shm_fd(-1), shm_base(nullptr), shm_size(0), capacity_mb(capacity_mb),
+      backing_mode(BackingMode::SsdStream), use_file_backing(false), ssd_config(ssd_config), header(nullptr),
+      data_area(nullptr) {
+    shm_size = capacity_mb * 1024 * 1024;
+    if (this->ssd_config.capacity_bytes == 0) {
+        this->ssd_config.capacity_bytes = shm_size;
+    }
+    SPDLOG_INFO("SharedMemoryManager: SSD streaming capacity {}MB, logical size: {} bytes", capacity_mb,
+                this->ssd_config.capacity_bytes);
+    SPDLOG_INFO("Using SSD streaming backing: {}", this->ssd_config.backing_path);
+}
+
 SharedMemoryManager::~SharedMemoryManager() { cleanup(); }
 
 bool SharedMemoryManager::initialize() {
     try {
         // Create or open shared memory or file backing
-        if (use_file_backing) {
+        if (backing_mode == BackingMode::SsdStream) {
+            header_storage = {};
+            header = &header_storage;
+            data_area = nullptr;
+
+            if (!create_ssd_streaming_backend()) {
+                SPDLOG_ERROR("Failed to initialize SSD streaming backend");
+                return false;
+            }
+        } else if (use_file_backing) {
             if (!create_file_backing()) {
                 SPDLOG_ERROR("Failed to create backing file");
                 return false;
@@ -62,10 +100,12 @@ bool SharedMemoryManager::initialize() {
             }
         }
 
-        // Map shared memory
-        if (!map_shared_memory()) {
-            SPDLOG_ERROR("Failed to map shared memory");
-            return false;
+        if (backing_mode != BackingMode::SsdStream) {
+            // Map shared memory
+            if (!map_shared_memory()) {
+                SPDLOG_ERROR("Failed to map shared memory");
+                return false;
+            }
         }
 
         // Initialize header and data areas
@@ -75,6 +115,10 @@ bool SharedMemoryManager::initialize() {
         SPDLOG_INFO("SharedMemoryManager initialized successfully");
         SPDLOG_INFO("  Shared memory: {}", shm_name);
         SPDLOG_INFO("  Size: {} MB", capacity_mb);
+        if (backing_mode == BackingMode::SsdStream) {
+            SPDLOG_INFO("  Backing mode: SSD streaming");
+            SPDLOG_INFO("  SSD backing path: {}", ssd_config.backing_path);
+        }
         SPDLOG_INFO("  Base address: 0x{:x}", header->base_addr);
         SPDLOG_INFO("  Cachelines: {}", header->num_cachelines);
 
@@ -150,6 +194,47 @@ bool SharedMemoryManager::create_file_backing() {
     return true;
 }
 
+bool SharedMemoryManager::create_ssd_streaming_backend() {
+    if (ssd_config.backing_path.empty()) {
+        SPDLOG_ERROR("SSD streaming mode requires a non-empty backing_path");
+        return false;
+    }
+
+#ifndef CXLMEMSIM_HAS_SSD_STREAMING_BACKEND
+    SPDLOG_ERROR("SSD streaming backend was not compiled in. Provide include/ssd_streaming_backend.h, "
+                 "src/ssd_streaming_backend.cpp, and liburing on Linux.");
+    return false;
+#else
+    try {
+        ::SsdStreamingConfig backend_config;
+        backend_config.backing_path = ssd_config.backing_path;
+        backend_config.capacity_bytes = static_cast<uint64_t>(ssd_config.capacity_bytes);
+        backend_config.page_size = static_cast<uint32_t>(ssd_config.page_size);
+        backend_config.io_chunk_size = static_cast<uint32_t>(ssd_config.io_chunk_size);
+        backend_config.cache_pages = ssd_config.cache_pages;
+        backend_config.read_ahead_pages = static_cast<uint32_t>(ssd_config.read_ahead_pages);
+        backend_config.use_io_uring = ssd_config.use_io_uring;
+        backend_config.use_odirect = ssd_config.use_odirect;
+
+        ssd_backend = std::make_unique<SsdStreamingBackend>(backend_config);
+        if (!call_backend_bool([&]() { return ssd_backend->initialize(); })) {
+            SPDLOG_ERROR("SSD streaming backend initialize() returned failure");
+            return false;
+        }
+
+        SPDLOG_INFO("SSD streaming backend initialized: path={} capacity={} page={} chunk={} cache_pages={} "
+                    "read_ahead_pages={} io_uring={} odirect={}",
+                    ssd_config.backing_path, ssd_config.capacity_bytes, ssd_config.page_size,
+                    ssd_config.io_chunk_size, ssd_config.cache_pages, ssd_config.read_ahead_pages,
+                    ssd_config.use_io_uring, ssd_config.use_odirect);
+        return true;
+    } catch (const std::exception &e) {
+        SPDLOG_ERROR("Exception while initializing SSD streaming backend: {}", e.what());
+        return false;
+    }
+#endif
+}
+
 bool SharedMemoryManager::map_shared_memory() {
     // Map the entire shared memory region
     shm_base = mmap(nullptr, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
@@ -170,7 +255,7 @@ bool SharedMemoryManager::map_shared_memory() {
 
 void SharedMemoryManager::initialize_header() {
     // Check if already initialized (magic number present)
-    if (header->magic == MAGIC_NUMBER && header->version == FORMAT_VERSION) {
+    if (backing_mode != BackingMode::SsdStream && header->magic == MAGIC_NUMBER && header->version == FORMAT_VERSION) {
         SPDLOG_INFO("Shared memory already initialized, using existing data");
         return;
     }
@@ -178,8 +263,8 @@ void SharedMemoryManager::initialize_header() {
     // Initialize header
     header->magic = MAGIC_NUMBER;
     header->version = FORMAT_VERSION;
-    header->total_size = shm_size;
-    header->data_offset = sizeof(SharedMemoryHeader);
+    header->total_size = backing_mode == BackingMode::SsdStream ? ssd_config.capacity_bytes : shm_size;
+    header->data_offset = backing_mode == BackingMode::SsdStream ? 0 : sizeof(SharedMemoryHeader);
     header->metadata_offset = 0; // Metadata is kept locally, not in shared memory
 
     // Support both low addresses (for testing) and high CXL addresses
@@ -193,7 +278,7 @@ void SharedMemoryManager::initialize_header() {
     }
 
     // Calculate number of cachelines
-    size_t data_area_size = shm_size - sizeof(SharedMemoryHeader);
+    size_t data_area_size = data_capacity_bytes();
     header->num_cachelines = data_area_size / SHM_CACHELINE_SIZE;
 
     SPDLOG_INFO("Initialized header: {} cachelines available", header->num_cachelines);
@@ -202,8 +287,10 @@ void SharedMemoryManager::initialize_header() {
 
 void SharedMemoryManager::initialize_data_area() {
     // Only clear data if this is a fresh initialization (magic number not present)
-    size_t data_size = shm_size - sizeof(SharedMemoryHeader);
-    if (header->magic != MAGIC_NUMBER) {
+    size_t data_size = data_capacity_bytes();
+    if (backing_mode == BackingMode::SsdStream) {
+        SPDLOG_INFO("SSD streaming data area is populated lazily from the backing device/file");
+    } else if (header->magic != MAGIC_NUMBER) {
         // Clear the data area only for new shared memory
         memset(data_area, 0, data_size);
         SPDLOG_INFO("Cleared data area for new shared memory initialization");
@@ -213,6 +300,7 @@ void SharedMemoryManager::initialize_data_area() {
 
     // Initialize memory regions
     // Start with one large region covering all CXL memory
+    regions.clear();
     MemoryRegion region;
     region.base_addr = header->base_addr;
     region.size = header->num_cachelines * SHM_CACHELINE_SIZE;
@@ -223,6 +311,13 @@ void SharedMemoryManager::initialize_data_area() {
 }
 
 void SharedMemoryManager::cleanup() {
+#ifdef CXLMEMSIM_HAS_SSD_STREAMING_BACKEND
+    if (ssd_backend) {
+        call_backend_bool([&]() { return ssd_backend->shutdown(); });
+        ssd_backend.reset();
+    }
+#endif
+
     if (shm_base != nullptr && shm_base != MAP_FAILED) {
         munmap(shm_base, shm_size);
         shm_base = nullptr;
@@ -237,6 +332,16 @@ void SharedMemoryManager::cleanup() {
     // Call shm_unlink(shm_name.c_str()) explicitly if you want to remove
 }
 
+size_t SharedMemoryManager::data_capacity_bytes() const {
+    if (backing_mode == BackingMode::SsdStream) {
+        return static_cast<size_t>(ssd_config.capacity_bytes);
+    }
+    if (shm_size < sizeof(SharedMemoryHeader)) {
+        return 0;
+    }
+    return shm_size - sizeof(SharedMemoryHeader);
+}
+
 void SharedMemoryManager::set_base_addr(uint64_t addr) {
     if (header) {
         header->base_addr = addr;
@@ -247,14 +352,37 @@ void SharedMemoryManager::set_base_addr(uint64_t addr) {
 SharedMemoryManager::SharedMemoryInfo SharedMemoryManager::get_shm_info() const {
     SharedMemoryInfo info;
     info.shm_name = shm_name;
-    info.size = shm_size;
+    info.size = backing_mode == BackingMode::SsdStream ? data_capacity_bytes() : shm_size;
     info.base_addr = header ? header->base_addr : 0;
     info.num_cachelines = header ? header->num_cachelines : 0;
     return info;
 }
 
+bool SharedMemoryManager::address_to_backend_offset(uint64_t addr, size_t access_size, uint64_t *offset) const {
+    if (!header || !offset || access_size == 0) {
+        return false;
+    }
+
+    uint64_t cacheline_addr = addr_to_cacheline(addr);
+    size_t cacheline_offset = static_cast<size_t>(addr - cacheline_addr);
+    if (cacheline_offset + access_size > SHM_CACHELINE_SIZE) {
+        return false;
+    }
+
+    uint64_t index = cacheline_to_index(cacheline_addr);
+    if (index >= header->num_cachelines) {
+        return false;
+    }
+
+    *offset = index * SHM_CACHELINE_SIZE + cacheline_offset;
+    return true;
+}
+
 uint8_t *SharedMemoryManager::get_cacheline_data(uint64_t cacheline_addr) {
     if (!header || !data_area) {
+        if (backing_mode == BackingMode::SsdStream) {
+            SPDLOG_ERROR("get_cacheline_data: direct cacheline pointer access is unavailable in SSD streaming mode");
+        }
         return nullptr;
     }
 
@@ -283,6 +411,42 @@ bool SharedMemoryManager::read_cacheline(uint64_t addr, uint8_t *buffer, size_t 
     if (size == 0 || size > SHM_CACHELINE_SIZE) {
         SPDLOG_ERROR("read_cacheline: invalid size {} (max {})", size, SHM_CACHELINE_SIZE);
         return false;
+    }
+
+    if (backing_mode == BackingMode::SsdStream) {
+#ifdef CXLMEMSIM_HAS_SSD_STREAMING_BACKEND
+        if (!ssd_backend) {
+            SPDLOG_ERROR("read_cacheline: SSD streaming backend is not initialized");
+            return false;
+        }
+
+        size_t bytes_read = 0;
+        while (bytes_read < size) {
+            uint64_t current_addr = addr + bytes_read;
+            uint64_t cacheline_addr = addr_to_cacheline(current_addr);
+            size_t offset_in_cacheline = static_cast<size_t>(current_addr - cacheline_addr);
+            size_t bytes_in_cacheline = std::min(size - bytes_read, SHM_CACHELINE_SIZE - offset_in_cacheline);
+
+            uint64_t backend_offset = 0;
+            if (!address_to_backend_offset(current_addr, bytes_in_cacheline, &backend_offset)) {
+                SPDLOG_ERROR("read_cacheline: invalid SSD streaming address 0x{:x} size {}", current_addr,
+                             bytes_in_cacheline);
+                return false;
+            }
+
+            if (!call_backend_bool(
+                    [&]() { return ssd_backend->read(backend_offset, buffer + bytes_read, bytes_in_cacheline); })) {
+                SPDLOG_ERROR("read_cacheline: SSD backend read failed at offset {} size {}", backend_offset,
+                             bytes_in_cacheline);
+                return false;
+            }
+            bytes_read += bytes_in_cacheline;
+        }
+        return true;
+#else
+        SPDLOG_ERROR("read_cacheline: SSD streaming backend is not compiled in");
+        return false;
+#endif
     }
 
     // Always allow access when base_addr is 0 (modulo mapping mode)
@@ -337,6 +501,44 @@ bool SharedMemoryManager::write_cacheline(uint64_t addr, const uint8_t *data, si
     if (size == 0 || size > SHM_CACHELINE_SIZE) {
         SPDLOG_ERROR("write_cacheline: invalid size {} (max {})", size, SHM_CACHELINE_SIZE);
         return false;
+    }
+
+    if (backing_mode == BackingMode::SsdStream) {
+#ifdef CXLMEMSIM_HAS_SSD_STREAMING_BACKEND
+        if (!ssd_backend) {
+            SPDLOG_ERROR("write_cacheline: SSD streaming backend is not initialized");
+            return false;
+        }
+
+        size_t bytes_written = 0;
+        while (bytes_written < size) {
+            uint64_t current_addr = addr + bytes_written;
+            uint64_t cacheline_addr = addr_to_cacheline(current_addr);
+            size_t offset_in_cacheline = static_cast<size_t>(current_addr - cacheline_addr);
+            size_t bytes_in_cacheline = std::min(size - bytes_written, SHM_CACHELINE_SIZE - offset_in_cacheline);
+
+            uint64_t backend_offset = 0;
+            if (!address_to_backend_offset(current_addr, bytes_in_cacheline, &backend_offset)) {
+                SPDLOG_ERROR("write_cacheline: invalid SSD streaming address 0x{:x} size {}", current_addr,
+                             bytes_in_cacheline);
+                return false;
+            }
+
+            if (!call_backend_bool(
+                    [&]() { return ssd_backend->write(backend_offset, data + bytes_written, bytes_in_cacheline); })) {
+                SPDLOG_ERROR("write_cacheline: SSD backend write failed at offset {} size {}", backend_offset,
+                             bytes_in_cacheline);
+                return false;
+            }
+            bytes_written += bytes_in_cacheline;
+        }
+
+        __sync_synchronize();
+        return true;
+#else
+        SPDLOG_ERROR("write_cacheline: SSD streaming backend is not compiled in");
+        return false;
+#endif
     }
 
     // Always allow access when base_addr is 0 (modulo mapping mode)
@@ -403,6 +605,178 @@ bool SharedMemoryManager::write_cacheline(uint64_t addr, const uint8_t *data, si
     SPDLOG_DEBUG("Wrote {} bytes to addr 0x{:x} (cacheline 0x{:x} offset {})", size, addr, cacheline_addr, offset);
 
     return true;
+}
+
+bool SharedMemoryManager::atomic_fetch_add_uint64(uint64_t addr, uint64_t value, uint64_t *old_value) {
+    if (!old_value) {
+        return false;
+    }
+    uint64_t cacheline_addr = addr_to_cacheline(addr);
+    size_t offset = static_cast<size_t>(addr - cacheline_addr);
+    if (offset + sizeof(uint64_t) > SHM_CACHELINE_SIZE) {
+        SPDLOG_ERROR("atomic_fetch_add_uint64: operation crosses cacheline boundary at 0x{:x}", addr);
+        return false;
+    }
+
+    if (backing_mode == BackingMode::SsdStream) {
+        uint64_t current = 0;
+        if (!read_cacheline(addr, reinterpret_cast<uint8_t *>(&current), sizeof(current))) {
+            return false;
+        }
+        *old_value = current;
+        uint64_t next = current + value;
+        return write_cacheline(addr, reinterpret_cast<const uint8_t *>(&next), sizeof(next));
+    }
+
+    uint8_t *cacheline_data = get_cacheline_data(cacheline_addr);
+    if (!cacheline_data) {
+        return false;
+    }
+
+    auto *ptr = reinterpret_cast<uint64_t *>(cacheline_data + offset);
+    *old_value = __atomic_fetch_add(ptr, value, __ATOMIC_SEQ_CST);
+    flush_cacheline(addr, sizeof(uint64_t));
+    return true;
+}
+
+bool SharedMemoryManager::atomic_compare_exchange_uint64(uint64_t addr, uint64_t expected, uint64_t desired,
+                                                        uint64_t *old_value) {
+    if (!old_value) {
+        return false;
+    }
+    uint64_t cacheline_addr = addr_to_cacheline(addr);
+    size_t offset = static_cast<size_t>(addr - cacheline_addr);
+    if (offset + sizeof(uint64_t) > SHM_CACHELINE_SIZE) {
+        SPDLOG_ERROR("atomic_compare_exchange_uint64: operation crosses cacheline boundary at 0x{:x}", addr);
+        return false;
+    }
+
+    if (backing_mode == BackingMode::SsdStream) {
+        uint64_t current = 0;
+        if (!read_cacheline(addr, reinterpret_cast<uint8_t *>(&current), sizeof(current))) {
+            return false;
+        }
+        *old_value = current;
+        if (current != expected) {
+            return true;
+        }
+        return write_cacheline(addr, reinterpret_cast<const uint8_t *>(&desired), sizeof(desired));
+    }
+
+    uint8_t *cacheline_data = get_cacheline_data(cacheline_addr);
+    if (!cacheline_data) {
+        return false;
+    }
+
+    auto *ptr = reinterpret_cast<uint64_t *>(cacheline_data + offset);
+    uint64_t actual = expected;
+    bool success = __atomic_compare_exchange_n(ptr, &actual, desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    *old_value = actual;
+    if (success) {
+        flush_cacheline(addr, sizeof(uint64_t));
+    }
+    return true;
+}
+
+bool SharedMemoryManager::flush() {
+    if (backing_mode == BackingMode::SsdStream) {
+#ifdef CXLMEMSIM_HAS_SSD_STREAMING_BACKEND
+        if (!ssd_backend) {
+            return false;
+        }
+        return call_backend_bool([&]() { return ssd_backend->flush(); });
+#else
+        return false;
+#endif
+    }
+
+    if (!shm_base || shm_base == MAP_FAILED || shm_size == 0) {
+        return true;
+    }
+    if (msync(shm_base, shm_size, MS_SYNC) != 0) {
+        SPDLOG_ERROR("flush: msync failed: {}", strerror(errno));
+        return false;
+    }
+    return true;
+}
+
+bool SharedMemoryManager::flush_cacheline(uint64_t addr, size_t size) {
+    (void)addr;
+    (void)size;
+    return flush();
+}
+
+bool SharedMemoryManager::prefetch(uint64_t addr, size_t size) {
+    if (backing_mode != BackingMode::SsdStream) {
+        return true;
+    }
+#ifdef CXLMEMSIM_HAS_SSD_STREAMING_BACKEND
+    uint64_t offset = 0;
+    if (!ssd_backend || !address_to_backend_offset(addr, 1, &offset)) {
+        return false;
+    }
+    return call_backend_bool([&]() { return ssd_backend->prefetch(offset, size); });
+#else
+    return false;
+#endif
+}
+
+bool SharedMemoryManager::evict_after(uint64_t addr, size_t size) {
+    if (backing_mode != BackingMode::SsdStream) {
+        return true;
+    }
+#ifdef CXLMEMSIM_HAS_SSD_STREAMING_BACKEND
+    uint64_t offset = 0;
+    if (!ssd_backend || !address_to_backend_offset(addr, 1, &offset)) {
+        return false;
+    }
+    return call_backend_bool([&]() { return ssd_backend->evict_after(offset, size); });
+#else
+    return false;
+#endif
+}
+
+bool SharedMemoryManager::pin(uint64_t addr, size_t size) {
+    if (backing_mode != BackingMode::SsdStream) {
+        return true;
+    }
+#ifdef CXLMEMSIM_HAS_SSD_STREAMING_BACKEND
+    uint64_t offset = 0;
+    if (!ssd_backend || !address_to_backend_offset(addr, 1, &offset)) {
+        return false;
+    }
+    return call_backend_bool([&]() { return ssd_backend->pin(offset, size); });
+#else
+    return false;
+#endif
+}
+
+bool SharedMemoryManager::unpin(uint64_t addr, size_t size) {
+    if (backing_mode != BackingMode::SsdStream) {
+        return true;
+    }
+#ifdef CXLMEMSIM_HAS_SSD_STREAMING_BACKEND
+    uint64_t offset = 0;
+    if (!ssd_backend || !address_to_backend_offset(addr, 1, &offset)) {
+        return false;
+    }
+    return call_backend_bool([&]() { return ssd_backend->unpin(offset, size); });
+#else
+    return false;
+#endif
+}
+
+void SharedMemoryManager::set_streaming(bool enabled) {
+    if (backing_mode != BackingMode::SsdStream) {
+        return;
+    }
+#ifdef CXLMEMSIM_HAS_SSD_STREAMING_BACKEND
+    if (ssd_backend && enabled) {
+        call_backend_bool([&]() { return ssd_backend->set_streaming(0, data_capacity_bytes()); });
+    }
+#else
+    (void)enabled;
+#endif
 }
 
 CachelineMetadata *SharedMemoryManager::get_cacheline_metadata(uint64_t cacheline_addr) {

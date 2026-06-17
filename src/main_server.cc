@@ -151,6 +151,8 @@ private:
     // Shared memory manager for real memory allocation
     std::unique_ptr<SharedMemoryManager> shm_manager;
     std::string backing_file_;
+    SharedMemoryManager::BackingMode backing_mode_;
+    SharedMemoryManager::SsdStreamingConfig ssd_config_;
 
     // Memory storage with coherency tracking (metadata only)
     // Actual data is in shared memory managed by shm_manager
@@ -220,16 +222,23 @@ private:
 
 public:
     ThreadPerConnectionServer(int port, CXLController *ctrl, size_t capacity_mb, const std::string &backing_file = "",
-                              CommMode mode = CommMode::TCP, const std::string &pgas_shm_name = "/cxlmemsim_pgas")
+                              CommMode mode = CommMode::TCP,
+                              const std::string &pgas_shm_name = "/cxlmemsim_pgas",
+                              SharedMemoryManager::BackingMode backing_mode =
+                                  SharedMemoryManager::BackingMode::SharedMemory,
+                              const SharedMemoryManager::SsdStreamingConfig &ssd_config = {})
         : server_fd(-1), port(port), controller(ctrl), running(true), next_thread_id(0), comm_mode(mode),
           pgas_shm_name_(pgas_shm_name), pgas_shm_fd_(-1), pgas_shm_header_(nullptr), pgas_memory_(nullptr),
-          pgas_memory_size_(0), backing_file_(backing_file) {
+          pgas_memory_size_(0), backing_file_(backing_file), backing_mode_(backing_mode), ssd_config_(ssd_config) {
         congestion_info.active_requests = 0;
         congestion_info.total_bandwidth_used = 0;
         congestion_info.last_reset = std::chrono::steady_clock::now();
 
         // Initialize shared memory manager
-        if (!backing_file_.empty()) {
+        if (backing_mode_ == SharedMemoryManager::BackingMode::SsdStream) {
+            SPDLOG_INFO("Using SSD streaming backing for memory: {}", ssd_config_.backing_path);
+            shm_manager = std::make_unique<SharedMemoryManager>(capacity_mb, "/cxlmemsim_shared", ssd_config_);
+        } else if (!backing_file_.empty()) {
             SPDLOG_INFO("Using backing file for memory: {}", backing_file_);
             shm_manager = std::make_unique<SharedMemoryManager>(capacity_mb, "/cxlmemsim_shared", true, backing_file_);
         } else {
@@ -320,7 +329,15 @@ struct ServerOptions {
     int capacity = 256;
     int port = 9999;
     std::string topology = "topology.txt";
+    std::string backing_mode_str;
     std::string backing_file;
+    std::string ssd_backing_file;
+    size_t ssd_page_size = 4096;
+    size_t ssd_io_chunk_size = 64 * 1024;
+    size_t ssd_cache_mb = 16;
+    size_t ssd_read_ahead_pages = 16;
+    bool ssd_io_uring = true;
+    bool ssd_odirect = true;
     std::string comm_mode_str = "tcp";
     std::string pgas_shm_name = "/cxlmemsim_pgas";
     uint32_t node_id = 0;
@@ -351,7 +368,15 @@ static void print_server_help(const char *program) {
               << "      --capacity <MB>                CXL expander capacity (default: 256)\n"
               << "  -p, --port <port>                  Server port (default: 9999)\n"
               << "  -t, --topology <file>              Topology file (default: topology.txt)\n"
+              << "      --backing-mode <mode>          shm, file, or ssd-stream\n"
               << "      --backing-file <path>          Back CXL memory with a regular file\n"
+              << "      --ssd-backing-file <path>      Persistent SSD streaming file or block device\n"
+              << "      --ssd-page-size <bytes>        SSD backend page size (default: 4096)\n"
+              << "      --ssd-io-chunk-size <bytes>    SSD backend I/O chunk size (default: 65536)\n"
+              << "      --ssd-cache-mb <MB>            Resident SSD cache budget (default: 16)\n"
+              << "      --ssd-read-ahead-pages <count> SSD read-ahead pages (default: 16 = 64KB)\n"
+              << "      --ssd-io-uring[=true|false]    Use io_uring on Linux when available\n"
+              << "      --ssd-odirect[=true|false]     Use O_DIRECT when backend supports it\n"
               << "      --comm-mode <mode>             tcp, shm, pgas-shm, or distributed\n"
               << "      --pgas-shm-name <name>         PGAS shared memory name\n"
               << "      --node-id <id>                 Distributed node ID\n"
@@ -508,8 +533,24 @@ static bool parse_server_options(int argc, char *argv[], ServerOptions &opts, st
                 opts.port = std::stoi(get_value(key));
             } else if (key == "topology") {
                 opts.topology = get_value(key);
+            } else if (key == "backing-mode") {
+                opts.backing_mode_str = get_value(key);
             } else if (key == "backing-file") {
                 opts.backing_file = get_value(key);
+            } else if (key == "ssd-backing-file") {
+                opts.ssd_backing_file = get_value(key);
+            } else if (key == "ssd-page-size") {
+                opts.ssd_page_size = std::stoull(get_value(key));
+            } else if (key == "ssd-io-chunk-size") {
+                opts.ssd_io_chunk_size = std::stoull(get_value(key));
+            } else if (key == "ssd-cache-mb") {
+                opts.ssd_cache_mb = std::stoull(get_value(key));
+            } else if (key == "ssd-read-ahead-pages") {
+                opts.ssd_read_ahead_pages = std::stoull(get_value(key));
+            } else if (key == "ssd-io-uring") {
+                opts.ssd_io_uring = parse_optional_bool_option(argc, argv, i, value, has_inline_value);
+            } else if (key == "ssd-odirect") {
+                opts.ssd_odirect = parse_optional_bool_option(argc, argv, i, value, has_inline_value);
             } else if (key == "comm-mode") {
                 opts.comm_mode_str = get_value(key);
             } else if (key == "pgas-shm-name") {
@@ -573,7 +614,8 @@ int main(int argc, char *argv[]) {
     }
 
     const auto &backing_file = opts.backing_file;
-    int verbose = opts.verbose;
+    const auto &backing_mode_str = opts.backing_mode_str;
+    const auto &ssd_backing_file = opts.ssd_backing_file;
     size_t default_latency = opts.default_latency;
     size_t interleave_size = opts.interleave_size;
     int capacity = opts.capacity;
@@ -596,6 +638,64 @@ int main(int argc, char *argv[]) {
     uint32_t gfam_hosts = opts.gfam_hosts;
     double gfam_fabric_latency = opts.gfam_fabric_latency;
     double gfam_bandwidth = opts.gfam_bandwidth;
+
+    SharedMemoryManager::BackingMode backing_mode = SharedMemoryManager::BackingMode::SharedMemory;
+    if (!backing_mode_str.empty()) {
+        if (backing_mode_str == "shm" || backing_mode_str == "shared-memory" ||
+            backing_mode_str == "shared_memory") {
+            backing_mode = SharedMemoryManager::BackingMode::SharedMemory;
+        } else if (backing_mode_str == "file" || backing_mode_str == "mmap-file" ||
+                   backing_mode_str == "mmap_file") {
+            backing_mode = SharedMemoryManager::BackingMode::FileMmap;
+        } else if (backing_mode_str == "ssd-stream" || backing_mode_str == "ssd_stream") {
+            backing_mode = SharedMemoryManager::BackingMode::SsdStream;
+        } else {
+            SPDLOG_ERROR("Invalid backing mode: {}. Use 'shm', 'file', or 'ssd-stream'", backing_mode_str);
+            return 1;
+        }
+    } else if (!ssd_backing_file.empty()) {
+        backing_mode = SharedMemoryManager::BackingMode::SsdStream;
+    } else if (!backing_file.empty()) {
+        backing_mode = SharedMemoryManager::BackingMode::FileMmap;
+    }
+
+    if (backing_mode == SharedMemoryManager::BackingMode::FileMmap && backing_file.empty()) {
+        SPDLOG_ERROR("--backing-mode=file requires --backing-file <path>");
+        return 1;
+    }
+    if (backing_mode == SharedMemoryManager::BackingMode::SharedMemory && !backing_file.empty() &&
+        !backing_mode_str.empty()) {
+        SPDLOG_ERROR("--backing-file cannot be combined with --backing-mode=shm");
+        return 1;
+    }
+    if (backing_mode == SharedMemoryManager::BackingMode::SsdStream && ssd_backing_file.empty()) {
+        SPDLOG_ERROR("--backing-mode=ssd-stream requires --ssd-backing-file <path>");
+        return 1;
+    }
+    if (backing_mode == SharedMemoryManager::BackingMode::SsdStream && !backing_file.empty()) {
+        SPDLOG_ERROR("--backing-file cannot be combined with SSD streaming; use --ssd-backing-file");
+        return 1;
+    }
+    if (backing_mode == SharedMemoryManager::BackingMode::SsdStream && opts.ssd_page_size == 0) {
+        SPDLOG_ERROR("--ssd-page-size must be non-zero");
+        return 1;
+    }
+    if (backing_mode != SharedMemoryManager::BackingMode::SsdStream && !ssd_backing_file.empty()) {
+        SPDLOG_ERROR("--ssd-backing-file requires --backing-mode=ssd-stream or no explicit --backing-mode");
+        return 1;
+    }
+
+    SharedMemoryManager::SsdStreamingConfig ssd_config;
+    ssd_config.backing_path = ssd_backing_file;
+    ssd_config.capacity_bytes = static_cast<uint64_t>(opts.capacity) * 1024ULL * 1024ULL;
+    ssd_config.page_size = opts.ssd_page_size;
+    ssd_config.io_chunk_size = opts.ssd_io_chunk_size;
+    ssd_config.cache_pages = static_cast<size_t>(
+        (static_cast<uint64_t>(opts.ssd_cache_mb) * 1024ULL * 1024ULL + opts.ssd_page_size - 1) /
+        opts.ssd_page_size);
+    ssd_config.read_ahead_pages = opts.ssd_read_ahead_pages;
+    ssd_config.use_io_uring = opts.ssd_io_uring;
+    ssd_config.use_odirect = opts.ssd_odirect;
 
     // Map transport mode string to enum
     DistTransportMode transport_mode = DistTransportMode::SHM;
@@ -620,6 +720,16 @@ int main(int argc, char *argv[]) {
         comm_mode = CommMode::DISTRIBUTED;
     } else if (comm_mode_str != "tcp") {
         SPDLOG_ERROR("Invalid communication mode: {}. Use 'tcp', 'shm', 'pgas-shm', or 'distributed'", comm_mode_str);
+        return 1;
+    }
+
+    if (backing_mode == SharedMemoryManager::BackingMode::SsdStream && comm_mode == CommMode::PGAS_SHM) {
+        SPDLOG_ERROR("SSD streaming backing is not supported with --comm-mode=pgas-shm because that path bypasses "
+                     "SharedMemoryManager storage");
+        return 1;
+    }
+    if (backing_mode == SharedMemoryManager::BackingMode::SsdStream && comm_mode == CommMode::DISTRIBUTED) {
+        SPDLOG_ERROR("SSD streaming backing is not wired into distributed mode yet");
         return 1;
     }
 
@@ -726,6 +836,21 @@ int main(int argc, char *argv[]) {
     SPDLOG_INFO("  Port: {}", port);
     SPDLOG_INFO("  Topology: {}", topology);
     SPDLOG_INFO("  Capacity: {} MB", capacity);
+    const char *backing_mode_label = backing_mode == SharedMemoryManager::BackingMode::SsdStream
+                                         ? "SSD streaming"
+                                     : backing_mode == SharedMemoryManager::BackingMode::FileMmap ? "mmap file"
+                                                                                                   : "POSIX shared memory";
+    SPDLOG_INFO("  Backing Mode: {}", backing_mode_label);
+    if (backing_mode == SharedMemoryManager::BackingMode::FileMmap) {
+        SPDLOG_INFO("  Backing File: {}", backing_file);
+    } else if (backing_mode == SharedMemoryManager::BackingMode::SsdStream) {
+        SPDLOG_INFO("  SSD Backing: {}", ssd_config.backing_path);
+        SPDLOG_INFO("  SSD Page: {} bytes, I/O chunk: {} bytes, cache: {} MB ({} pages), read-ahead pages: {}, "
+                    "io_uring: {}, O_DIRECT: {}",
+                    ssd_config.page_size, ssd_config.io_chunk_size, opts.ssd_cache_mb, ssd_config.cache_pages,
+                    ssd_config.read_ahead_pages, ssd_config.use_io_uring ? "on" : "off",
+                    ssd_config.use_odirect ? "on" : "off");
+    }
     SPDLOG_INFO("  Default latency: {} ns", default_latency);
     SPDLOG_INFO("  Interleave size: {} bytes", interleave_size);
     SPDLOG_INFO("  DCD: {}", controller->dcd_enabled() ? "enabled" : "disabled");
@@ -858,7 +983,8 @@ int main(int argc, char *argv[]) {
     }
 
     try {
-        ThreadPerConnectionServer server(port, controller, capacity, backing_file, comm_mode, pgas_shm_name);
+        ThreadPerConnectionServer server(port, controller, capacity, backing_file, comm_mode, pgas_shm_name,
+                                         backing_mode, ssd_config);
 
         if (!server.start()) {
             SPDLOG_ERROR("Failed to start server");
@@ -917,6 +1043,10 @@ bool ThreadPerConnectionServer::start() {
     case CommMode::TCP:
         SPDLOG_INFO(">>> TCP mode: Initializing TCP socket <<<");
         break;
+
+    case CommMode::DISTRIBUTED:
+        SPDLOG_ERROR("Distributed mode is handled by DistributedMemoryServer before ThreadPerConnectionServer");
+        return false;
     }
 
     // TCP mode initialization (only reached if comm_mode == TCP)
@@ -966,6 +1096,10 @@ void ThreadPerConnectionServer::run() {
     case CommMode::TCP:
         SPDLOG_INFO("Running in TCP mode");
         break;
+
+    case CommMode::DISTRIBUTED:
+        SPDLOG_ERROR("Distributed mode is not served by ThreadPerConnectionServer");
+        return;
     }
 
     // TCP accept loop (only reached if comm_mode == TCP)
@@ -1421,11 +1555,6 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
 
             // Read data from shared memory
             if (!shm_manager->read_cacheline(req.addr, resp.data, req.size)) {
-                // Force sync before reporting failure
-                auto *metadata_ptr = shm_manager->get_cacheline_metadata(cacheline_addr);
-                if (metadata_ptr) {
-                    msync(metadata_ptr, sizeof(CachelineMetadata), MS_INVALIDATE | MS_SYNC);
-                }
                 SPDLOG_ERROR("Thread {}: Failed to read from shared memory at 0x{:x}", thread_id, (uint64_t)req.addr);
                 resp.status = 1;
                 congestion_info.active_requests--;
@@ -1489,15 +1618,8 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
                 return;
             }
 
-            // CRITICAL: Force sync to physical memory so other guests can see it
-            auto *metadata_ptr = shm_manager->get_cacheline_metadata(cacheline_addr);
-            if (metadata_ptr) {
-                msync(metadata_ptr, sizeof(CachelineMetadata), MS_SYNC);
-            }
-            // Force sync the data as well
-            void *data_ptr = shm_manager->get_data_area();
-            if (data_ptr) {
-                msync((uint8_t *)data_ptr + (cacheline_addr & ~SHM_CACHELINE_MASK), SHM_CACHELINE_SIZE, MS_SYNC);
+            if (!shm_manager->flush_cacheline(req.addr, req.size)) {
+                SPDLOG_WARN("Thread {}: flush failed after write at 0x{:x}", thread_id, req.addr);
             }
             std::atomic_thread_fence(std::memory_order_release);
 
@@ -1660,7 +1782,9 @@ void ThreadPerConnectionServer::handle_bi_request(int thread_id, const ServerReq
             metadata->sharers.clear();
             metadata->last_access_time = req.timestamp;
             metadata->version++;
-            msync(metadata, sizeof(CachelineMetadata), MS_SYNC);
+            if (!shm_manager->flush_cacheline(req.addr, size)) {
+                SPDLOG_WARN("Thread {}: BI writeback flush failed at 0x{:x}", thread_id, req.addr);
+            }
         }
 
         register_back_invalidation(cacheline_addr, thread_id, dirty_data, req.timestamp);
@@ -1734,24 +1858,17 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
         // Lock the cacheline for this atomic operation
         std::lock_guard<std::mutex> cacheline_lock(metadata->lock);
 
-        // Get pointer to the data location in shared memory
-        void *data_area = shm_manager->get_data_area();
-        if (!data_area) {
-            SPDLOG_ERROR("Thread {}: Failed to get data area for atomic op", thread_id);
-            resp.status = 1;
-            resp.old_value = 0;
-            congestion_info.active_requests--;
-            return;
-        }
-
-        // Calculate offset within cacheline
-        size_t offset = req.addr % 64;
-        uint64_t *ptr = reinterpret_cast<uint64_t *>(static_cast<uint8_t *>(data_area) + cacheline_addr + offset);
-
         switch (req.op_type) {
         case OP_ATOMIC_FAA: {
             // Fetch-and-Add: atomically add value and return old value
-            uint64_t old_value = __atomic_fetch_add(ptr, req.value, __ATOMIC_SEQ_CST);
+            uint64_t old_value = 0;
+            if (!shm_manager->atomic_fetch_add_uint64(req.addr, req.value, &old_value)) {
+                SPDLOG_ERROR("Thread {}: ATOMIC_FAA failed at 0x{:x}", thread_id, req.addr);
+                resp.status = 1;
+                resp.old_value = 0;
+                congestion_info.active_requests--;
+                return;
+            }
             resp.old_value = old_value;
 
             // Update metadata
@@ -1761,8 +1878,6 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
             metadata->sharers.clear();
             metadata->version++;
 
-            // Force sync to physical memory
-            msync(ptr, sizeof(uint64_t), MS_SYNC);
             __atomic_thread_fence(__ATOMIC_RELEASE);
 
             total_atomic_faa++;
@@ -1774,10 +1889,16 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
 
         case OP_ATOMIC_CAS: {
             // Compare-and-Swap: if *ptr == expected, set *ptr = value
-            uint64_t expected = req.expected;
-            bool success =
-                __atomic_compare_exchange_n(ptr, &expected, req.value, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-            resp.old_value = expected; // Returns actual value (old if success, current if fail)
+            uint64_t actual = 0;
+            if (!shm_manager->atomic_compare_exchange_uint64(req.addr, req.expected, req.value, &actual)) {
+                SPDLOG_ERROR("Thread {}: ATOMIC_CAS failed at 0x{:x}", thread_id, req.addr);
+                resp.status = 1;
+                resp.old_value = 0;
+                congestion_info.active_requests--;
+                return;
+            }
+            bool success = actual == req.expected;
+            resp.old_value = actual; // Returns actual value (old if success, current if fail)
 
             // Update metadata
             metadata->last_access_time = req.timestamp;
@@ -1787,16 +1908,13 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
                 metadata->sharers.clear();
                 metadata->version++;
                 total_atomic_cas_success++;
-
-                // Force sync to physical memory
-                msync(ptr, sizeof(uint64_t), MS_SYNC);
             }
             __atomic_thread_fence(__ATOMIC_RELEASE);
 
             total_atomic_cas++;
             log_periodic_stats("ATOMIC_CAS", total_atomic_cas.load());
             SPDLOG_DEBUG("Thread {}: ATOMIC_CAS addr=0x{:x} expected={} desired={} actual={} success={}", thread_id,
-                         req.addr, req.expected, req.value, expected, success);
+                         req.addr, req.expected, req.value, actual, success);
             break;
         }
 
@@ -1805,10 +1923,8 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
             __atomic_thread_fence(__ATOMIC_SEQ_CST);
             resp.old_value = 0;
 
-            // Also sync the entire shared memory region
-            if (data_area) {
-                auto shm_info = shm_manager->get_shm_info();
-                msync(data_area, shm_info.size, MS_SYNC);
+            if (!shm_manager->flush()) {
+                SPDLOG_WARN("Thread {}: FENCE flush failed", thread_id);
             }
 
             total_fences++;
