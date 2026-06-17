@@ -104,6 +104,8 @@ The server supports several communication modes:
 
 The memory pool is managed by `SharedMemoryManager`. It can use POSIX shared memory or a regular file as a backing store. The shared-memory header records a magic value, format version, total size, data offset, base address, and cache-line count. The default cache-line data area is mapped with `mmap()` and is reused when the backing object already exists.
 
+When `include/ssd_streaming_backend.h` and `src/ssd_streaming_backend.cpp` are present, the server also builds an SSD streaming backing mode. This mode keeps the CXL address space persistent in a backing file or raw block device and routes cache-line reads and writes through `SsdStreamingBackend` instead of exposing a direct mmap pointer. The MVP backend uses 4KB page metadata by default, 64KB read-ahead (`16` pages at 4KB), a resident page cache sized by `--ssd-cache-mb`, CLOCK-like eviction in the backend, Linux `io_uring` with a registered fixed file/buffer when available, O_DIRECT-safe aligned page buffers, and placeholder hint plumbing for prefetch, pin/unpin, evict-after, and streaming ranges.
+
 The server CLI uses local parse-result structs in `src/main_server.cc`, `src/main.cc`, and `src/rob.cc`, so command-line parsing is handled in-tree.
 
 ## CPU PMU Compatibility
@@ -552,6 +554,52 @@ File-backed memory pool:
   --capacity=1024
 ```
 
+Persistent SSD streaming memory pool:
+
+```bash
+./build/cxlmemsim_server \
+  --comm-mode=tcp \
+  --ssd-backing-file=/tmp/cxlmemsim.ssd \
+  --ssd-cache-mb=16 \
+  --ssd-page-size=4096 \
+  --ssd-io-chunk-size=65536 \
+  --ssd-read-ahead-pages=16 \
+  --ssd-io-uring=true \
+  --ssd-odirect=true \
+  --capacity=1024
+```
+
+SSD streaming is available for TCP, ring-buffer SHM, PGAS SHM request slots, and distributed local-node memory. PGAS and distributed modes keep their control-plane shared memory, but cache-line data is served by `SharedMemoryManager` when SSD streaming is selected.
+
+PGAS shared-memory protocol over SSD streaming:
+
+```bash
+./build/cxlmemsim_server \
+  --comm-mode=pgas-shm \
+  --pgas-shm-name=/cxlmemsim_pgas \
+  --ssd-backing-file=/nvme/cxlmemsim-pgas.swap \
+  --ssd-cache-mb=16 \
+  --capacity=1024
+```
+
+In PGAS SSD mode the POSIX shared memory object only carries request/response slots; cache-line data is served from the SSD streaming backend.
+
+Distributed node with SSD streaming local memory:
+
+```bash
+./build/cxlmemsim_server \
+  --comm-mode=distributed \
+  --node-id=0 \
+  --dist-shm-name=/cxlmemsim_dist \
+  --port=9999 \
+  --transport-mode=shm \
+  --ssd-backing-file=/nvme/cxlmemsim-node{node}.swap \
+  --ssd-cache-mb=16 \
+  --capacity=1024
+```
+
+For distributed launches, `{node}` in `--ssd-backing-file` is replaced with the node ID. Without the placeholder, the path is used exactly as provided, which is useful when each node process is launched with an explicit raw block device path.
+
 Dynamic Capacity Device and GFAM:
 
 ```bash
@@ -580,6 +628,17 @@ Useful options:
 | `--topology` | Topology file using Newick-style syntax. |
 | `--comm-mode` | `tcp`, `shm`, `pgas-shm`, or `distributed`. |
 | `--backing-file` | Use a regular file instead of POSIX shared memory. |
+| `--ssd-backing-file` | Use persistent SSD streaming storage from a file or raw block device. |
+| `--ssd-cache-mb` | Resident SSD backend cache budget in MB. |
+| `--ssd-page-size` | SSD backend page size in bytes; default is 4096. |
+| `--ssd-io-chunk-size` | SSD backend I/O chunk size in bytes; default is 65536. |
+| `--ssd-read-ahead-pages` | Sequential read-ahead window in backend pages; default is 16. |
+| `--ssd-io-uring` | Use Linux `io_uring` with registered fixed file and buffer when available; default is on. |
+| `--ssd-odirect` | Open the backing file or block device with O_DIRECT when supported; default is on. |
+| `--pgas-shm-name` | POSIX shared memory name for PGAS request slots. |
+| `--node-id` | Distributed node ID. |
+| `--dist-shm-name` | Shared memory name for distributed node queues. |
+| `--transport-mode` | Distributed inter-node transport: `shm`, `tcp`, `rdma`, or `hybrid`. |
 | `--enable-dcd` | Enable the Dynamic Capacity Device model. |
 | `--dcd-granularity-mb` | DCD allocation granularity in MB. |
 | `--dcd-initial-capacity` | Initial DCD capacity in MB. Omit it to allocate the full `--capacity`. |

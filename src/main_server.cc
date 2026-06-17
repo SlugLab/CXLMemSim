@@ -723,16 +723,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (backing_mode == SharedMemoryManager::BackingMode::SsdStream && comm_mode == CommMode::PGAS_SHM) {
-        SPDLOG_ERROR("SSD streaming backing is not supported with --comm-mode=pgas-shm because that path bypasses "
-                     "SharedMemoryManager storage");
-        return 1;
-    }
-    if (backing_mode == SharedMemoryManager::BackingMode::SsdStream && comm_mode == CommMode::DISTRIBUTED) {
-        SPDLOG_ERROR("SSD streaming backing is not wired into distributed mode yet");
-        return 1;
-    }
-
     // Initialize policies
     std::array<Policy *, 4> policies = {new AllocationPolicy(), new MigrationPolicy(), new PagingPolicy(),
                                         new CachingPolicy()};
@@ -888,7 +878,7 @@ int main(int argc, char *argv[]) {
             SPDLOG_INFO("Starting distributed memory server node {}...", node_id);
 
             DistributedMemoryServer dist_server(node_id, dist_shm_name, port, capacity, controller, transport_mode,
-                                                tcp_addr, tcp_transport_port);
+                                                tcp_addr, tcp_transport_port, ssd_config);
 
             if (!dist_server.initialize()) {
                 SPDLOG_ERROR("Failed to initialize distributed server");
@@ -2265,6 +2255,8 @@ struct PGASMemoryEntry {
 } __attribute__((packed));
 
 bool ThreadPerConnectionServer::init_pgas_shm(const std::string &shm_name, size_t memory_size) {
+    const bool use_storage_backend = shm_manager && shm_manager->is_ssd_streaming();
+
     // Remove existing shared memory
     shm_unlink(shm_name.c_str());
 
@@ -2275,10 +2267,11 @@ bool ThreadPerConnectionServer::init_pgas_shm(const std::string &shm_name, size_
         return false;
     }
 
-    // Calculate total size: header + slots + memory (data + metadata per cacheline)
-    // Each cacheline needs 128 bytes (64 data + 64 metadata)
+    // Calculate total size: header + slots + optional memory table. SSD streaming
+    // mode keeps data in SharedMemoryManager, so the PGAS shm object only needs
+    // request/response slots.
     size_t num_cachelines = memory_size / 64;
-    size_t entry_region_size = num_cachelines * sizeof(PGASMemoryEntry);
+    size_t entry_region_size = use_storage_backend ? 0 : num_cachelines * sizeof(PGASMemoryEntry);
     size_t header_size = CXL_SHM_HEADER_SIZE(CXL_SHM_MAX_SLOTS);
     size_t total_size = header_size + entry_region_size;
 
@@ -2299,7 +2292,7 @@ bool ThreadPerConnectionServer::init_pgas_shm(const std::string &shm_name, size_
     }
 
     pgas_shm_header_ = (cxl_shm_header_t *)mapped;
-    pgas_memory_ = (char *)mapped + header_size;
+    pgas_memory_ = use_storage_backend ? nullptr : (char *)mapped + header_size;
     pgas_memory_size_ = entry_region_size;
 
     // Initialize header
@@ -2310,24 +2303,27 @@ bool ThreadPerConnectionServer::init_pgas_shm(const std::string &shm_name, size_
     pgas_shm_header_->memory_base = 0;
     pgas_shm_header_->memory_size = memory_size; // Original memory size (data only)
     pgas_shm_header_->num_cachelines = num_cachelines;
-    pgas_shm_header_->metadata_enabled = 1; // Always enabled in PGAS mode
-    pgas_shm_header_->entry_size = sizeof(PGASMemoryEntry);
-    pgas_shm_header_->flags = CXL_SHM_FLAG_METADATA_ENABLED;
+    pgas_shm_header_->metadata_enabled = use_storage_backend ? 0 : 1;
+    pgas_shm_header_->entry_size = use_storage_backend ? 0 : sizeof(PGASMemoryEntry);
+    pgas_shm_header_->flags = use_storage_backend ? 0 : CXL_SHM_FLAG_METADATA_ENABLED;
 
     // Initialize memory entries (data + metadata)
-    PGASMemoryEntry *entries = (PGASMemoryEntry *)pgas_memory_;
-    for (size_t i = 0; i < num_cachelines; i++) {
-        memset(&entries[i], 0, sizeof(PGASMemoryEntry));
-        entries[i].metadata.cache_state = CXL_CACHE_INVALID;
-        entries[i].metadata.owner_id = 0xFF; // No owner
-        entries[i].metadata.physical_addr = i * 64; // Cacheline address
+    if (!use_storage_backend) {
+        PGASMemoryEntry *entries = (PGASMemoryEntry *)pgas_memory_;
+        for (size_t i = 0; i < num_cachelines; i++) {
+            memset(&entries[i], 0, sizeof(PGASMemoryEntry));
+            entries[i].metadata.cache_state = CXL_CACHE_INVALID;
+            entries[i].metadata.owner_id = 0xFF; // No owner
+            entries[i].metadata.physical_addr = i * 64; // Cacheline address
+        }
     }
 
     SPDLOG_INFO("PGAS shared memory initialized:");
     SPDLOG_INFO("  Name: {}", shm_name);
     SPDLOG_INFO("  Memory size: {} MB ({} cachelines)", memory_size / (1024 * 1024), num_cachelines);
     SPDLOG_INFO("  Total mapped size: {} MB (including metadata)", total_size / (1024 * 1024));
-    SPDLOG_INFO("  Entry size: {} bytes (64 data + 64 metadata)", sizeof(PGASMemoryEntry));
+    SPDLOG_INFO("  Entry size: {} bytes{}", pgas_shm_header_->entry_size,
+                use_storage_backend ? " (SSD streaming data path)" : " (64 data + 64 metadata)");
 
     return true;
 }
@@ -2369,7 +2365,8 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
         return 0;
 
     int processed = 0;
-    PGASMemoryEntry *entries = (PGASMemoryEntry *)pgas_memory_;
+    const bool use_storage_backend = shm_manager && shm_manager->is_ssd_streaming();
+    PGASMemoryEntry *entries = use_storage_backend ? nullptr : (PGASMemoryEntry *)pgas_memory_;
     size_t num_cachelines = pgas_shm_header_->memory_size / 64;
 
     for (uint32_t i = 0; i < pgas_shm_header_->num_slots; i++) {
@@ -2397,7 +2394,7 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
             continue;
         }
 
-        PGASMemoryEntry *entry = &entries[cacheline_idx];
+        PGASMemoryEntry *entry = entries ? &entries[cacheline_idx] : nullptr;
 
         // Base CXL device latency (server mode has no perf-populated address entries)
         double base_latency = controller->dramlatency;
@@ -2426,6 +2423,10 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
         case CXL_SHM_REQ_READ: {
             double fabric_latency_ns = 0.0;
             size_t copy_size = std::min((size_t)slot->size, (size_t)64);
+            size_t offset = addr % 64;
+            if (!use_storage_backend) {
+                copy_size = std::min(copy_size, (size_t)64 - offset);
+            }
             if (!check_pgas_fabric_access(false, false, copy_size, fabric_latency_ns)) {
                 slot->resp_status = CXL_SHM_RESP_ERROR;
                 processed++;
@@ -2433,12 +2434,19 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
             }
 
             // Update metadata
-            entry->metadata.access_count++;
-            entry->metadata.last_access_time = request_ts;
+            if (entry) {
+                entry->metadata.access_count++;
+                entry->metadata.last_access_time = request_ts;
+            }
 
             // Copy data to slot
-            size_t offset = addr % 64;
-            memcpy((void *)slot->data, entry->data + offset, copy_size);
+            bool ok = use_storage_backend ? shm_manager->read_cacheline(addr, slot->data, copy_size)
+                                          : (memcpy((void *)slot->data, entry->data + offset, copy_size), true);
+            if (!ok) {
+                slot->resp_status = CXL_SHM_RESP_ERROR;
+                processed++;
+                break;
+            }
 
             // Copy metadata to response (use latency_ns field for cache_state)
             slot->latency_ns = (uint64_t)(base_latency + fabric_latency_ns);
@@ -2460,6 +2468,10 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
         case CXL_SHM_REQ_WRITE: {
             // Copy data from slot to memory
             size_t copy_size = std::min((size_t)slot->size, (size_t)64);
+            size_t offset = addr % 64;
+            if (!use_storage_backend) {
+                copy_size = std::min(copy_size, (size_t)64 - offset);
+            }
             double fabric_latency_ns = 0.0;
             if (!check_pgas_fabric_access(true, false, copy_size, fabric_latency_ns)) {
                 slot->resp_status = CXL_SHM_RESP_ERROR;
@@ -2467,14 +2479,21 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 break;
             }
 
-            size_t offset = addr % 64;
-            memcpy(entry->data + offset, (void *)slot->data, copy_size);
+            bool ok = use_storage_backend ? shm_manager->write_cacheline(addr, slot->data, copy_size)
+                                          : (memcpy(entry->data + offset, (void *)slot->data, copy_size), true);
+            if (!ok) {
+                slot->resp_status = CXL_SHM_RESP_ERROR;
+                processed++;
+                break;
+            }
 
             // Update metadata
-            entry->metadata.access_count++;
-            entry->metadata.last_access_time = request_ts;
-            entry->metadata.cache_state = 3; // MODIFIED
-            entry->metadata.version++;
+            if (entry) {
+                entry->metadata.access_count++;
+                entry->metadata.last_access_time = request_ts;
+                entry->metadata.cache_state = 3; // MODIFIED
+                entry->metadata.version++;
+            }
 
             slot->latency_ns = (uint64_t)(base_latency + fabric_latency_ns);
             total_writes++;
@@ -2496,13 +2515,28 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 break;
             }
             if (slot->addr + sizeof(uint64_t) <= num_cachelines * 64) {
-                uint64_t *ptr = (uint64_t *)(entry->data + (addr % 64));
-                uint64_t old = __atomic_fetch_add(ptr, slot->value, __ATOMIC_SEQ_CST);
+                uint64_t old = 0;
+                bool ok = false;
+                if (use_storage_backend) {
+                    ok = shm_manager->atomic_fetch_add_uint64(addr, slot->value, &old);
+                } else if ((addr % 64) + sizeof(uint64_t) <= 64) {
+                    uint64_t *ptr = (uint64_t *)(entry->data + (addr % 64));
+                    old = __atomic_fetch_add(ptr, slot->value, __ATOMIC_SEQ_CST);
+                    ok = true;
+                }
+                if (!ok) {
+                    slot->resp_status = CXL_SHM_RESP_ERROR;
+                    processed++;
+                    break;
+                }
+                slot->value = old;
                 memcpy((void *)slot->data, &old, sizeof(old));
 
-                entry->metadata.access_count++;
-                entry->metadata.cache_state = 3; // MODIFIED
-                entry->metadata.version++;
+                if (entry) {
+                    entry->metadata.access_count++;
+                    entry->metadata.cache_state = 3; // MODIFIED
+                    entry->metadata.version++;
+                }
 
                 slot->latency_ns = (uint64_t)(base_latency + fabric_latency_ns);
                 __atomic_thread_fence(__ATOMIC_RELEASE);
@@ -2524,13 +2558,28 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 break;
             }
             if (slot->addr + sizeof(uint64_t) <= num_cachelines * 64) {
-                uint64_t *ptr = (uint64_t *)(entry->data + (addr % 64));
-                uint64_t expected = slot->expected;
-                __atomic_compare_exchange_n(ptr, &expected, slot->value, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-                memcpy((void *)slot->data, &expected, sizeof(expected));
+                uint64_t actual = 0;
+                bool ok = false;
+                if (use_storage_backend) {
+                    ok = shm_manager->atomic_compare_exchange_uint64(addr, slot->expected, slot->value, &actual);
+                } else if ((addr % 64) + sizeof(uint64_t) <= 64) {
+                    actual = slot->expected;
+                    uint64_t *ptr = (uint64_t *)(entry->data + (addr % 64));
+                    __atomic_compare_exchange_n(ptr, &actual, slot->value, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+                    ok = true;
+                }
+                if (!ok) {
+                    slot->resp_status = CXL_SHM_RESP_ERROR;
+                    processed++;
+                    break;
+                }
+                slot->value = actual;
+                memcpy((void *)slot->data, &actual, sizeof(actual));
 
-                entry->metadata.access_count++;
-                entry->metadata.version++;
+                if (entry) {
+                    entry->metadata.access_count++;
+                    entry->metadata.version++;
+                }
 
                 slot->latency_ns = (uint64_t)(base_latency + fabric_latency_ns);
                 __atomic_thread_fence(__ATOMIC_RELEASE);
@@ -2546,6 +2595,11 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
 
         case CXL_SHM_REQ_FENCE: {
             __atomic_thread_fence(__ATOMIC_SEQ_CST);
+            if (use_storage_backend && !shm_manager->flush()) {
+                slot->resp_status = CXL_SHM_RESP_ERROR;
+                processed++;
+                break;
+            }
             slot->latency_ns = 0;
             __atomic_thread_fence(__ATOMIC_RELEASE);
             slot->resp_status = CXL_SHM_RESP_OK;

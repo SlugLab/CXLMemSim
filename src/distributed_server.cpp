@@ -58,6 +58,19 @@ static constexpr uint8_t DIST_OP_FENCE = 5;
 static constexpr uint8_t DIST_OP_LSA_READ = 6;
 static constexpr uint8_t DIST_OP_LSA_WRITE = 7;
 
+namespace {
+
+std::string expand_node_backing_path(std::string path, uint32_t node_id) {
+    constexpr const char *kNodeToken = "{node}";
+    size_t pos = path.find(kNodeToken);
+    if (pos != std::string::npos) {
+        path.replace(pos, std::strlen(kNodeToken), std::to_string(node_id));
+    }
+    return path;
+}
+
+} // namespace
+
 /* ============================================================================
  * DistributedMessageManager Implementation
  * ============================================================================ */
@@ -501,12 +514,14 @@ DistributedMessageManager::Stats DistributedMessageManager::get_stats() const {
 DistributedMemoryServer::DistributedMemoryServer(uint32_t node_id, const std::string &shm_name, int tcp_port,
                                                  size_t capacity_mb, CXLController *controller,
                                                  DistTransportMode transport_mode, const std::string &tcp_addr,
-                                                 uint16_t tcp_transport_port)
+                                                 uint16_t tcp_transport_port,
+                                                 const SharedMemoryManager::SsdStreamingConfig &ssd_config)
     : node_id_(node_id), shm_name_(shm_name), tcp_port_(tcp_port), memory_capacity_mb_(capacity_mb),
-      transport_mode_(transport_mode), tcp_addr_(tcp_addr), tcp_transport_port_(tcp_transport_port),
-      controller_(controller), lsa_size_(256 * 1024), /* 256KB default LSA size per CXL spec */
-      tcp_server_fd_(-1), next_client_id_(0), running_(false), state_(NODE_STATE_UNKNOWN), local_reads_(0),
-      local_writes_(0), remote_reads_(0), remote_writes_(0), forwarded_requests_(0), coherency_messages_(0) {
+      transport_mode_(transport_mode), ssd_config_(ssd_config), tcp_addr_(tcp_addr),
+      tcp_transport_port_(tcp_transport_port), controller_(controller), running_(false), state_(NODE_STATE_UNKNOWN),
+      tcp_server_fd_(-1), next_client_id_(0), lsa_size_(256 * 1024), /* 256KB default LSA size per CXL spec */
+      local_reads_(0), local_writes_(0), remote_reads_(0), remote_writes_(0), forwarded_requests_(0),
+      coherency_messages_(0) {
     lsa_data_.resize(lsa_size_, 0);
     SPDLOG_INFO("Node {} LSA initialized: {} bytes", node_id_, lsa_size_);
 }
@@ -518,7 +533,17 @@ bool DistributedMemoryServer::initialize() {
 
     // Initialize local memory manager
     std::string local_shm = shm_name_ + "_node" + std::to_string(node_id_);
-    local_memory_ = std::make_unique<SharedMemoryManager>(memory_capacity_mb_, local_shm);
+    if (!ssd_config_.backing_path.empty()) {
+        auto node_ssd_config = ssd_config_;
+        node_ssd_config.backing_path = expand_node_backing_path(node_ssd_config.backing_path, node_id_);
+        if (node_ssd_config.capacity_bytes == 0) {
+            node_ssd_config.capacity_bytes = memory_capacity_mb_ * 1024ULL * 1024ULL;
+        }
+        SPDLOG_INFO("Distributed node {} using SSD streaming backing: {}", node_id_, node_ssd_config.backing_path);
+        local_memory_ = std::make_unique<SharedMemoryManager>(memory_capacity_mb_, local_shm, node_ssd_config);
+    } else {
+        local_memory_ = std::make_unique<SharedMemoryManager>(memory_capacity_mb_, local_shm);
+    }
     if (!local_memory_->initialize()) {
         SPDLOG_ERROR("Failed to initialize local shared memory");
         return false;
@@ -778,6 +803,15 @@ void DistributedMemoryServer::setup_message_handlers() {
         handle_atomic_request(req, resp);
     });
 
+    msg_manager_->register_handler(DIST_MSG_FENCE_REQ, [this](const dist_message_t &req, dist_message_t &resp) {
+        (void)req;
+        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+        bool ok = local_memory_ ? local_memory_->flush() : true;
+        resp.header.msg_type = DIST_MSG_FENCE_RESP;
+        resp.payload.mem.status = ok ? 0 : 1;
+        resp.payload.mem.latency_ns = static_cast<uint64_t>(controller_->dramlatency);
+    });
+
     // Coherency handlers
     msg_manager_->register_handler(DIST_MSG_INVALIDATE, [this](const dist_message_t &req, dist_message_t &resp) {
         handle_coherency_request(req, resp);
@@ -797,7 +831,7 @@ void DistributedMemoryServer::setup_message_handlers() {
     });
 
     // Directory query handler (now handled by CoherencyEngine, reply with ACK)
-    msg_manager_->register_handler(DIST_MSG_DIR_QUERY, [this](const dist_message_t &req, dist_message_t &resp) {
+    msg_manager_->register_handler(DIST_MSG_DIR_QUERY, [](const dist_message_t &req, dist_message_t &resp) {
         resp.header.msg_type = DIST_MSG_DIR_RESPONSE;
         resp.payload.coherency.cacheline_addr = req.payload.coherency.cacheline_addr;
         // CoherencyEngine processes coherency internally; just acknowledge
@@ -856,37 +890,28 @@ void DistributedMemoryServer::handle_write_request(const dist_message_t &req, di
 
 void DistributedMemoryServer::handle_atomic_request(const dist_message_t &req, dist_message_t &resp) {
     uint64_t addr = req.payload.mem.addr;
+    const bool is_faa = req.header.msg_type == DIST_MSG_ATOMIC_FAA_REQ;
+    resp.header.msg_type = is_faa ? DIST_MSG_ATOMIC_FAA_RESP : DIST_MSG_ATOMIC_CAS_RESP;
 
     // Ensure exclusive access
     ensure_coherency_for_write(addr, req.header.src_node_id);
 
-    // Get pointer to data
-    uint8_t *data_ptr = local_memory_->get_cacheline_data(addr & ~(DIST_CACHELINE_SIZE - 1));
-    if (!data_ptr) {
-        if (req.header.msg_type == DIST_MSG_ATOMIC_FAA_REQ) {
-            resp.header.msg_type = DIST_MSG_ATOMIC_FAA_RESP;
-        } else {
-            resp.header.msg_type = DIST_MSG_ATOMIC_CAS_RESP;
-        }
+    uint64_t old_value = 0;
+    bool ok = false;
+    if (is_faa) {
+        ok = local_memory_->atomic_fetch_add_uint64(addr, req.payload.mem.value, &old_value);
+    } else {
+        ok = local_memory_->atomic_compare_exchange_uint64(addr, req.payload.mem.expected, req.payload.mem.value,
+                                                          &old_value);
+    }
+
+    if (!ok) {
         resp.payload.mem.status = 1;
         return;
     }
 
-    uint64_t offset = addr % DIST_CACHELINE_SIZE;
-    uint64_t *ptr = reinterpret_cast<uint64_t *>(data_ptr + offset);
-
-    if (req.header.msg_type == DIST_MSG_ATOMIC_FAA_REQ) {
-        resp.header.msg_type = DIST_MSG_ATOMIC_FAA_RESP;
-        uint64_t old = __atomic_fetch_add(ptr, req.payload.mem.value, __ATOMIC_SEQ_CST);
-        memcpy(&resp.payload.mem.value, &old, sizeof(old));
-        resp.payload.mem.status = 0;
-    } else { // CAS
-        resp.header.msg_type = DIST_MSG_ATOMIC_CAS_RESP;
-        uint64_t expected = req.payload.mem.expected;
-        __atomic_compare_exchange_n(ptr, &expected, req.payload.mem.value, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-        memcpy(&resp.payload.mem.value, &expected, sizeof(expected));
-        resp.payload.mem.status = 0;
-    }
+    memcpy(&resp.payload.mem.value, &old_value, sizeof(old_value));
+    resp.payload.mem.status = 0;
 
     // Atomic: DRAM latency + atomic overhead (serialization)
     resp.payload.mem.latency_ns = static_cast<uint64_t>(controller_->dramlatency) + 20;
@@ -1182,6 +1207,9 @@ int DistributedMemoryServer::atomic_cas(uint64_t addr, uint64_t expected, uint64
 
 void DistributedMemoryServer::fence() {
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    if (local_memory_ && !local_memory_->flush()) {
+        SPDLOG_WARN("Node {} local memory flush failed during fence", node_id_);
+    }
 
     // Broadcast fence to all active nodes
     dist_message_t fence_msg;

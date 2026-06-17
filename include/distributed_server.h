@@ -317,16 +317,16 @@ typedef struct {
 
 /* TCP transport support */
 #include "tcp_communication.h"
+#include "shared_memory_manager.h"
 
 /* RDMA transport support */
 #include "rdma_communication.h"
 
 /* Forward declarations */
 class CXLController;
-class SharedMemoryManager;
 class CoherencyEngine;
 class HDMDecoder;
-struct MHSLDDevice;
+class MHSLDDevice;
 enum class MHSLDCacheState : uint8_t;
 
 /* Transport mode for distributed server */
@@ -697,6 +697,7 @@ private:
     int tcp_port_;
     size_t memory_capacity_mb_;
     DistTransportMode transport_mode_;
+    SharedMemoryManager::SsdStreamingConfig ssd_config_;
 
     /* TCP configuration */
     std::string tcp_addr_;
@@ -746,7 +747,8 @@ private:
 public:
     DistributedMemoryServer(uint32_t node_id, const std::string &shm_name, int tcp_port, size_t capacity_mb,
                             CXLController *controller, DistTransportMode transport_mode = DistTransportMode::SHM,
-                            const std::string &tcp_addr = "0.0.0.0", uint16_t tcp_transport_port = 5555);
+                            const std::string &tcp_addr = "0.0.0.0", uint16_t tcp_transport_port = 5555,
+                            const SharedMemoryManager::SsdStreamingConfig &ssd_config = {});
     ~DistributedMemoryServer();
 
     /* Lifecycle */
