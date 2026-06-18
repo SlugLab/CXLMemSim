@@ -1609,7 +1609,7 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
             }
 
             if (!shm_manager->flush_cacheline(req.addr, req.size)) {
-                SPDLOG_WARN("Thread {}: flush failed after write at 0x{:x}", thread_id, req.addr);
+                SPDLOG_WARN("Thread {}: flush failed after write at 0x{:x}", thread_id, (uint64_t)req.addr);
             }
             std::atomic_thread_fence(std::memory_order_release);
 
@@ -1853,7 +1853,7 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
             // Fetch-and-Add: atomically add value and return old value
             uint64_t old_value = 0;
             if (!shm_manager->atomic_fetch_add_uint64(req.addr, req.value, &old_value)) {
-                SPDLOG_ERROR("Thread {}: ATOMIC_FAA failed at 0x{:x}", thread_id, req.addr);
+                SPDLOG_ERROR("Thread {}: ATOMIC_FAA failed at 0x{:x}", thread_id, (uint64_t)req.addr);
                 resp.status = 1;
                 resp.old_value = 0;
                 congestion_info.active_requests--;
@@ -1881,7 +1881,7 @@ void ThreadPerConnectionServer::handle_atomic_request(int thread_id, ServerReque
             // Compare-and-Swap: if *ptr == expected, set *ptr = value
             uint64_t actual = 0;
             if (!shm_manager->atomic_compare_exchange_uint64(req.addr, req.expected, req.value, &actual)) {
-                SPDLOG_ERROR("Thread {}: ATOMIC_CAS failed at 0x{:x}", thread_id, req.addr);
+                SPDLOG_ERROR("Thread {}: ATOMIC_CAS failed at 0x{:x}", thread_id, (uint64_t)req.addr);
                 resp.status = 1;
                 resp.old_value = 0;
                 congestion_info.active_requests--;
