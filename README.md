@@ -357,6 +357,8 @@ Build the QEMU tree with the CXL Type 2 support:
 ./script/build_qemu.sh
 ```
 
+By default this builds the x86_64 system target used by the integration scripts. Set `QEMU_TARGET_LIST=all QEMU_NINJA_TARGETS=all` to build every configured QEMU target.
+
 Build the QEMU tree with vendored hetGPU integrated:
 
 ```bash
