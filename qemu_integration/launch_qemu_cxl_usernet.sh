@@ -5,10 +5,12 @@ QEMU_BINARY=${QEMU_BINARY:-/usr/local/bin/qemu-system-x86_64}
 ROOT=${ROOT:-/home/victoryang00/CXLMemSim}
 KERNEL=${KERNEL:-$ROOT/build/bzImage}
 DISK_IMAGE=${DISK_IMAGE:-$ROOT/build/qemu.img}
+DISK_FORMAT=${DISK_FORMAT:-raw}
 VM_MEMORY=${VM_MEMORY:-8G}
 VM_MAX_MEMORY=${VM_MAX_MEMORY:-16G}
 SMP=${SMP:-4}
 SSH_PORT=${SSH_PORT:-10022}
+NET_MAC=${NET_MAC:-52:54:00:00:10:22}
 CXL_BACKING=${CXL_BACKING:-/dev/shm/cxlmemsim_shared}
 CXL_LSA=${CXL_LSA:-/dev/shm/lsa0.raw}
 CXL_BACKING_SIZE=${CXL_BACKING_SIZE:-1G}
@@ -32,9 +34,9 @@ exec "$QEMU_BINARY" \
     -M q35,cxl=on \
     -kernel "$KERNEL" \
     -append "root=/dev/sda rw console=ttyS0,115200 nokaslr" \
-    -drive file="$DISK_IMAGE",index=0,media=disk,format=raw \
+    -drive file="$DISK_IMAGE",index=0,media=disk,format="$DISK_FORMAT" \
     -netdev user,id=net0,hostfwd=tcp:127.0.0.1:"$SSH_PORT"-:22 \
-    -device virtio-net-pci,netdev=net0,mac=52:54:00:00:10:22 \
+    -device virtio-net-pci,netdev=net0,mac="$NET_MAC" \
     -fsdev local,security_model=none,id=fsdev0,path="$ROOT" \
     -device virtio-9p-pci,id=fs0,fsdev=fsdev0,mount_tag=hostrepo,bus=pcie.0 \
     -device pxb-cxl,bus_nr=12,bus=pcie.0,id=cxl.1 \
