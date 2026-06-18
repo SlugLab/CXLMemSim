@@ -8,7 +8,7 @@ QEMU_LAUNCHER=${QEMU_LAUNCHER:-$ROOT/qemu_integration/launch_qemu_cxl_usernet.sh
 KERNEL=${KERNEL:-$ROOT/build/bzImage}
 BASE_DISK=${BASE_DISK:-$ROOT/build/qemu.img}
 BACKING_FILE=${BACKING_FILE:-/mnt/disk0/cxlmemsim-ssd-bench.swap}
-RUN_ROOT=${RUN_ROOT:-$ROOT/artifact/ssd_stream_bench}
+RUN_ROOT=${RUN_ROOT:-/mnt/disk0/cxlmemsim-ssd-stream-bench-artifact}
 TRANSFER_MB=${TRANSFER_MB:-256}
 CAPACITY_MB=${CAPACITY_MB:-1024}
 SERVER_PORT=${SERVER_PORT:-19999}
@@ -98,22 +98,49 @@ require_file() {
     [[ -e "$path" ]] || die "Missing required $label: $path"
 }
 
+assert_process_alive() {
+    local pid=$1
+    local label=$2
+
+    [[ -n "$pid" ]] || die "$label pid is not set"
+    kill -0 "$pid" 2>/dev/null || die "$label process pid $pid is not running"
+}
+
+assert_port_free() {
+    local host=$1
+    local port=$2
+    local label=$3
+
+    if (echo >"/dev/tcp/$host/$port") >/dev/null 2>&1; then
+        die "$label port $host:$port is already in use"
+    fi
+}
+
+preflight_ports() {
+    if [[ "$SERVER_PORT" == "$SSH_PORT0" || "$SERVER_PORT" == "$SSH_PORT1" || "$SSH_PORT0" == "$SSH_PORT1" ]]; then
+        die "SERVER_PORT, SSH_PORT0, and SSH_PORT1 must be distinct"
+    fi
+
+    assert_port_free 127.0.0.1 "$SERVER_PORT" "server"
+    assert_port_free 127.0.0.1 "$SSH_PORT0" "node0 SSH forward"
+    assert_port_free 127.0.0.1 "$SSH_PORT1" "node1 SSH forward"
+}
+
 wait_tcp() {
     local host=$1
     local port=$2
     local label=$3
-    local timeout_sec=${4:-60}
+    local pid=$4
+    local timeout_sec=${5:-60}
     local start now
 
     start=$(date +%s)
     while true; do
+        assert_process_alive "$pid" "$label"
         if (echo >"/dev/tcp/$host/$port") >/dev/null 2>&1; then
+            assert_process_alive "$pid" "$label"
             log "$label is accepting TCP on $host:$port"
             return 0
-        fi
-
-        if [[ -n "$SERVER_PID" ]] && ! kill -0 "$SERVER_PID" 2>/dev/null; then
-            die "$label process exited before TCP became ready"
         fi
 
         now=$(date +%s)
@@ -143,20 +170,22 @@ wait_ssh() {
     local node=$1
     local port=$2
     local timeout_sec=${3:-180}
+    local pid
     local start now
+
+    if [[ "$node" == "0" ]]; then
+        pid=$QEMU_PID0
+    else
+        pid=$QEMU_PID1
+    fi
 
     start=$(date +%s)
     while true; do
-        if timeout 10 ssh_guest "$port" true >/dev/null 2>&1; then
+        assert_process_alive "$pid" "node$node QEMU"
+        if ssh_guest "$port" true >/dev/null 2>&1; then
+            assert_process_alive "$pid" "node$node QEMU"
             log "node$node SSH is ready on port $port"
             return 0
-        fi
-
-        if [[ "$node" == "0" && -n "$QEMU_PID0" ]] && ! kill -0 "$QEMU_PID0" 2>/dev/null; then
-            die "node0 QEMU exited before SSH became ready"
-        fi
-        if [[ "$node" == "1" && -n "$QEMU_PID1" ]] && ! kill -0 "$QEMU_PID1" 2>/dev/null; then
-            die "node1 QEMU exited before SSH became ready"
         fi
 
         now=$(date +%s)
@@ -169,11 +198,11 @@ wait_ssh() {
 
 copy_disk() {
     local node=$1
-    local dst=$RUN_DIR/qemu-node${node}.img
+    local dst=$2
 
     log "Copying base disk for node$node to $dst"
-    cp --reflink=auto "$BASE_DISK" "$dst"
-    printf '%s\n' "$dst"
+    cp --reflink=auto "$BASE_DISK" "$dst" || die "Failed to copy base disk for node$node to $dst"
+    [[ -s "$dst" ]] || die "Copied disk for node$node is missing or empty: $dst"
 }
 
 start_server() {
@@ -197,7 +226,7 @@ start_server() {
     SERVER_PID=$!
     printf '%s\n' "$SERVER_PID" >"$SERVER_PID_FILE"
 
-    wait_tcp 127.0.0.1 "$SERVER_PORT" "cxlmemsim server" 90
+    wait_tcp 127.0.0.1 "$SERVER_PORT" "cxlmemsim server" "$SERVER_PID" 90
 }
 
 start_qemu() {
@@ -354,12 +383,15 @@ main() {
     require_file "$DAX_WORKER_SOURCE" "DAX worker source"
     require_file "$TOPOLOGY_FILE" "server topology"
 
+    preflight_ports
     write_config
     build_worker
 
     local disk0 disk1
-    disk0=$(copy_disk 0)
-    disk1=$(copy_disk 1)
+    disk0=$RUN_DIR/qemu-node0.img
+    disk1=$RUN_DIR/qemu-node1.img
+    copy_disk 0 "$disk0"
+    copy_disk 1 "$disk1"
 
     start_server
     start_qemu 0 "$SSH_PORT0" 52:54:00:00:10:20 "$disk0"
