@@ -16,7 +16,7 @@ This directory contains the integration between QEMU and CXLMemSim, allowing QEM
 cd qemu_integration
 mkdir build
 cd build
-cmake ..
+cmake ../..
 make -j$(nproc)
 sudo make install
 ```
