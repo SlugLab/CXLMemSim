@@ -92,6 +92,7 @@ Supported request classes include:
 - Label Storage Area reads and writes.
 - Dynamic Capacity Device add, release, and query operations.
 - GFAM host map, unmap, access-check, and query operations.
+- optional near-switch offload operations for general cores and AI cores.
 
 The server supports several communication modes:
 
@@ -101,6 +102,29 @@ The server supports several communication modes:
 | `shm` | Shared-memory ring-buffer communication through `/dev/shm`. |
 | `pgas-shm` | PGAS-style shared memory protocol used by `cxl_backend.h` clients. |
 | `distributed` | Multi-node memory server mode with SHM, TCP, RDMA, or hybrid transport. |
+
+### Near-Switch Runtime Cores
+
+The Type 3 memory server can also model cores colocated with the CXL switch.
+Enable them explicitly:
+
+```bash
+./build/cxlmemsim_server \
+  --comm-mode=tcp \
+  --port=9999 \
+  --capacity=256 \
+  --enable-switch-cores \
+  --switch-general-cores=2 \
+  --switch-ai-cores=1
+```
+
+The server adds switch-core latency and queueing while still using the same
+cacheline metadata and coherency transitions as normal CXL.mem reads and writes.
+General cores currently handle switch-side `memcpy`, `memset`, and `uint64`
+reduction. AI cores handle `int32` dot product and small `int32` matrix
+multiplication. QEMU Type 2 exposes these through BAR2 commands
+`CXL_GPU_CMD_SWITCH_*` when Type 2 is connected to the server over the TCP
+MemSim transport; direct TCP clients can use server opcodes 19-24.
 
 The memory pool is managed by `SharedMemoryManager`. It can use POSIX shared memory or a regular file as a backing store. The shared-memory header records a magic value, format version, total size, data offset, base address, and cache-line count. The default cache-line data area is mapped with `mmap()` and is reused when the backing object already exists.
 

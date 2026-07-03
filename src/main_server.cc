@@ -15,6 +15,7 @@
 #include "distributed_server.h"
 #include "policy.h"
 #include "shm_communication.h"
+#include "switch_runtime.h"
 #include <algorithm>
 #include <arpa/inet.h>
 #include <atomic>
@@ -75,7 +76,13 @@ constexpr uint8_t OP_BI_DISABLE = 15; // Endpoint BI disable notification
 constexpr uint8_t OP_BI_INVALIDATE = 16; // Back-invalidate range
 constexpr uint8_t OP_BI_WRITEBACK = 17; // Back-invalidate dirty writeback
 constexpr uint8_t OP_BI_QUERY = 18; // Return BI fabric stats
-constexpr uint8_t OP_MAX = OP_BI_QUERY;
+constexpr uint8_t OP_SWITCH_MEMCPY = 19; // Near-switch general-core memcpy; addr=src, value=dst, size=bytes
+constexpr uint8_t OP_SWITCH_MEMSET = 20; // Near-switch general-core memset; addr=dst, value=byte pattern, size=bytes
+constexpr uint8_t OP_SWITCH_REDUCE_ADD64 = 21; // General-core uint64 reduction; addr=src, size=bytes
+constexpr uint8_t OP_SWITCH_DOT_I32 = 22; // Near-switch AI-core int32 dot; addr=a, value=b, expected=count
+constexpr uint8_t OP_SWITCH_MATMUL_I32 = 23; // Near-switch AI-core int32 matmul descriptor in data
+constexpr uint8_t OP_SWITCH_QUERY = 24; // Return switch-runtime stats in response
+constexpr uint8_t OP_MAX = OP_SWITCH_QUERY;
 
 // Server request/response structures (matching qemu_integration)
 struct __attribute__((packed)) ServerRequest {
@@ -97,6 +104,16 @@ struct __attribute__((packed)) ServerResponse {
     uint64_t latency_ns;
     uint64_t old_value; // Previous value returned by atomic operations
     uint8_t data[64];
+};
+
+struct __attribute__((packed)) SwitchMatmulI32Descriptor {
+    uint64_t a_addr;
+    uint64_t b_addr;
+    uint64_t c_addr;
+    uint32_t m;
+    uint32_t n;
+    uint32_t k;
+    uint32_t flags;
 };
 
 // Extended response for shared memory info
@@ -191,7 +208,10 @@ private:
     std::atomic<uint64_t> bi_disable_requests{0};
     std::atomic<uint64_t> bi_invalidate_requests{0};
     std::atomic<uint64_t> bi_writeback_requests{0};
+    std::atomic<uint64_t> switch_general_requests{0};
+    std::atomic<uint64_t> switch_ai_requests{0};
     std::atomic<uint64_t> total_latency_ns{0}; // accumulated latency for avg calculation
+    SwitchRuntime switch_runtime;
 
     // LSA (Label Storage Area) - shared across all QEMU guests
     std::vector<uint8_t> lsa_data_;
@@ -220,10 +240,11 @@ private:
 
 public:
     ThreadPerConnectionServer(int port, CXLController *ctrl, size_t capacity_mb, const std::string &backing_file = "",
-                              CommMode mode = CommMode::TCP, const std::string &pgas_shm_name = "/cxlmemsim_pgas")
+                              CommMode mode = CommMode::TCP, const std::string &pgas_shm_name = "/cxlmemsim_pgas",
+                              const SwitchRuntimeConfig &switch_config = {})
         : server_fd(-1), port(port), controller(ctrl), running(true), next_thread_id(0), comm_mode(mode),
           pgas_shm_name_(pgas_shm_name), pgas_shm_fd_(-1), pgas_shm_header_(nullptr), pgas_memory_(nullptr),
-          pgas_memory_size_(0), backing_file_(backing_file) {
+          pgas_memory_size_(0), backing_file_(backing_file), switch_runtime(switch_config) {
         congestion_info.active_requests = 0;
         congestion_info.total_bandwidth_used = 0;
         congestion_info.last_reset = std::chrono::steady_clock::now();
@@ -275,6 +296,15 @@ private:
     void handle_capacity_management_request(int thread_id, const ServerRequest &req, ServerResponse &resp);
     bool is_bi_op(uint8_t op_type) const;
     void handle_bi_request(int thread_id, const ServerRequest &req, ServerResponse &resp);
+    bool is_switch_op(uint8_t op_type) const;
+    void handle_switch_request(int thread_id, const ServerRequest &req, ServerResponse &resp);
+    bool check_switch_range_access(int thread_id, const ServerRequest &req, uint64_t addr, uint64_t size,
+                                   bool is_write, bool is_atomic, ServerResponse &resp, double &fabric_latency_ns);
+    bool switch_read_bytes(uint64_t addr, uint8_t *buffer, size_t size, int core_id, uint64_t timestamp,
+                           uint64_t &lines_touched);
+    bool switch_write_bytes(uint64_t addr, const uint8_t *buffer, size_t size, int core_id, uint64_t timestamp,
+                            uint64_t &lines_touched);
+    uint64_t switch_dispatch_latency(SwitchCoreKind core, uint64_t bytes, uint64_t work_items, uint64_t timestamp);
     bool check_fabric_access(int thread_id, const ServerRequest &req, bool is_write, bool is_atomic,
                              double &fabric_latency_ns, ServerResponse &resp);
     uint64_t calculate_total_latency(uint64_t base_latency, double congestion_factor, bool had_coherency_miss,
@@ -339,6 +369,7 @@ struct ServerOptions {
     uint32_t gfam_hosts = 16;
     double gfam_fabric_latency = 80.0;
     double gfam_bandwidth = 64.0;
+    SwitchRuntimeConfig switch_config;
 };
 
 static void print_server_help(const char *program) {
@@ -367,7 +398,16 @@ static void print_server_help(const char *program) {
               << "      --enable-gfam[=true|false]     Enable GFAM model\n"
               << "      --gfam-hosts <count>           Number of GFAM host ports\n"
               << "      --gfam-fabric-latency <ns>     GFAM fabric traversal latency\n"
-              << "      --gfam-bandwidth <GB/s>        Aggregate GFAM fabric bandwidth\n";
+              << "      --gfam-bandwidth <GB/s>        Aggregate GFAM fabric bandwidth\n"
+              << "      --enable-switch-cores[=true|false]\n"
+              << "                                      Enable near-switch offload cores\n"
+              << "      --switch-general-cores <count> General-purpose cores near the switch\n"
+              << "      --switch-ai-cores <count>      AI cores near the switch\n"
+              << "      --switch-general-latency <ns>  Base latency for general-core work\n"
+              << "      --switch-ai-latency <ns>       Base latency for AI-core work\n"
+              << "      --switch-general-bandwidth <GB/s>\n"
+              << "                                      General-core memory bandwidth\n"
+              << "      --switch-ai-ops-per-ns <ops>   AI-core throughput model\n";
 }
 
 static bool option_has_value(const std::string &arg) { return !arg.empty() && arg[0] != '-'; }
@@ -543,6 +583,20 @@ static bool parse_server_options(int argc, char *argv[], ServerOptions &opts, st
                 opts.gfam_fabric_latency = std::stod(get_value(key));
             } else if (key == "gfam-bandwidth") {
                 opts.gfam_bandwidth = std::stod(get_value(key));
+            } else if (key == "enable-switch-cores") {
+                opts.switch_config.enabled = parse_optional_bool_option(argc, argv, i, value, has_inline_value);
+            } else if (key == "switch-general-cores") {
+                opts.switch_config.general_cores = static_cast<uint32_t>(std::stoul(get_value(key)));
+            } else if (key == "switch-ai-cores") {
+                opts.switch_config.ai_cores = static_cast<uint32_t>(std::stoul(get_value(key)));
+            } else if (key == "switch-general-latency") {
+                opts.switch_config.general_base_latency_ns = std::stoull(get_value(key));
+            } else if (key == "switch-ai-latency") {
+                opts.switch_config.ai_base_latency_ns = std::stoull(get_value(key));
+            } else if (key == "switch-general-bandwidth") {
+                opts.switch_config.general_bandwidth_gbps = std::stod(get_value(key));
+            } else if (key == "switch-ai-ops-per-ns") {
+                opts.switch_config.ai_ops_per_ns = std::stod(get_value(key));
             } else {
                 throw std::invalid_argument("Unknown option: --" + key);
             }
@@ -596,6 +650,7 @@ int main(int argc, char *argv[]) {
     uint32_t gfam_hosts = opts.gfam_hosts;
     double gfam_fabric_latency = opts.gfam_fabric_latency;
     double gfam_bandwidth = opts.gfam_bandwidth;
+    const auto &switch_config = opts.switch_config;
 
     // Map transport mode string to enum
     DistTransportMode transport_mode = DistTransportMode::SHM;
@@ -730,6 +785,14 @@ int main(int argc, char *argv[]) {
     SPDLOG_INFO("  Interleave size: {} bytes", interleave_size);
     SPDLOG_INFO("  DCD: {}", controller->dcd_enabled() ? "enabled" : "disabled");
     SPDLOG_INFO("  GFAM: {}", controller->gfam_enabled() ? "enabled" : "disabled");
+    SPDLOG_INFO("  Switch cores: {}", switch_config.enabled ? "enabled" : "disabled");
+    if (switch_config.enabled) {
+        SPDLOG_INFO("    General cores: {}, base latency: {} ns, bandwidth: {:.2f} GB/s",
+                    switch_config.general_cores, switch_config.general_base_latency_ns,
+                    switch_config.general_bandwidth_gbps);
+        SPDLOG_INFO("    AI cores: {}, base latency: {} ns, throughput: {:.2f} ops/ns", switch_config.ai_cores,
+                    switch_config.ai_base_latency_ns, switch_config.ai_ops_per_ns);
+    }
     SPDLOG_INFO("CXL Type3 Operations Supported:");
     SPDLOG_INFO("  - CXL_TYPE3_READ");
     SPDLOG_INFO("  - CXL_TYPE3_WRITE");
@@ -858,7 +921,8 @@ int main(int argc, char *argv[]) {
     }
 
     try {
-        ThreadPerConnectionServer server(port, controller, capacity, backing_file, comm_mode, pgas_shm_name);
+        ThreadPerConnectionServer server(port, controller, capacity, backing_file, comm_mode, pgas_shm_name,
+                                         switch_config);
 
         if (!server.start()) {
             SPDLOG_ERROR("Failed to start server");
@@ -1047,6 +1111,15 @@ void ThreadPerConnectionServer::stop() {
     SPDLOG_INFO("  Coherency Invalidations: {}", coherency_invalidations.load());
     SPDLOG_INFO("  Coherency Downgrades: {}", coherency_downgrades.load());
     SPDLOG_INFO("  Back Invalidations: {}", back_invalidations.load());
+    if (switch_runtime.enabled()) {
+        auto switch_stats = switch_runtime.get_stats();
+        SPDLOG_INFO("  Switch General Requests: {} ({} bytes)", switch_general_requests.load(),
+                    switch_stats.general_bytes);
+        SPDLOG_INFO("  Switch AI Requests: {} ({} bytes, {} work items)", switch_ai_requests.load(),
+                    switch_stats.ai_bytes, switch_stats.ai_work_items);
+        SPDLOG_INFO("  Switch Queue/Service: queued={} ns service={} ns", switch_stats.queued_ns,
+                    switch_stats.service_ns);
+    }
 
     // Print CXL controller topology statistics (switches/expanders/counters)
     if (controller && comm_mode != CommMode::PGAS_SHM) {
@@ -1305,6 +1378,11 @@ void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, Ser
 
     if (is_bi_op(req.op_type)) {
         handle_bi_request(thread_id, req, resp);
+        return;
+    }
+
+    if (is_switch_op(req.op_type)) {
+        handle_switch_request(thread_id, req, resp);
         return;
     }
 
@@ -1682,6 +1760,411 @@ void ThreadPerConnectionServer::handle_bi_request(int thread_id, const ServerReq
     default:
         resp.status = 1;
         break;
+    }
+}
+
+bool ThreadPerConnectionServer::is_switch_op(uint8_t op_type) const {
+    return op_type == OP_SWITCH_MEMCPY || op_type == OP_SWITCH_MEMSET || op_type == OP_SWITCH_REDUCE_ADD64 ||
+           op_type == OP_SWITCH_DOT_I32 || op_type == OP_SWITCH_MATMUL_I32 || op_type == OP_SWITCH_QUERY;
+}
+
+bool ThreadPerConnectionServer::check_switch_range_access(int thread_id, const ServerRequest &req, uint64_t addr,
+                                                          uint64_t size, bool is_write, bool is_atomic,
+                                                          ServerResponse &resp, double &fabric_latency_ns) {
+    fabric_latency_ns = 0.0;
+    if (size == 0) {
+        resp.status = 1;
+        return false;
+    }
+    if (addr > std::numeric_limits<uint64_t>::max() - (size - 1)) {
+        resp.status = 1;
+        return false;
+    }
+
+    ServerRequest access_req = req;
+    access_req.addr = addr;
+    access_req.size = size;
+    return check_fabric_access(thread_id, access_req, is_write, is_atomic, fabric_latency_ns, resp);
+}
+
+bool ThreadPerConnectionServer::switch_read_bytes(uint64_t addr, uint8_t *buffer, size_t size, int core_id,
+                                                  uint64_t timestamp, uint64_t &lines_touched) {
+    if (size == 0) {
+        return true;
+    }
+
+    std::unique_lock<std::shared_mutex> lock(memory_mutex);
+    size_t done = 0;
+    while (done < size) {
+        uint64_t current_addr = addr + done;
+        uint64_t cacheline_addr = current_addr & SHM_CACHELINE_MASK;
+        size_t offset = current_addr - cacheline_addr;
+        size_t chunk = std::min(size - done, static_cast<size_t>(SHM_CACHELINE_SIZE - offset));
+
+        auto *metadata = shm_manager->get_cacheline_metadata(cacheline_addr);
+        if (!metadata) {
+            SPDLOG_ERROR("Switch core {}: missing metadata for cacheline 0x{:x}", core_id, cacheline_addr);
+            return false;
+        }
+
+        std::lock_guard<std::mutex> cacheline_lock(metadata->lock);
+        check_and_apply_back_invalidations(cacheline_addr, core_id, *metadata);
+        handle_read_coherency(cacheline_addr, core_id, *metadata);
+
+        if (!shm_manager->read_cacheline(current_addr, buffer + done, chunk)) {
+            SPDLOG_ERROR("Switch core {}: read failed at 0x{:x} size={}", core_id, current_addr, chunk);
+            return false;
+        }
+
+        metadata->last_access_time = timestamp;
+        done += chunk;
+        lines_touched++;
+    }
+
+    return true;
+}
+
+bool ThreadPerConnectionServer::switch_write_bytes(uint64_t addr, const uint8_t *buffer, size_t size, int core_id,
+                                                   uint64_t timestamp, uint64_t &lines_touched) {
+    if (size == 0) {
+        return true;
+    }
+
+    std::unique_lock<std::shared_mutex> lock(memory_mutex);
+    size_t done = 0;
+    while (done < size) {
+        uint64_t current_addr = addr + done;
+        uint64_t cacheline_addr = current_addr & SHM_CACHELINE_MASK;
+        size_t offset = current_addr - cacheline_addr;
+        size_t chunk = std::min(size - done, static_cast<size_t>(SHM_CACHELINE_SIZE - offset));
+
+        auto *metadata = shm_manager->get_cacheline_metadata(cacheline_addr);
+        if (!metadata) {
+            SPDLOG_ERROR("Switch core {}: missing metadata for cacheline 0x{:x}", core_id, cacheline_addr);
+            return false;
+        }
+
+        std::lock_guard<std::mutex> cacheline_lock(metadata->lock);
+        handle_write_coherency(cacheline_addr, core_id, *metadata);
+
+        if (!shm_manager->write_cacheline(current_addr, buffer + done, chunk)) {
+            SPDLOG_ERROR("Switch core {}: write failed at 0x{:x} size={}", core_id, current_addr, chunk);
+            return false;
+        }
+
+        metadata->last_access_time = timestamp;
+        metadata->version++;
+        done += chunk;
+        lines_touched++;
+    }
+
+    return true;
+}
+
+uint64_t ThreadPerConnectionServer::switch_dispatch_latency(SwitchCoreKind core, uint64_t bytes, uint64_t work_items,
+                                                            uint64_t timestamp) {
+    uint64_t latency = switch_runtime.dispatch(core, bytes, work_items, timestamp);
+    if (core == SwitchCoreKind::AI) {
+        switch_ai_requests++;
+    } else {
+        switch_general_requests++;
+    }
+    return latency;
+}
+
+void ThreadPerConnectionServer::handle_switch_request(int thread_id, const ServerRequest &req, ServerResponse &resp) {
+    auto fail = [&resp]() {
+        resp.status = 1;
+        resp.latency_ns = 0;
+        resp.old_value = 0;
+    };
+    auto add_u64 = [&resp](size_t offset, uint64_t value) {
+        if (offset + sizeof(value) <= sizeof(resp.data)) {
+            memcpy(resp.data + offset, &value, sizeof(value));
+        }
+    };
+    auto range_valid = [](uint64_t addr, uint64_t size) {
+        return size != 0 && addr <= std::numeric_limits<uint64_t>::max() - (size - 1);
+    };
+
+    memset(&resp, 0, sizeof(resp));
+
+    if (req.op_type == OP_SWITCH_QUERY) {
+        auto stats = switch_runtime.get_stats();
+        resp.status = 0;
+        resp.old_value = switch_runtime.enabled() ? 1 : 0;
+        add_u64(0, stats.general_ops);
+        add_u64(8, stats.ai_ops);
+        add_u64(16, stats.general_bytes);
+        add_u64(24, stats.ai_bytes);
+        add_u64(32, stats.queued_ns);
+        add_u64(40, stats.service_ns);
+        add_u64(48, switch_runtime.config().general_cores);
+        add_u64(56, switch_runtime.config().ai_cores);
+        return;
+    }
+
+    if (!switch_runtime.enabled()) {
+        SPDLOG_WARN("Thread {}: switch offload opcode {} rejected because switch cores are disabled", thread_id,
+                    req.op_type);
+        fail();
+        return;
+    }
+
+    constexpr int kSwitchGeneralCoreId = -1000;
+    constexpr int kSwitchAICoreId = -2000;
+
+    switch (req.op_type) {
+    case OP_SWITCH_MEMCPY: {
+        uint64_t src = req.addr;
+        uint64_t dst = req.value;
+        uint64_t size = req.size;
+        double src_fabric_ns = 0.0;
+        double dst_fabric_ns = 0.0;
+
+        if (!range_valid(src, size) || !range_valid(dst, size) ||
+            !check_switch_range_access(thread_id, req, src, size, false, false, resp, src_fabric_ns) ||
+            !check_switch_range_access(thread_id, req, dst, size, true, false, resp, dst_fabric_ns)) {
+            fail();
+            return;
+        }
+
+        uint8_t buffer[SHM_CACHELINE_SIZE];
+        uint64_t lines = 0;
+        if (dst > src && dst < src + size) {
+            uint64_t remaining = size;
+            while (remaining > 0) {
+                size_t chunk = std::min<uint64_t>(remaining, sizeof(buffer));
+                uint64_t offset = remaining - chunk;
+                if (!switch_read_bytes(src + offset, buffer, chunk, kSwitchGeneralCoreId, req.timestamp, lines) ||
+                    !switch_write_bytes(dst + offset, buffer, chunk, kSwitchGeneralCoreId, req.timestamp, lines)) {
+                    fail();
+                    return;
+                }
+                remaining -= chunk;
+            }
+        } else {
+            for (uint64_t copied = 0; copied < size;) {
+                size_t chunk = std::min<uint64_t>(size - copied, sizeof(buffer));
+                if (!switch_read_bytes(src + copied, buffer, chunk, kSwitchGeneralCoreId, req.timestamp, lines) ||
+                    !switch_write_bytes(dst + copied, buffer, chunk, kSwitchGeneralCoreId, req.timestamp, lines)) {
+                    fail();
+                    return;
+                }
+                copied += chunk;
+            }
+        }
+
+        resp.status = 0;
+        resp.old_value = size;
+        resp.latency_ns = switch_dispatch_latency(SwitchCoreKind::General, size, lines, req.timestamp) +
+                          static_cast<uint64_t>(src_fabric_ns + dst_fabric_ns);
+        total_latency_ns += resp.latency_ns;
+        SPDLOG_DEBUG("Thread {}: switch memcpy src=0x{:x} dst=0x{:x} size={} latency={}ns", thread_id, src, dst,
+                     size, resp.latency_ns);
+        return;
+    }
+
+    case OP_SWITCH_MEMSET: {
+        uint64_t dst = req.addr;
+        uint64_t size = req.size;
+        double fabric_ns = 0.0;
+
+        if (!range_valid(dst, size) ||
+            !check_switch_range_access(thread_id, req, dst, size, true, false, resp, fabric_ns)) {
+            fail();
+            return;
+        }
+
+        uint8_t buffer[SHM_CACHELINE_SIZE];
+        memset(buffer, static_cast<int>(req.value & 0xff), sizeof(buffer));
+
+        uint64_t lines = 0;
+        for (uint64_t written = 0; written < size;) {
+            size_t chunk = std::min<uint64_t>(size - written, sizeof(buffer));
+            if (!switch_write_bytes(dst + written, buffer, chunk, kSwitchGeneralCoreId, req.timestamp, lines)) {
+                fail();
+                return;
+            }
+            written += chunk;
+        }
+
+        resp.status = 0;
+        resp.old_value = size;
+        resp.latency_ns = switch_dispatch_latency(SwitchCoreKind::General, size, lines, req.timestamp) +
+                          static_cast<uint64_t>(fabric_ns);
+        total_latency_ns += resp.latency_ns;
+        return;
+    }
+
+    case OP_SWITCH_REDUCE_ADD64: {
+        uint64_t src = req.addr;
+        uint64_t size = req.size;
+        double fabric_ns = 0.0;
+
+        if (!range_valid(src, size) || size % sizeof(uint64_t) != 0 ||
+            !check_switch_range_access(thread_id, req, src, size, false, false, resp, fabric_ns)) {
+            fail();
+            return;
+        }
+
+        uint64_t sum = 0;
+        uint64_t lines = 0;
+        for (uint64_t offset = 0; offset < size; offset += sizeof(uint64_t)) {
+            uint64_t value = 0;
+            if (!switch_read_bytes(src + offset, reinterpret_cast<uint8_t *>(&value), sizeof(value),
+                                   kSwitchGeneralCoreId, req.timestamp, lines)) {
+                fail();
+                return;
+            }
+            sum += value;
+        }
+
+        resp.status = 0;
+        resp.old_value = sum;
+        resp.latency_ns = switch_dispatch_latency(SwitchCoreKind::General, size, size / sizeof(uint64_t),
+                                                  req.timestamp) +
+                          static_cast<uint64_t>(fabric_ns);
+        total_latency_ns += resp.latency_ns;
+        return;
+    }
+
+    case OP_SWITCH_DOT_I32: {
+        uint64_t a_addr = req.addr;
+        uint64_t b_addr = req.value;
+        uint64_t count = req.expected;
+        uint64_t bytes = 0;
+        double a_fabric_ns = 0.0;
+        double b_fabric_ns = 0.0;
+
+        if (count == 0 || count > std::numeric_limits<uint64_t>::max() / (2 * sizeof(int32_t))) {
+            fail();
+            return;
+        }
+        bytes = count * 2 * sizeof(int32_t);
+        uint64_t vector_bytes = count * sizeof(int32_t);
+        if (!range_valid(a_addr, vector_bytes) || !range_valid(b_addr, vector_bytes) ||
+            !check_switch_range_access(thread_id, req, a_addr, vector_bytes, false, false, resp, a_fabric_ns) ||
+            !check_switch_range_access(thread_id, req, b_addr, vector_bytes, false, false, resp, b_fabric_ns)) {
+            fail();
+            return;
+        }
+
+        int64_t acc = 0;
+        uint64_t lines = 0;
+        for (uint64_t i = 0; i < count; i++) {
+            int32_t a = 0;
+            int32_t b = 0;
+            uint64_t byte_offset = i * sizeof(int32_t);
+            if (!switch_read_bytes(a_addr + byte_offset, reinterpret_cast<uint8_t *>(&a), sizeof(a),
+                                   kSwitchAICoreId, req.timestamp, lines) ||
+                !switch_read_bytes(b_addr + byte_offset, reinterpret_cast<uint8_t *>(&b), sizeof(b),
+                                   kSwitchAICoreId, req.timestamp, lines)) {
+                fail();
+                return;
+            }
+            acc += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+        }
+
+        resp.status = 0;
+        resp.old_value = static_cast<uint64_t>(acc);
+        resp.latency_ns = switch_dispatch_latency(SwitchCoreKind::AI, bytes, count, req.timestamp) +
+                          static_cast<uint64_t>(a_fabric_ns + b_fabric_ns);
+        total_latency_ns += resp.latency_ns;
+        return;
+    }
+
+    case OP_SWITCH_MATMUL_I32: {
+        if (req.size < sizeof(SwitchMatmulI32Descriptor)) {
+            fail();
+            return;
+        }
+
+        SwitchMatmulI32Descriptor desc;
+        memcpy(&desc, req.data, sizeof(desc));
+
+        uint64_t m = desc.m;
+        uint64_t n = desc.n;
+        uint64_t k = desc.k;
+        if (m == 0 || n == 0 || k == 0) {
+            fail();
+            return;
+        }
+        if (m > std::numeric_limits<uint64_t>::max() / k ||
+            k > std::numeric_limits<uint64_t>::max() / n ||
+            m > std::numeric_limits<uint64_t>::max() / n) {
+            fail();
+            return;
+        }
+
+        uint64_t a_elems = m * k;
+        uint64_t b_elems = k * n;
+        uint64_t c_elems = m * n;
+        if (a_elems > std::numeric_limits<uint64_t>::max() / sizeof(int32_t) ||
+            b_elems > std::numeric_limits<uint64_t>::max() / sizeof(int32_t) ||
+            c_elems > std::numeric_limits<uint64_t>::max() / sizeof(int32_t)) {
+            fail();
+            return;
+        }
+
+        uint64_t a_bytes = a_elems * sizeof(int32_t);
+        uint64_t b_bytes = b_elems * sizeof(int32_t);
+        uint64_t c_bytes = c_elems * sizeof(int32_t);
+        double a_fabric_ns = 0.0;
+        double b_fabric_ns = 0.0;
+        double c_fabric_ns = 0.0;
+
+        if (!range_valid(desc.a_addr, a_bytes) || !range_valid(desc.b_addr, b_bytes) ||
+            !range_valid(desc.c_addr, c_bytes) ||
+            !check_switch_range_access(thread_id, req, desc.a_addr, a_bytes, false, false, resp, a_fabric_ns) ||
+            !check_switch_range_access(thread_id, req, desc.b_addr, b_bytes, false, false, resp, b_fabric_ns) ||
+            !check_switch_range_access(thread_id, req, desc.c_addr, c_bytes, true, false, resp, c_fabric_ns)) {
+            fail();
+            return;
+        }
+
+        uint64_t lines = 0;
+        for (uint64_t row = 0; row < m; row++) {
+            for (uint64_t col = 0; col < n; col++) {
+                int64_t acc = 0;
+                for (uint64_t kk = 0; kk < k; kk++) {
+                    int32_t a = 0;
+                    int32_t b = 0;
+                    uint64_t a_offset = (row * k + kk) * sizeof(int32_t);
+                    uint64_t b_offset = (kk * n + col) * sizeof(int32_t);
+                    if (!switch_read_bytes(desc.a_addr + a_offset, reinterpret_cast<uint8_t *>(&a), sizeof(a),
+                                           kSwitchAICoreId, req.timestamp, lines) ||
+                        !switch_read_bytes(desc.b_addr + b_offset, reinterpret_cast<uint8_t *>(&b), sizeof(b),
+                                           kSwitchAICoreId, req.timestamp, lines)) {
+                        fail();
+                        return;
+                    }
+                    acc += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+                }
+
+                int32_t out = static_cast<int32_t>(acc);
+                uint64_t c_offset = (row * n + col) * sizeof(int32_t);
+                if (!switch_write_bytes(desc.c_addr + c_offset, reinterpret_cast<uint8_t *>(&out), sizeof(out),
+                                        kSwitchAICoreId, req.timestamp, lines)) {
+                    fail();
+                    return;
+                }
+            }
+        }
+
+        uint64_t work_items = m * n * k;
+        uint64_t bytes = a_bytes + b_bytes + c_bytes;
+        resp.status = 0;
+        resp.old_value = c_elems;
+        resp.latency_ns = switch_dispatch_latency(SwitchCoreKind::AI, bytes, work_items, req.timestamp) +
+                          static_cast<uint64_t>(a_fabric_ns + b_fabric_ns + c_fabric_ns);
+        total_latency_ns += resp.latency_ns;
+        return;
+    }
+
+    default:
+        fail();
+        return;
     }
 }
 

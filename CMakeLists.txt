@@ -53,6 +53,7 @@ set(SOURCE_FILES
     src/dcd_gfam.cpp
     src/hdm_decoder.cpp
     src/coherency_engine.cpp
+    src/switch_runtime.cpp
     src/policy.cpp
     src/helper.cpp
     src/monitor.cpp
@@ -142,6 +143,11 @@ add_executable(test_bandwidth_model tests/test_bandwidth_model.cpp)
 target_include_directories(test_bandwidth_model PRIVATE include src ${spdlog_INCLUDE_DIR})
 target_link_libraries(test_bandwidth_model cxlmemsim spdlog::spdlog_header_only ${RT_LIB} ${ATOMIC_LIB})
 add_test(NAME test_bandwidth_model COMMAND test_bandwidth_model)
+
+add_executable(test_switch_runtime tests/test_switch_runtime.cpp)
+target_include_directories(test_switch_runtime PRIVATE include src)
+target_link_libraries(test_switch_runtime cxlmemsim ${RT_LIB} ${ATOMIC_LIB})
+add_test(NAME test_switch_runtime COMMAND test_switch_runtime)
 
 # Integration-style test clients. They require an external server/DAX setup, so
 # CMake builds them but does not register them as always-on CTest tests.

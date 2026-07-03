@@ -206,6 +206,100 @@ The Zettai switch CCI device (`7a74:a123`) creates a guest char device such as
 `ioctl()`, not `io_uring_cmd`; `/tmp/zettai-qmp.sock` remains a host-side QMP
 socket used for bind/add/query orchestration.
 
+For the QEMU Type2 BAR2 command path, a CXLMemSim server started with
+`--enable-switch-cores` also accepts near-switch offloads over the TCP MemSim
+transport:
+
+| Command | Params | Result |
+| --- | --- | --- |
+| `CXL_GPU_CMD_SWITCH_MEMCPY` | `dst, src, size` | `RESULT0=bytes`, `RESULT1=latency_ns` |
+| `CXL_GPU_CMD_SWITCH_MEMSET` | `dst, byte_pattern, size` | `RESULT0=bytes`, `RESULT1=latency_ns` |
+| `CXL_GPU_CMD_SWITCH_REDUCE_ADD64` | `src, bytes` | `RESULT0=sum`, `RESULT1=latency_ns` |
+| `CXL_GPU_CMD_SWITCH_DOT_I32` | `a, b, count` | `RESULT0=dot`, `RESULT1=latency_ns` |
+| `CXL_GPU_CMD_SWITCH_MATMUL_I32` | `a, b, c, m, n, k` | `RESULT0=output_elements`, `RESULT1=latency_ns` |
+| `CXL_GPU_CMD_SWITCH_GET_STATS` | none | `RESULT0=enabled`, stats in BAR2 data buffer |
+
+The memory server executes these operations near the switch, updates CXL
+cacheline metadata, and accounts for core queueing/service time.
+
+Run the host-side qtest experiment to exercise those commands through QEMU BAR2
+MMIO without booting a guest:
+
+```bash
+python3 ./qtest_switch_offload.py
+```
+
+The script starts a switch-enabled `cxlmemsim_server`, launches
+`qemu-system-x86_64` with `-accel qtest`, assigns the Type2 BAR2 and root-port
+prefetchable window, writes the BAR2 command registers for memcpy, memset,
+reduce, dot, matmul, and stats, then verifies the resulting CXLMemSim memory
+contents. Logs are written under `build/qtest-switch-offload/`.
+
+Run the broader Damer-mapped benchmark suite from the same host-side QEMU qtest
+path:
+
+```bash
+python3 ./qtest_switch_benchmark.py
+```
+
+The benchmark keeps QEMU alive for a suite of general-core, AI-core, and mixed
+pipeline cases: cacheline memcpy, memset, add64 reduction, dot product, GEMM,
+`ternary_matmul` import/go/export, `qwen_decode_token`, and
+`qwen_prefill_gemm`, plus Graph500-style frontier expansion, in-memory
+hash-join probe, and distributed KV get/put batches. When `/root/Damer` is
+present, the result rows include the matching
+`workloads/concordia/ptxspatial/*.ptxspatial.json` trace path and event count.
+Use `--quick` for smaller matrices/vectors, `--repeat=N` for repeated
+runs, or `--cases=ai_gemm_i32,mixed_qwen_prefill_gemm` to select a subset.
+Results are written under `build/qtest-switch-bench/` as
+`switch_benchmark.csv` and `switch_benchmark.json`.
+
+For a focused ternary end-to-end model with NCCL-style hooked collectives, run:
+
+```bash
+python3 ./qtest_switch_benchmark.py \
+  --cases=kimi26_ternary_nccl_hook_e2e \
+  --output-prefix=kimi26_ternary_nccl
+```
+
+This is a deterministic Kimi 2.6-style profile for the emulated switch path, not
+a real model runtime. Each layer issues a hooked KV all-gather as switch memcpy
+fanout, four ternary-valued matmul phases through the AI core, and hooked
+attention/residual all-reduces as switch reductions plus result broadcasts.
+
+Run configuration sweeps over the emulated switch core counts and service rates:
+
+```bash
+python3 ./qtest_switch_sweep.py --preset=all
+```
+
+This repeatedly launches the benchmark with isolated run directories for
+`balanced`, single-core, general-core scaling, AI-core scaling, slow/fast
+general bandwidth, slow/fast AI rate, and high base latency configurations.
+Aggregate results are written under `build/qtest-switch-sweep/` as
+`switch_sweep.csv` and `switch_sweep.json`. Use `--preset=core-scale` or
+`--preset=rates` for narrower sweeps.
+
+The same sweep harness can isolate the Kimi ternary/NCCL-hook profile:
+
+```bash
+python3 ./qtest_switch_sweep.py \
+  --preset=all \
+  --cases=kimi26_ternary_nccl_hook_e2e \
+  --run-dir=../build/qtest-switch-kimi26-sweep
+```
+
+To scale the Kimi profile itself across layers, ranks, KV shard size, reduction
+width, and ternary matmul dimension, run:
+
+```bash
+python3 ./qtest_kimi_scaling.py --preset=all
+```
+
+This produces `build/qtest-switch-kimi26-size/kimi_size_sweep.csv` and
+`kimi_size_sweep.json`, with one row for each deterministic profile from
+`tiny` through `dim_scale`.
+
 Build the guest helper:
 
 ```bash
