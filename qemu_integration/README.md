@@ -249,10 +249,19 @@ pipeline cases: cacheline memcpy, memset, add64 reduction, dot product, GEMM,
 hash-join probe, and distributed KV get/put batches. When `/root/Damer` is
 present, the result rows include the matching
 `workloads/concordia/ptxspatial/*.ptxspatial.json` trace path and event count.
-Use `--quick` for smaller matrices/vectors, `--repeat=N` for repeated
-runs, or `--cases=ai_gemm_i32,mixed_qwen_prefill_gemm` to select a subset.
-Results are written under `build/qtest-switch-bench/` as
-`switch_benchmark.csv` and `switch_benchmark.json`.
+Use `--quick` for smaller matrices/vectors, or
+`--cases=ai_gemm_i32,mixed_qwen_prefill_gemm` to select a subset. Results are
+written under `build/qtest-switch-bench/` as `switch_benchmark.csv` and
+`switch_benchmark.json`. For repeated measurements, prefer independent trials
+so switch queue state does not carry across repeats:
+
+```bash
+python3 ./qtest_cxlbench_repeat.py --trials=3
+```
+
+The repeat driver writes `cxl_switch_benchmark_summary.csv` and
+`cxl_switch_benchmark_summary.json` under
+`build/qtest-switch-cxlbench-repeat/`.
 
 For a focused ternary end-to-end model with NCCL-style hooked collectives, run:
 
@@ -266,6 +275,25 @@ This is a deterministic Kimi 2.6-style profile for the emulated switch path, not
 a real model runtime. Each layer issues a hooked KV all-gather as switch memcpy
 fanout, four ternary-valued matmul phases through the AI core, and hooked
 attention/residual all-reduces as switch reductions plus result broadcasts.
+The Kimi profile also exposes collective ablation knobs:
+`--kimi-allgather-mode=full|single-dst` controls whether KV all-gather
+materializes the gathered buffer at every rank or only one destination, and
+`--kimi-allreduce-mode=full|reduce-only` controls whether scalar reductions are
+staged and broadcast back to all ranks or measured as switch-side reductions
+only.
+
+For the default four-way ablation study, run:
+
+```bash
+python3 ./qtest_kimi_ablation.py --repeat=3
+```
+
+This runs full collectives, single-destination all-gather, reduce-only
+all-reduce, and the combined lower-bound configuration. Each repeat is a fresh
+server/QEMU trial. Results are written under
+`build/qtest-switch-kimi26-ablation/` as `kimi_ablation.csv` and
+`kimi_ablation.json`. Use this table to separate mandatory collective semantics
+from optional fanout/staging overhead.
 
 Run configuration sweeps over the emulated switch core counts and service rates:
 

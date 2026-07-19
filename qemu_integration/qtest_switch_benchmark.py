@@ -37,7 +37,7 @@ class CaseSpec:
 
 class BenchmarkContext:
     def __init__(self, client: qtest.MemSimClient, qt: qtest.QTest, bar2: int,
-                 quick: bool, profile: dict[str, int | None] | None = None) -> None:
+                 quick: bool, profile: dict[str, object | None] | None = None) -> None:
         self.client = client
         self.qt = qt
         self.bar2 = bar2
@@ -82,6 +82,10 @@ class BenchmarkContext:
     def profile_int(self, name: str, fallback: int) -> int:
         value = self.profile.get(name)
         return fallback if value is None else int(value)
+
+    def profile_str(self, name: str, fallback: str) -> str:
+        value = self.profile.get(name)
+        return fallback if value is None else str(value)
 
 
 def pack_i32(values: list[int]) -> bytes:
@@ -194,7 +198,14 @@ def run_ternary_matmul(ctx: BenchmarkContext, label: str, m: int, n: int, k: int
 
 
 def nccl_hook_allgather(ctx: BenchmarkContext, label: str, ranks: int,
-                        shard_bytes: int, seed: int) -> dict[str, object]:
+                        shard_bytes: int, seed: int, mode: str) -> dict[str, object]:
+    if mode == "full":
+        dst_ranks = ranks
+    elif mode == "single-dst":
+        dst_ranks = 1
+    else:
+        raise RuntimeError(f"unknown all-gather ablation mode {mode!r}")
+
     src_addrs = []
     src_payloads = []
     for rank in range(ranks):
@@ -206,7 +217,7 @@ def nccl_hook_allgather(ctx: BenchmarkContext, label: str, ranks: int,
 
     expected = b"".join(src_payloads)
     checksum = 0
-    for dst_rank in range(ranks):
+    for dst_rank in range(dst_ranks):
         dst_base = ctx.alloc(ranks * shard_bytes)
         ctx.write_bytes(dst_base, b"\0" * ranks * shard_bytes)
         for src_rank, src_addr in enumerate(src_addrs):
@@ -220,17 +231,21 @@ def nccl_hook_allgather(ctx: BenchmarkContext, label: str, ranks: int,
             raise RuntimeError(f"{label}: all-gather verification failed")
         checksum += sum(actual)
 
-    moved = ranks * ranks * shard_bytes
+    moved = dst_ranks * ranks * shard_bytes
     return {
         "bytes": moved,
         "work_items": moved // 64,
         "checksum": checksum,
         "collectives": 1,
+        "fanout_copies": dst_ranks * ranks,
     }
 
 
 def nccl_hook_allreduce_checksum(ctx: BenchmarkContext, label: str, ranks: int,
-                                 count_u64: int, seed: int) -> dict[str, object]:
+                                 count_u64: int, seed: int, mode: str) -> dict[str, object]:
+    if mode not in {"full", "reduce-only"}:
+        raise RuntimeError(f"unknown all-reduce ablation mode {mode!r}")
+
     values = []
     for rank in range(ranks):
         values.extend(((idx + rank + seed) % 23) + 1 for idx in range(count_u64))
@@ -247,27 +262,32 @@ def nccl_hook_allreduce_checksum(ctx: BenchmarkContext, label: str, ranks: int,
     if result != expected:
         raise RuntimeError(f"{label}: all-reduce expected {expected}, got {result}")
 
-    # The qtest command returns scalar reductions in BAR registers. Stage that
-    # scalar once, then model the NCCL hook broadcast through switch copies.
-    scratch = ctx.alloc(64)
-    ctx.write_bytes(scratch, struct.pack("<Q", result).ljust(64, b"\0"))
-    for rank in range(ranks):
-        dst = ctx.alloc(64)
-        ctx.write_bytes(dst, b"\0" * 64)
-        ctx.offload(
-            f"{label}_broadcast_r{rank}",
-            qtest.CXL_GPU_CMD_SWITCH_MEMCPY,
-            [dst, scratch, 64],
-        )
-        actual = struct.unpack("<Q", ctx.read_bytes(dst, 8))[0]
-        if actual != result:
-            raise RuntimeError(f"{label}: broadcast verification failed")
+    broadcast_copies = 0
+    if mode == "full":
+        # The qtest command returns scalar reductions in BAR registers. Stage
+        # that scalar once, then model the NCCL hook broadcast through switch
+        # copies. reduce-only mode intentionally skips this staging/fanout path.
+        scratch = ctx.alloc(64)
+        ctx.write_bytes(scratch, struct.pack("<Q", result).ljust(64, b"\0"))
+        for rank in range(ranks):
+            dst = ctx.alloc(64)
+            ctx.write_bytes(dst, b"\0" * 64)
+            ctx.offload(
+                f"{label}_broadcast_r{rank}",
+                qtest.CXL_GPU_CMD_SWITCH_MEMCPY,
+                [dst, scratch, 64],
+            )
+            actual = struct.unpack("<Q", ctx.read_bytes(dst, 8))[0]
+            if actual != result:
+                raise RuntimeError(f"{label}: broadcast verification failed")
+        broadcast_copies = ranks
 
     return {
-        "bytes": len(payload) + ranks * 64,
+        "bytes": len(payload) + broadcast_copies * 64,
         "work_items": ranks * count_u64,
         "checksum": result,
         "collectives": 1,
+        "broadcast_copies": broadcast_copies,
     }
 
 
@@ -606,10 +626,16 @@ def case_kimi26_ternary_nccl_hook_e2e(ctx: BenchmarkContext) -> dict[str, object
                                      128 if ctx.quick else 256)
     reduce_count = ctx.profile_int("kimi_reduce_count",
                                    16 if ctx.quick else 64)
+    allgather_mode = ctx.profile_str("kimi_allgather_mode", "full")
+    allreduce_mode = ctx.profile_str("kimi_allreduce_mode", "full")
     if ranks < 1 or layers < 1 or dim < 1 or reduce_count < 1:
         raise RuntimeError("Kimi profile dimensions must be positive")
     if kv_shard_bytes < 64 or kv_shard_bytes % 64 != 0:
         raise RuntimeError("--kimi-kv-shard-bytes must be a positive 64-byte multiple")
+    if allgather_mode not in {"full", "single-dst"}:
+        raise RuntimeError("--kimi-allgather-mode must be full or single-dst")
+    if allreduce_mode not in {"full", "reduce-only"}:
+        raise RuntimeError("--kimi-allreduce-mode must be full or reduce-only")
 
     totals = {
         "bytes": 0,
@@ -617,6 +643,8 @@ def case_kimi26_ternary_nccl_hook_e2e(ctx: BenchmarkContext) -> dict[str, object
         "checksum": 0,
         "collectives": 0,
         "ternary_matmuls": 0,
+        "fanout_copies": 0,
+        "broadcast_copies": 0,
     }
 
     def add(item: dict[str, object]) -> None:
@@ -624,6 +652,8 @@ def case_kimi26_ternary_nccl_hook_e2e(ctx: BenchmarkContext) -> dict[str, object
         totals["work_items"] += int(item["work_items"])
         totals["checksum"] += int(item["checksum"])
         totals["collectives"] += int(item.get("collectives", 0))
+        totals["fanout_copies"] += int(item.get("fanout_copies", 0))
+        totals["broadcast_copies"] += int(item.get("broadcast_copies", 0))
 
     for layer in range(layers):
         add(nccl_hook_allgather(
@@ -632,6 +662,7 @@ def case_kimi26_ternary_nccl_hook_e2e(ctx: BenchmarkContext) -> dict[str, object
             ranks,
             kv_shard_bytes,
             41 + layer * 17,
+            allgather_mode,
         ))
 
         for phase, seed in (
@@ -656,6 +687,7 @@ def case_kimi26_ternary_nccl_hook_e2e(ctx: BenchmarkContext) -> dict[str, object
             ranks,
             reduce_count,
             503 + layer * 19,
+            allreduce_mode,
         ))
         add(nccl_hook_allreduce_checksum(
             ctx,
@@ -663,6 +695,7 @@ def case_kimi26_ternary_nccl_hook_e2e(ctx: BenchmarkContext) -> dict[str, object
             ranks,
             reduce_count,
             709 + layer * 23,
+            allreduce_mode,
         ))
 
     return {
@@ -671,6 +704,9 @@ def case_kimi26_ternary_nccl_hook_e2e(ctx: BenchmarkContext) -> dict[str, object
         "result": (
             f"layers={layers};ranks={ranks};ternary_matmuls="
             f"{totals['ternary_matmuls']};collectives={totals['collectives']};"
+            f"allgather={allgather_mode};allreduce={allreduce_mode};"
+            f"fanout_copies={totals['fanout_copies']};"
+            f"broadcast_copies={totals['broadcast_copies']};"
             f"checksum={totals['checksum']}"
         ),
     }
@@ -892,6 +928,12 @@ def main() -> int:
     parser.add_argument("--kimi-dim", type=int)
     parser.add_argument("--kimi-kv-shard-bytes", type=int)
     parser.add_argument("--kimi-reduce-count", type=int)
+    parser.add_argument("--kimi-allgather-mode", choices=["full", "single-dst"],
+                        default="full",
+                        help="Kimi collective ablation: full fanout or one destination")
+    parser.add_argument("--kimi-allreduce-mode", choices=["full", "reduce-only"],
+                        default="full",
+                        help="Kimi collective ablation: include or omit result broadcast")
     args = parser.parse_args()
 
     if args.repeat < 1:
@@ -931,7 +973,9 @@ def main() -> int:
         qtest.wait_for_port(args.host, args.port)
         client = qtest.MemSimClient(args.host, args.port)
 
-        qtest_dir = Path(tempfile.mkdtemp(prefix="qtest-", dir=run_dir))
+        # Keep the qtest socket path short enough for sockaddr_un. Results and
+        # logs still go under run_dir; only this transient socket lives in /tmp.
+        qtest_dir = Path(tempfile.mkdtemp(prefix="qtest-"))
         qtest_path = qtest_dir / "qtest.sock"
         qemu_proc, qt, qemu_log = qtest.launch_qemu(
             qemu_args(args, qtest_path), qtest_path, qemu_log_path)
@@ -943,6 +987,8 @@ def main() -> int:
             "kimi_dim": args.kimi_dim,
             "kimi_kv_shard_bytes": args.kimi_kv_shard_bytes,
             "kimi_reduce_count": args.kimi_reduce_count,
+            "kimi_allgather_mode": args.kimi_allgather_mode,
+            "kimi_allreduce_mode": args.kimi_allreduce_mode,
         }
         ctx = BenchmarkContext(client, qt, bar2, args.quick, profile)
         initial = stats_from_bar(ctx)
