@@ -1311,6 +1311,78 @@ static inline uint64_t bar4_offset_of(void *host_ptr) {
     return (uint64_t)((uint8_t *)host_ptr - (uint8_t *)g_bar4_ptr);
 }
 
+static int bar4_range_offset(void *host_ptr, uint64_t size, uint64_t *offset) {
+    uintptr_t base;
+    uintptr_t pointer;
+    uint64_t range_offset;
+
+    if (!host_ptr || !g_bar4_ptr || !offset || size == 0)
+        return 0;
+
+    base = (uintptr_t)g_bar4_ptr;
+    pointer = (uintptr_t)host_ptr;
+    if (pointer < base)
+        return 0;
+
+    range_offset = (uint64_t)(pointer - base);
+    if (range_offset > g_bar4_size || size > (uint64_t)g_bar4_size - range_offset)
+        return 0;
+
+    *offset = range_offset;
+    return 1;
+}
+
+int cxlCoherentAcquireRange(void *host_ptr, uint64_t size, int intent, uint64_t *device_ptr, uint64_t *lines_granted) {
+    uint64_t offset;
+    CUresult result;
+
+    if (!device_ptr || !lines_granted)
+        return CXL_GPU_ERROR_INVALID_VALUE;
+    *device_ptr = 0;
+    *lines_granted = 0;
+
+    if (!host_ptr || size == 0 || (intent != CXL_COH_RANGE_READ && intent != CXL_COH_RANGE_WRITE))
+        return CXL_GPU_ERROR_INVALID_VALUE;
+    if (!g_regs || !ensure_bar4())
+        return CXL_GPU_ERROR_NOT_INITIALIZED;
+    if (!bar4_range_offset(host_ptr, size, &offset))
+        return CXL_GPU_ERROR_INVALID_VALUE;
+
+    cmd_lock();
+    reg_write64(CXL_GPU_REG_PARAM0, offset);
+    reg_write64(CXL_GPU_REG_PARAM1, size);
+    reg_write64(CXL_GPU_REG_PARAM2, (uint64_t)intent);
+    result = execute_cmd(CXL_GPU_CMD_COH_ACQUIRE_RANGE);
+    if (result == CXL_GPU_SUCCESS || result == CXL_GPU_ERROR_COHERENCY)
+        *lines_granted = reg_read64(CXL_GPU_REG_RESULT0);
+    if (result == CXL_GPU_SUCCESS)
+        *device_ptr = reg_read64(CXL_GPU_REG_RESULT1);
+    cmd_unlock();
+
+    return result;
+}
+
+int cxlCoherentReleaseRange(void *host_ptr, uint64_t size, int dirty) {
+    uint64_t offset;
+    CUresult result;
+
+    if (!host_ptr || size == 0 || (dirty != 0 && dirty != 1))
+        return CXL_GPU_ERROR_INVALID_VALUE;
+    if (!g_regs || !ensure_bar4())
+        return CXL_GPU_ERROR_NOT_INITIALIZED;
+    if (!bar4_range_offset(host_ptr, size, &offset))
+        return CXL_GPU_ERROR_INVALID_VALUE;
+
+    cmd_lock();
+    reg_write64(CXL_GPU_REG_PARAM0, offset);
+    reg_write64(CXL_GPU_REG_PARAM1, size);
+    reg_write64(CXL_GPU_REG_PARAM2, (uint64_t)dirty);
+    result = execute_cmd(CXL_GPU_CMD_COH_RELEASE_RANGE);
+    cmd_unlock();
+
+    return result;
+}
+
 int cxlSetBias(void *host_ptr, uint64_t size, int bias_mode) {
     if (!g_regs)
         return 1;

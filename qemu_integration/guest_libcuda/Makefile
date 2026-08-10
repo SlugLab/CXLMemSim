@@ -8,14 +8,18 @@ CUDA_LINK := libcuda.so
 
 CUDA_TESTS := cuda_test cuda_advanced_test
 BAR_TESTS := cxl_bar_benchmark
+UNIT_TESTS := cxl_coherent_range_test
 BAR_STATIC := cxl_bar_benchmark.static
 TARGETS := $(CUDA_SHIM) $(CUDA_LINK) $(CUDA_TESTS) $(BAR_TESTS)
 
-.PHONY: all clean static test-binaries
+.PHONY: all clean static test test-binaries
 
 all: $(TARGETS)
 
 test-binaries: $(CUDA_TESTS) $(BAR_TESTS)
+
+test: $(UNIT_TESTS)
+	./cxl_coherent_range_test
 
 $(CUDA_SHIM): libcuda.c cxl_gpu_cmd.h
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ libcuda.c -ldl $(LDFLAGS) $(LDLIBS)
@@ -32,10 +36,13 @@ cuda_advanced_test: cuda_advanced_test.c $(CUDA_LINK)
 cxl_bar_benchmark: cxl_bar_benchmark.c cxl_gpu_cmd.h
 	$(CC) $(CFLAGS) -o $@ cxl_bar_benchmark.c -lrt -lpthread $(LDFLAGS) $(LDLIBS)
 
+cxl_coherent_range_test: cxl_coherent_range_test.c libcuda.c cxl_gpu_cmd.h
+	$(CC) $(CFLAGS) -O0 -Wno-format-truncation -Wno-unused-result -o $@ cxl_coherent_range_test.c -ldl $(LDFLAGS) $(LDLIBS)
+
 static: $(BAR_STATIC)
 
 $(BAR_STATIC): cxl_bar_benchmark.c cxl_gpu_cmd.h
 	$(CC) $(CFLAGS) -static -o $@ cxl_bar_benchmark.c -lrt -lpthread $(LDFLAGS) $(LDLIBS)
 
 clean:
-	rm -f $(TARGETS) $(BAR_STATIC)
+	rm -f $(TARGETS) $(BAR_STATIC) $(UNIT_TESTS)

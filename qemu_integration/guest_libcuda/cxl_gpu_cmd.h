@@ -130,6 +130,11 @@ typedef enum {
     CXL_GPU_CMD_CACHE_FLUSH = 0x80, /* Flush cache lines to device */
     CXL_GPU_CMD_CACHE_INVALIDATE = 0x81, /* Invalidate cache lines */
     CXL_GPU_CMD_CACHE_WRITEBACK = 0x82, /* Writeback dirty cache lines */
+    CXL_GPU_CMD_COHERENT_LOAD = 0x83, /* Protocol-v2 device load */
+    CXL_GPU_CMD_COHERENT_STORE = 0x84, /* Protocol-v2 device store */
+    CXL_GPU_CMD_COHERENT_FAA = 0x85, /* Protocol-v2 fetch-and-add */
+    CXL_GPU_CMD_COHERENT_CAS = 0x86, /* Protocol-v2 compare-and-swap */
+    CXL_GPU_CMD_CACHE_PREFETCH = 0x88, /* Prefetch coherent lines */
 
     /* P2P DMA commands (GPU <-> Type3 CXL memory) */
     CXL_GPU_CMD_P2P_DISCOVER = 0x90, /* Discover P2P peers */
@@ -154,6 +159,10 @@ typedef enum {
     /* Coherency statistics commands */
     CXL_GPU_CMD_COH_GET_STATS = 0xB0, /* Get coherency statistics */
     CXL_GPU_CMD_COH_RESET_STATS = 0xB1, /* Reset coherency statistics */
+    /* P0=BAR4 offset, P1=size, P2=intent; R0=lines granted, R1=CUDA device pointer. */
+    CXL_GPU_CMD_COH_ACQUIRE_RANGE = 0xB2,
+    /* P0=BAR4 offset, P1=size, P2=dirty; R0=lines released. */
+    CXL_GPU_CMD_COH_RELEASE_RANGE = 0xB3,
 
     /* DCD/GFAM/MH-SLD fabric-memory commands */
     CXL_GPU_CMD_DCD_ADD = 0xC0, /* params: base, size, tag */
@@ -165,6 +174,10 @@ typedef enum {
     CXL_GPU_CMD_MHSLD_GET_INFO = 0xD0, /* results: heads, current, stats */
     CXL_GPU_CMD_MHSLD_SET_HEAD = 0xD1, /* params: head_id */
 } CXLGPUCommand;
+
+/* Coherent range access intent. */
+#define CXL_COH_RANGE_READ 0
+#define CXL_COH_RANGE_WRITE 1
 
 /* Coherent pool register offsets (in GPU command region) */
 #define CXL_GPU_REG_COH_POOL_BASE 0x0300 /* Coherent pool base offset */
@@ -238,6 +251,10 @@ typedef enum {
     CXL_GPU_ERROR_LAUNCH_FAILED = 700,
     CXL_GPU_ERROR_INVALID_PTX = 800,
     CXL_GPU_ERROR_UNKNOWN = 999,
+    CXL_GPU_ERROR_COHERENCY = 1000,
 } CXLGPUError;
+
+int cxlCoherentAcquireRange(void *host_ptr, uint64_t size, int intent, uint64_t *device_ptr, uint64_t *lines_granted);
+int cxlCoherentReleaseRange(void *host_ptr, uint64_t size, int dirty);
 
 #endif /* CXL_GPU_CMD_H */
