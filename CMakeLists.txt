@@ -231,6 +231,10 @@ target_link_libraries(test_coherence_range_acquire cxlmemsim)
 add_test(NAME test_coherence_range_acquire COMMAND test_coherence_range_acquire)
 set_tests_properties(test_coherence_range_acquire PROPERTIES TIMEOUT 30)
 
+add_executable(test_vectordb_dirty_ranges tests/test_vectordb_dirty_ranges.cpp src/vectordb_dirty_ranges.cpp)
+target_include_directories(test_vectordb_dirty_ranges PRIVATE include)
+add_test(NAME test_vectordb_dirty_ranges COMMAND test_vectordb_dirty_ranges)
+
 add_executable(test_type2_device_litmus_contract tests/test_type2_device_litmus_contract.c)
 target_compile_options(test_type2_device_litmus_contract PRIVATE -std=gnu11)
 add_test(NAME test_type2_device_litmus_contract COMMAND test_type2_device_litmus_contract)
