@@ -118,6 +118,22 @@ int main(void) {
         "_mm_sfence",
         "copied_bytes",
         "dirty_lines",
+        "typedef struct GrantEvidence",
+        "uint64_t lines_requested;",
+        "uint64_t lines_granted;",
+        "uint64_t partial_grants;",
+        "GrantEvidence grant_evidence = {0, 0, 0, \"not-applicable\"};",
+        "grant_evidence.lines_requested = index_bytes / CACHE_LINE_BYTES;",
+        "record_coherent_grant(&grant_evidence, initial_lines_granted)",
+        "record_coherent_grant(&grant_evidence, post_update_lines_granted)",
+        "grant->lines_granted = device_lines_granted;",
+        "++grant->partial_grants;",
+        "device-returned-exact-grant",
+        "not-applicable",
+        "\\\"lines_requested\\\":%",
+        "\\\"lines_granted\\\":%",
+        "\\\"partial_grants\\\":%",
+        "\\\"grant_evidence\\\":",
         "correct",
         "stale_observed",
         "gpu_labels",
@@ -161,6 +177,9 @@ int main(void) {
     }
     if (!rejects(source, "options->queries, 1, 1, 1, 1, 1") || !rejects(source, "kExactL2Top10Ptx") ||
         !rejects(source, "double qps = kernel_ms") || !contains(source, "double qps = end_to_end_ms > 0.0") ||
+        !contains_at_least(source, "record_coherent_grant(&grant_evidence", 2) ||
+        !ordered(source, "grant->lines_granted = device_lines_granted;", "++grant->partial_grants;") ||
+        !ordered(source, "record_coherent_grant(&grant_evidence, post_update_lines_granted)", "emit_result(&options") ||
         !ordered(source, "cuMemcpyDtoH_v2(query_elapsed_ns", "epoch_end = now_ms();") ||
         !ordered(source, "epoch_end = now_ms();", "oracle_start = now_ms();") ||
         !ordered(source, "oracle_end = now_ms();", "emit_result(&options")) {

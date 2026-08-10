@@ -101,6 +101,23 @@ typedef struct {
     size_t dirty_count;
 } DirtyLines;
 
+typedef struct GrantEvidence {
+    uint64_t lines_requested;
+    uint64_t lines_granted;
+    uint64_t partial_grants;
+    const char *description;
+} GrantEvidence;
+
+static bool record_coherent_grant(GrantEvidence *grant, uint64_t device_lines_granted) {
+    grant->lines_granted = device_lines_granted;
+    if (device_lines_granted != grant->lines_requested) {
+        ++grant->partial_grants;
+        return false;
+    }
+    grant->description = "device-returned-exact-grant";
+    return true;
+}
+
 static double now_ms(void) {
     struct timespec value;
 
@@ -568,8 +585,9 @@ static void print_label_array(const int *labels, size_t count) {
 static void emit_result(const Options *options, const Gpu *gpu, const char *backend, uint32_t epoch,
                         double end_to_end_ms, double update_ms, double synchronization_ms, double kernel_ms,
                         double oracle_ms, double p50_query_ms, double p99_query_ms, uint64_t copied_bytes,
-                        size_t dirty_lines, bool correct, bool stale_observed, uint32_t target_query,
-                        uint32_t target_label, const int *gpu_labels, const int *cpu_labels, float maximum_error) {
+                        size_t dirty_lines, const GrantEvidence *grant, bool correct, bool stale_observed,
+                        uint32_t target_query, uint32_t target_label, const int *gpu_labels, const int *cpu_labels,
+                        float maximum_error) {
     size_t result_count = (size_t)options->queries * options->topk;
     double qps = end_to_end_ms > 0.0 ? (double)options->queries * 1000.0 / end_to_end_ms : 0.0;
     int observed_label = gpu_labels[(size_t)target_query * options->topk];
@@ -586,13 +604,17 @@ static void emit_result(const Options *options, const Gpu *gpu, const char *back
            ",\"epoch\":%u,\"end_to_end_ms\":%.6f,\"update_ms\":%.6f,\"synchronization_ms\":%.6f,"
            "\"kernel_ms\":%.6f,\"oracle_ms\":%.6f,\"qps\":%.6f,\"p50_query_ms\":%.6f,"
            "\"p99_query_ms\":%.6f,\"copied_bytes\":%" PRIu64 ",\"dirty_lines\":%zu,"
-           "\"correct\":%s,\"stale_observed\":%s,\"target_query\":%u,\"old_label\":%u,"
-           "\"observed_label\":%d,\"expected_label\":%d,\"max_distance_error\":%.9g,\"gpu_labels\":",
+           "\"lines_requested\":%" PRIu64 ",\"lines_granted\":%" PRIu64 ",\"partial_grants\":%" PRIu64
+           ",\"grant_evidence\":",
            options->rows, options->dim, options->queries, options->topk, options->update_ratio, options->warmup,
            options->epochs, options->seed, epoch, end_to_end_ms, update_ms, synchronization_ms, kernel_ms, oracle_ms,
-           qps, p50_query_ms, p99_query_ms, copied_bytes, dirty_lines, correct ? "true" : "false",
-           stale_observed ? "true" : "false", target_query, target_label, observed_label, expected_label,
-           maximum_error);
+           qps, p50_query_ms, p99_query_ms, copied_bytes, dirty_lines, grant->lines_requested, grant->lines_granted,
+           grant->partial_grants);
+    print_json_string(grant->description);
+    printf(",\"correct\":%s,\"stale_observed\":%s,\"target_query\":%u,\"old_label\":%u,"
+           "\"observed_label\":%d,\"expected_label\":%d,\"max_distance_error\":%.9g,\"gpu_labels\":",
+           correct ? "true" : "false", stale_observed ? "true" : "false", target_query, target_label, observed_label,
+           expected_label, maximum_error);
     print_label_array(gpu_labels, result_count);
     printf(",\"cpu_labels\":");
     print_label_array(cpu_labels, result_count);
@@ -632,6 +654,7 @@ int main(int argc, char **argv) {
     size_t index_elements, index_bytes, query_elements, query_bytes, result_count;
     size_t label_bytes, distance_bytes, scratch_elements, scratch_bytes, timing_bytes;
     uint64_t random_state;
+    GrantEvidence grant_evidence = {0, 0, 0, "not-applicable"};
     bool source_is_cxl = false;
     bool gpu_initialized = false;
     bool type2_range_active = false;
@@ -744,12 +767,19 @@ int main(int argc, char **argv) {
 
     if (options.mode == MODE_TYPE2_HWCC) {
         uint64_t acquired_device_pointer = 0;
-        uint64_t lines_granted = 0;
-        if (cxl.acquire(source, index_bytes, CXL_COH_RANGE_READ, &acquired_device_pointer, &lines_granted) !=
-                CUDA_SUCCESS ||
-            acquired_device_pointer == 0 || lines_granted != index_bytes / CACHE_LINE_BYTES) {
-            fprintf(stderr, "initial cxlCoherentAcquireRange failed or returned a partial grant (%" PRIu64 "/%zu)\n",
-                    lines_granted, index_bytes / CACHE_LINE_BYTES);
+        uint64_t initial_lines_granted = 0;
+        CUresult acquire_result;
+        bool exact_grant;
+
+        grant_evidence.lines_requested = index_bytes / CACHE_LINE_BYTES;
+        acquire_result =
+            cxl.acquire(source, index_bytes, CXL_COH_RANGE_READ, &acquired_device_pointer, &initial_lines_granted);
+        exact_grant = record_coherent_grant(&grant_evidence, initial_lines_granted);
+        if (acquire_result != CUDA_SUCCESS || acquired_device_pointer == 0 || !exact_grant) {
+            fprintf(stderr,
+                    "initial cxlCoherentAcquireRange failed or returned a partial grant (%" PRIu64 "/%" PRIu64
+                    ", partial_grants=%" PRIu64 ")\n",
+                    grant_evidence.lines_granted, grant_evidence.lines_requested, grant_evidence.partial_grants);
             goto cleanup;
         }
         device_index = acquired_device_pointer;
@@ -762,7 +792,6 @@ int main(int argc, char **argv) {
         uint32_t target_label = target_query % options.rows;
         uint64_t copied_bytes = 0;
         uint64_t acquired_device_pointer = 0;
-        uint64_t lines_granted = 0;
         float maximum_error = 0.0f;
         bool correct;
         bool stale_observed;
@@ -787,13 +816,16 @@ int main(int argc, char **argv) {
 
         synchronization_start = now_ms();
         if (options.mode == MODE_TYPE2_HWCC && dirty.dirty_count != 0) {
-            if (cxl.acquire(source, index_bytes, CXL_COH_RANGE_READ, &acquired_device_pointer, &lines_granted) !=
-                    CUDA_SUCCESS ||
-                acquired_device_pointer != device_index || lines_granted != index_bytes / CACHE_LINE_BYTES) {
+            uint64_t post_update_lines_granted = 0;
+            CUresult acquire_result = cxl.acquire(source, index_bytes, CXL_COH_RANGE_READ, &acquired_device_pointer,
+                                                  &post_update_lines_granted);
+            bool exact_grant = record_coherent_grant(&grant_evidence, post_update_lines_granted);
+
+            if (acquire_result != CUDA_SUCCESS || acquired_device_pointer != device_index || !exact_grant) {
                 fprintf(stderr,
                         "post-update cxlCoherentAcquireRange failed, remapped, or returned a partial grant "
-                        "(%" PRIu64 "/%zu)\n",
-                        lines_granted, index_bytes / CACHE_LINE_BYTES);
+                        "(%" PRIu64 "/%" PRIu64 ", partial_grants=%" PRIu64 ")\n",
+                        grant_evidence.lines_granted, grant_evidence.lines_requested, grant_evidence.partial_grants);
                 goto cleanup;
             }
         } else if (options.mode == MODE_SOFTWARE_CC) {
@@ -850,8 +882,9 @@ int main(int argc, char **argv) {
         if (iteration >= options.warmup) {
             emit_result(&options, &gpu, backend, iteration - options.warmup, epoch_end - epoch_start,
                         update_end - update_start, synchronization_ms, kernel_end - kernel_start,
-                        oracle_end - oracle_start, p50_query_ms, p99_query_ms, copied_bytes, dirty.dirty_count, correct,
-                        stale_observed, target_query, target_label, gpu_labels, cpu_labels, maximum_error);
+                        oracle_end - oracle_start, p50_query_ms, p99_query_ms, copied_bytes, dirty.dirty_count,
+                        &grant_evidence, correct, stale_observed, target_query, target_label, gpu_labels, cpu_labels,
+                        maximum_error);
         }
     }
     exit_code = 0;
