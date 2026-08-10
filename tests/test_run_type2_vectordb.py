@@ -1,4 +1,5 @@
 import contextlib
+import csv
 import io
 import json
 import signal
@@ -9,6 +10,8 @@ from subprocess import TimeoutExpired
 from unittest import mock
 
 from script.run_type2_vectordb import (
+    Workload,
+    enrich_rows,
     main,
     parse_benchmark_jsonl,
     parse_qemu_evidence,
@@ -17,6 +20,7 @@ from script.run_type2_vectordb import (
     stop_process,
     validate_row,
     validate_run_dir,
+    write_summary,
 )
 
 
@@ -43,6 +47,8 @@ def valid_row(mode="type2-hwcc", **overrides):
         "queries": 8,
         "topk": 10,
         "update_ratio": 1.0 / 4096.0,
+        "warmup": 0,
+        "epochs": 1,
         "epoch": 0,
         "seed": 1,
         "copied_bytes": 0,
@@ -59,7 +65,14 @@ def valid_row(mode="type2-hwcc", **overrides):
         "lines_requested": 32768,
         "lines_granted": 32768,
         "partial_grants": 0,
-        "grant_evidence": "benchmark-exact-grant-check",
+        "grant_evidence": "device-returned-exact-grant",
+        "end_to_end_ms": 1.0,
+        "update_ms": 0.1,
+        "synchronization_ms": 0.2,
+        "kernel_ms": 0.7,
+        "qps": 8000.0,
+        "p50_query_ms": 0.6,
+        "p99_query_ms": 0.7,
         "gets": 32768,
         "getm": 8,
         "upgrade": 0,
@@ -135,6 +148,13 @@ class ValidateRowTests(unittest.TestCase):
             with self.subTest(field=field):
                 self.assert_rejected(field, 1, message)
 
+    def test_requires_device_returned_grant_evidence(self):
+        self.assert_rejected(
+            "grant_evidence",
+            "benchmark-exact-grant-check",
+            "type2-hwcc requires device-returned exact grant evidence",
+        )
+
     def test_rejects_missing_physical_backing_identity(self):
         row = valid_row()
         row["backing"] = {"allocation_count": 1, "registered": True}
@@ -198,12 +218,25 @@ class ValidateRowTests(unittest.TestCase):
 
 
 class ValidateRunDirectoryTests(unittest.TestCase):
+    @staticmethod
+    def workload_from_row(row, epochs=1):
+        return {
+            "rows": row["rows"],
+            "queries": row["queries"],
+            "update_ratio": row["update_ratio"],
+            "warmup": row["warmup"],
+            "epochs": epochs,
+            "seed": row["seed"],
+            "dim": row["dim"],
+            "topk": row["topk"],
+        }
+
     def write_run(self, root, rows, manifest=None):
         root = Path(root)
         with (root / "results.jsonl").open("w", encoding="utf-8") as output:
             for row in rows:
                 output.write(json.dumps(row) + "\n")
-        (root / "summary.csv").write_text("mode,epochs\ntype2-hwcc,1\n", encoding="utf-8")
+        write_summary(rows, root / "summary.csv")
         (root / "evidence.txt").write_text("fixture evidence\n", encoding="utf-8")
         first = rows[0]
         default_manifest = {
@@ -217,6 +250,7 @@ class ValidateRunDirectoryTests(unittest.TestCase):
                 "qemu_gitlink": first["qemu_gitlink_commit"],
             },
             "gpu_inventory": first["gpu_inventory"],
+            "workloads": [self.workload_from_row(first)],
             "evidence_paths": ["evidence.txt"],
         }
         (root / "manifest.json").write_text(
@@ -262,6 +296,119 @@ class ValidateRunDirectoryTests(unittest.TestCase):
             errors = validate_run_dir(root)
             self.assertIn("summary.csv is missing or empty", errors)
             self.assertIn("manifest evidence path is missing: evidence.txt", errors)
+
+    def test_requires_exactly_all_modes_for_each_manifest_workload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rows = [valid_row(mode) for mode in MODES_FOR_TEST]
+            self.write_run(directory, rows[:-1])
+            self.assertIn(
+                "manifest workload 0 mode negative-stale has 0 rows; expected 1",
+                validate_run_dir(Path(directory)),
+            )
+
+    def test_rejects_extra_workloads_and_modes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rows = [valid_row(mode) for mode in MODES_FOR_TEST]
+            rows.append(valid_row("native-gpu", rows=8192, epoch=0))
+            self.write_run(directory, rows)
+            self.assertIn("results contain rows outside manifest workloads", validate_run_dir(Path(directory)))
+
+    def test_requires_unique_contiguous_epoch_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rows = []
+            for mode in MODES_FOR_TEST:
+                rows.extend((valid_row(mode, epochs=2, epoch=0), valid_row(mode, epochs=2, epoch=1)))
+            manifest = None
+            self.write_run(directory, rows, manifest)
+            root = Path(directory)
+            manifest_data = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+            manifest_data["workloads"][0]["epochs"] = 2
+            (root / "manifest.json").write_text(json.dumps(manifest_data), encoding="utf-8")
+            self.assertEqual([], validate_run_dir(root))
+
+            rows[-1]["epoch"] = 0
+            self.write_run(root, rows, manifest_data)
+            errors = validate_run_dir(root)
+            self.assertIn(
+                "manifest workload 0 mode negative-stale epoch IDs must be unique and contiguous 0..1",
+                errors,
+            )
+
+    def test_rejects_malformed_epoch_id_without_crashing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rows = []
+            for mode in MODES_FOR_TEST:
+                rows.extend((valid_row(mode, epochs=2, epoch=0), valid_row(mode, epochs=2, epoch=1)))
+            rows[0]["epoch"] = None
+            self.write_run(directory, rows)
+            root = Path(directory)
+            manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+            manifest["workloads"][0]["epochs"] = 2
+            (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            self.assertIn(
+                "manifest workload 0 mode type2-hwcc epoch IDs must be unique and contiguous 0..1",
+                validate_run_dir(root),
+            )
+
+    def test_rejects_missing_extra_and_altered_summary_rows(self):
+        rows = [valid_row(mode) for mode in MODES_FOR_TEST]
+        for mutation, expected in (
+            ("missing", "summary.csv keys do not match results.jsonl groups"),
+            ("extra", "summary.csv keys do not match results.jsonl groups"),
+            ("altered-median", "summary.csv type2-hwcc end_to_end_ms_median does not match results.jsonl"),
+            ("altered-p25", "summary.csv type2-hwcc end_to_end_ms_p25 does not match results.jsonl"),
+            ("altered-p75", "summary.csv type2-hwcc end_to_end_ms_p75 does not match results.jsonl"),
+        ):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                self.write_run(directory, rows)
+                path = Path(directory) / "summary.csv"
+                with path.open(newline="", encoding="utf-8") as source:
+                    reader = csv.DictReader(source)
+                    fieldnames = reader.fieldnames
+                    records = list(reader)
+                if mutation == "missing":
+                    records.pop()
+                elif mutation == "extra":
+                    extra = dict(records[0])
+                    extra["rows"] = "8192"
+                    records.append(extra)
+                else:
+                    record = next(record for record in records if record["mode"] == "type2-hwcc")
+                    suffix = mutation.removeprefix("altered-")
+                    record[f"end_to_end_ms_{suffix}"] = "1.000001"
+                with path.open("w", newline="", encoding="utf-8") as output:
+                    writer = csv.DictWriter(output, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(records)
+                self.assertIn(expected, validate_run_dir(Path(directory)))
+
+
+MODES_FOR_TEST = ("type2-hwcc", "software-cc", "full-copy", "native-gpu", "negative-stale")
+
+
+class EnrichRowsTests(unittest.TestCase):
+    def setUp(self):
+        self.inventory = valid_row()["gpu_inventory"]
+        self.commits = {"superproject": "a" * 40, "qemu": "b" * 40, "qemu_gitlink": "b" * 40}
+        self.workload = Workload(rows=4096, queries=8, update_ratio=1.0 / 4096.0, warmup=0, epochs=1)
+
+    def test_rejects_missing_raw_device_grant_evidence(self):
+        raw = valid_row()
+        for field in ("lines_requested", "lines_granted", "partial_grants", "grant_evidence"):
+            raw.pop(field)
+        with self.assertRaisesRegex(ValueError, "benchmark grant evidence is missing"):
+            enrich_rows([raw], self.inventory, self.commits, {}, self.workload)
+
+    def test_preserves_raw_device_grant_evidence(self):
+        raw = valid_row(lines_requested=17, lines_granted=16, partial_grants=1)
+        enriched = enrich_rows([raw], self.inventory, self.commits, {}, self.workload)
+        self.assertEqual(
+            (17, 16, 1, "device-returned-exact-grant"),
+            tuple(
+                enriched[0][field]
+                for field in ("lines_requested", "lines_granted", "partial_grants", "grant_evidence")
+            ),
+        )
 
 
 class DryRunTests(unittest.TestCase):
@@ -321,9 +468,9 @@ class EvidenceParserTests(unittest.TestCase):
 """
 
     QEMU_LOG = """
-CXL Type2: Coherent pool initialized: base=0x10000000 size=256 MB (trapping overlay at priority 2)
-CXL Type2: Coherent pool GPU mapping: host=0x7f0000000000 device=0x7f1000000000 size=268435456
-CXL Type2: protocol-v2 host endpoint 0 session 0x11, device endpoint 1 session 0x22 (write-back)
+CXL Type2: Coherent pool initialized: base=0x10000000 size=512 MB (trapping overlay at priority 2)
+CXL Type2: Coherent pool GPU mapping: host=0x7f0000000000 device=0x7f1000000000 size=536870912
+CXL Type2: protocol-v2 host endpoint 0 session 0x11, device endpoint 1 session 0x22, policy=write-back
 """
 
     def test_parses_final_server_counters(self):
@@ -340,7 +487,7 @@ CXL Type2: protocol-v2 host endpoint 0 session 0x11, device endpoint 1 session 0
         evidence = parse_qemu_evidence(self.QEMU_LOG, 128 * 1024 * 1024)
         self.assertEqual(0, evidence["host_endpoint"])
         self.assertEqual(1, evidence["device_endpoint"])
-        self.assertEqual(268435456, evidence["backing"]["size_bytes"])
+        self.assertEqual(536870912, evidence["backing"]["size_bytes"])
         self.assertEqual("0x7f0000000000", evidence["backing"]["host_identity"])
 
     def test_qemu_parser_rejects_partial_or_failed_path(self):
@@ -350,6 +497,23 @@ CXL Type2: protocol-v2 host endpoint 0 session 0x11, device endpoint 1 session 0
     def test_qemu_parser_rejects_ambiguous_backing(self):
         with self.assertRaisesRegex(ValueError, "identity is missing or ambiguous"):
             parse_qemu_evidence(self.QEMU_LOG + self.QEMU_LOG, 4096)
+
+    def test_qemu_parser_rejects_old_policy_format_wrong_policy_and_fallbacks(self):
+        old = self.QEMU_LOG.replace(", policy=write-back", " (write-back)")
+        mixed = self.QEMU_LOG + old.splitlines()[-1] + "\n"
+        wrong = self.QEMU_LOG.replace("policy=write-back", "policy=write-through")
+        fallback = self.QEMU_LOG + "CXL hetGPU: falling back to simulation backend\n"
+        simulation = self.QEMU_LOG + "CXL Type2: simulation mode selected\n"
+        with self.assertRaisesRegex(ValueError, "legacy protocol-v2 evidence"):
+            parse_qemu_evidence(old, 4096)
+        with self.assertRaisesRegex(ValueError, "legacy protocol-v2 evidence"):
+            parse_qemu_evidence(mixed, 4096)
+        with self.assertRaisesRegex(ValueError, "policy is not write-back"):
+            parse_qemu_evidence(wrong, 4096)
+        with self.assertRaisesRegex(ValueError, "coherence/GPU errors"):
+            parse_qemu_evidence(fallback, 4096)
+        with self.assertRaisesRegex(ValueError, "coherence/GPU errors"):
+            parse_qemu_evidence(simulation, 4096)
 
     def test_benchmark_parser_rejects_non_json_stdout(self):
         with self.assertRaisesRegex(ValueError, "line 2 is not JSON"):

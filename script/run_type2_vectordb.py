@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import re
 import shlex
@@ -37,6 +38,26 @@ SETUP_SCRIPT = REPO_ROOT / "qemu_integration" / "setup_cxl_numa.sh"
 SCHEMA = "splash.vectordb.v1"
 MODES = ("type2-hwcc", "software-cc", "full-copy", "native-gpu", "negative-stale")
 GUEST_MODES = frozenset(("type2-hwcc", "software-cc", "full-copy"))
+WORKLOAD_KEY_FIELDS = ("rows", "dim", "queries", "topk", "update_ratio", "warmup", "seed")
+SUMMARY_KEY_FIELDS = ("mode", "rows", "dim", "queries", "topk", "update_ratio")
+SUMMARY_METRICS = (
+    "end_to_end_ms",
+    "update_ms",
+    "synchronization_ms",
+    "kernel_ms",
+    "qps",
+    "p50_query_ms",
+    "p99_query_ms",
+    "copied_bytes",
+    "dirty_lines",
+)
+SUMMARY_FIELDNAMES = (
+    *SUMMARY_KEY_FIELDS,
+    "epochs",
+    *(f"{metric}_{suffix}" for metric in SUMMARY_METRICS for suffix in ("median", "p25", "p75")),
+)
+SUMMARY_REL_TOLERANCE = 1e-12
+SUMMARY_ABS_TOLERANCE = 1e-9
 AUDIT_LABELS = {
     "GETS": "gets",
     "GETM": "getm",
@@ -147,8 +168,8 @@ def validate_row(row: Any) -> list[str]:
             errors.append("type2-hwcc requires full range grants")
         if not _nonnegative_integer(row.get("partial_grants")) or row.get("partial_grants") != 0:
             errors.append("type2-hwcc observed partial range grants")
-        if row.get("grant_evidence") != "benchmark-exact-grant-check":
-            errors.append("type2-hwcc requires exact grant-check evidence")
+        if row.get("grant_evidence") != "device-returned-exact-grant":
+            errors.append("type2-hwcc requires device-returned exact grant evidence")
         for field, message in (
             ("timeout_events", "type2-hwcc observed timeout audit events"),
             ("partial_ack_events", "type2-hwcc observed partial ACK audit events"),
@@ -246,6 +267,124 @@ def _load_jsonl(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
     return rows, errors
 
 
+def _workload_key(value: dict[str, Any]) -> tuple[Any, ...]:
+    return tuple(value.get(field) for field in WORKLOAD_KEY_FIELDS)
+
+
+def _validate_manifest_results(manifest: dict[str, Any], rows: list[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    workloads = manifest.get("workloads")
+    if not isinstance(workloads, list) or not workloads:
+        return ["manifest workloads must be a nonempty list"]
+
+    expected: dict[tuple[Any, ...], tuple[int, int]] = {}
+    for index, workload in enumerate(workloads):
+        if not isinstance(workload, dict) or any(field not in workload for field in WORKLOAD_KEY_FIELDS):
+            errors.append(f"manifest workload {index} is malformed")
+            continue
+        epochs = workload.get("epochs")
+        if not _integer(epochs) or epochs <= 0:
+            errors.append(f"manifest workload {index} epochs must be a positive integer")
+            continue
+        key = _workload_key(workload)
+        if key in expected:
+            errors.append(f"manifest workload {index} duplicates an earlier workload key")
+            continue
+        expected[key] = (index, epochs)
+
+    result_groups: dict[tuple[tuple[Any, ...], Any], list[dict[str, Any]]] = {}
+    extra_rows = False
+    for row in rows:
+        key = _workload_key(row)
+        mode = row.get("mode")
+        if key not in expected or mode not in MODES:
+            extra_rows = True
+            continue
+        result_groups.setdefault((key, mode), []).append(row)
+    if extra_rows:
+        errors.append("results contain rows outside manifest workloads")
+
+    for key, (index, epochs) in expected.items():
+        for mode in MODES:
+            group = result_groups.get((key, mode), [])
+            if len(group) != epochs:
+                errors.append(f"manifest workload {index} mode {mode} has {len(group)} rows; expected {epochs}")
+            epoch_ids = [row.get("epoch") for row in group]
+            if not all(_nonnegative_integer(epoch_id) for epoch_id in epoch_ids) or sorted(epoch_ids) != list(
+                range(epochs)
+            ):
+                errors.append(
+                    f"manifest workload {index} mode {mode} epoch IDs must be unique and contiguous 0..{epochs - 1}"
+                )
+            if any(row.get("epochs") != epochs for row in group):
+                errors.append(f"manifest workload {index} mode {mode} row epochs must match manifest")
+    return errors
+
+
+def _validate_summary(path: Path, rows: list[dict[str, Any]]) -> list[str]:
+    try:
+        with path.open(newline="", encoding="utf-8") as source:
+            reader = csv.DictReader(source)
+            fieldnames = reader.fieldnames
+            records = list(reader)
+    except (OSError, csv.Error):
+        return ["summary.csv is missing or empty"]
+    if not fieldnames or not records:
+        return ["summary.csv is missing or empty"]
+    if tuple(fieldnames) != SUMMARY_FIELDNAMES:
+        return ["summary.csv columns do not match the summary contract"]
+
+    try:
+        expected_records = _summary_records(rows)
+    except (KeyError, TypeError, ValueError):
+        return ["results.jsonl lacks numeric fields required to recompute summary.csv"]
+
+    def record_key(record: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            record["mode"],
+            int(record["rows"]),
+            int(record["dim"]),
+            int(record["queries"]),
+            int(record["topk"]),
+            float(record["update_ratio"]),
+        )
+
+    try:
+        actual_by_key = {record_key(record): record for record in records}
+        expected_by_key = {record_key(record): record for record in expected_records}
+    except (KeyError, TypeError, ValueError):
+        return ["summary.csv contains malformed keys or values"]
+    if len(actual_by_key) != len(records) or set(actual_by_key) != set(expected_by_key):
+        return ["summary.csv keys do not match results.jsonl groups"]
+
+    errors: list[str] = []
+    for key, expected in expected_by_key.items():
+        actual = actual_by_key[key]
+        mode = str(expected["mode"])
+        try:
+            if int(actual["epochs"]) != int(expected["epochs"]):
+                errors.append(f"summary.csv {mode} epochs does not match results.jsonl")
+            for metric in SUMMARY_METRICS:
+                for suffix in ("median", "p25", "p75"):
+                    field = f"{metric}_{suffix}"
+                    actual_value = float(actual[field])
+                    expected_value = float(expected[field])
+                    if (
+                        not math.isfinite(actual_value)
+                        or not math.isfinite(expected_value)
+                        or not math.isclose(
+                            actual_value,
+                            expected_value,
+                            rel_tol=SUMMARY_REL_TOLERANCE,
+                            abs_tol=SUMMARY_ABS_TOLERANCE,
+                        )
+                    ):
+                        errors.append(f"summary.csv {mode} {field} does not match results.jsonl")
+        except (KeyError, TypeError, ValueError, OverflowError):
+            errors.append(f"summary.csv {mode} contains malformed aggregate values")
+    return errors
+
+
 def validate_run_dir(run_dir: Path | str) -> list[str]:
     root = Path(run_dir)
     rows, errors = _load_jsonl(root / "results.jsonl")
@@ -261,6 +400,9 @@ def validate_run_dir(run_dir: Path | str) -> list[str]:
     except (OSError, json.JSONDecodeError):
         errors.append("manifest.json is missing or malformed")
     else:
+        if not isinstance(manifest, dict):
+            errors.append("manifest.json must contain an object")
+            manifest = {}
         if manifest.get("status") != "pass":
             errors.append("manifest status must be pass")
         if manifest.get("budget_seconds") != 28800:
@@ -280,6 +422,7 @@ def validate_run_dir(run_dir: Path | str) -> list[str]:
             errors.append("manifest commits must match validated result rows")
         if manifest.get("gpu_inventory") != rows[0].get("gpu_inventory"):
             errors.append("manifest GPU inventory must match validated result rows")
+        errors.extend(_validate_manifest_results(manifest, rows))
         evidence_paths = manifest.get("evidence_paths")
         if not isinstance(evidence_paths, list) or not evidence_paths:
             errors.append("manifest evidence_paths must be nonempty")
@@ -287,13 +430,7 @@ def validate_run_dir(run_dir: Path | str) -> list[str]:
             for relative_path in evidence_paths:
                 if not isinstance(relative_path, str) or not relative_path or not (root / relative_path).exists():
                     errors.append(f"manifest evidence path is missing: {relative_path}")
-    summary_path = root / "summary.csv"
-    try:
-        summary_text = summary_path.read_text(encoding="utf-8")
-    except OSError:
-        summary_text = ""
-    if not summary_text.strip():
-        errors.append("summary.csv is missing or empty")
+    errors.extend(_validate_summary(root / "summary.csv", rows))
     return errors
 
 
@@ -313,10 +450,17 @@ def parse_server_evidence(text: str) -> dict[str, int]:
 
 
 def parse_qemu_evidence(text: str, matrix_bytes: int) -> dict[str, Any]:
-    protocol = re.search(
-        r"protocol-v2 host endpoint (\d+) session 0x[0-9a-f]+, device endpoint (\d+) session 0x[0-9a-f]+ \(([^)]+)\)",
+    legacy_protocol = re.search(
+        r"protocol-v2 host endpoint \d+ session 0x[0-9a-f]+, device endpoint \d+ session 0x[0-9a-f]+\s*"
+        r"\([^)]+\)\s*$",
         text,
-        re.IGNORECASE,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    protocol = re.search(
+        r"protocol-v2 host endpoint (\d+) session 0x[0-9a-f]+, device endpoint (\d+) session 0x[0-9a-f]+,\s*"
+        r"policy=([a-z-]+)\s*$",
+        text,
+        re.IGNORECASE | re.MULTILINE,
     )
     pool = re.findall(r"Coherent pool initialized: base=(0x[0-9a-f]+) size=(\d+) MB", text, re.IGNORECASE)
     mapping = re.findall(
@@ -325,8 +469,15 @@ def parse_qemu_evidence(text: str, matrix_bytes: int) -> dict[str, Any]:
     failures = [
         line.strip()
         for line in text.splitlines()
-        if re.search(r"CXL (?:Type2|hetGPU):.*(?:FAILED|failed|ERROR|partial)", line, re.IGNORECASE)
+        if re.search(
+            r"CXL (?:Type2|hetGPU):.*(?:fail(?:ed|ure)?|error|partial|fallback|fall(?:ing)? back|simulat|"
+            r"gpu-mode=1|backend=5)",
+            line,
+            re.IGNORECASE,
+        )
     ]
+    if legacy_protocol:
+        raise ValueError("QEMU legacy protocol-v2 evidence is not accepted")
     if failures:
         raise ValueError("QEMU reported coherence/GPU errors: " + failures[0])
     if not protocol:
@@ -636,6 +787,12 @@ def enrich_rows(
     enriched = []
     for raw in raw_rows:
         row = dict(raw)
+        grant_fields = ("lines_requested", "lines_granted", "partial_grants", "grant_evidence")
+        grant_evidence = None
+        if row.get("mode") == "type2-hwcc":
+            if any(field not in raw for field in grant_fields):
+                raise ValueError("benchmark grant evidence is missing")
+            grant_evidence = {field: raw[field] for field in grant_fields}
         row.update(
             {
                 "gpu_uuid": gpu["uuid"],
@@ -648,14 +805,8 @@ def enrich_rows(
             }
         )
         row.update(evidence)
-        if row.get("mode") == "type2-hwcc":
-            line_count = workload.matrix_bytes // 64
-            row.update(
-                lines_requested=line_count,
-                lines_granted=line_count,
-                partial_grants=0,
-                grant_evidence="benchmark-exact-grant-check",
-            )
+        if grant_evidence is not None:
+            row.update(grant_evidence)
         enriched.append(row)
     return enriched
 
@@ -860,35 +1011,28 @@ def percentile(values: Sequence[float], fraction: float) -> float:
     return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
 
 
-def write_summary(rows: list[dict[str, Any]], path: Path) -> None:
+def _summary_records(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
     for row in rows:
-        key = (row["mode"], row["rows"], row["dim"], row["queries"], row["topk"], row["update_ratio"])
+        key = tuple(row[field] for field in SUMMARY_KEY_FIELDS)
         groups.setdefault(key, []).append(row)
-    metrics = (
-        "end_to_end_ms",
-        "update_ms",
-        "synchronization_ms",
-        "kernel_ms",
-        "qps",
-        "p50_query_ms",
-        "p99_query_ms",
-        "copied_bytes",
-        "dirty_lines",
-    )
     records = []
     for key, group in sorted(groups.items()):
-        record = dict(zip(("mode", "rows", "dim", "queries", "topk", "update_ratio"), key))
+        record = dict(zip(SUMMARY_KEY_FIELDS, key))
         record["epochs"] = len(group)
-        for metric in metrics:
+        for metric in SUMMARY_METRICS:
             values = [float(row[metric]) for row in group]
             record[f"{metric}_median"] = statistics.median(values)
             record[f"{metric}_p25"] = percentile(values, 0.25)
             record[f"{metric}_p75"] = percentile(values, 0.75)
         records.append(record)
-    fieldnames = list(records[0]) if records else []
+    return records
+
+
+def write_summary(rows: list[dict[str, Any]], path: Path) -> None:
+    records = _summary_records(rows)
     with path.open("w", encoding="utf-8", newline="") as output:
-        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer = csv.DictWriter(output, fieldnames=SUMMARY_FIELDNAMES)
         writer.writeheader()
         writer.writerows(records)
 
