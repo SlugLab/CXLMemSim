@@ -235,6 +235,13 @@ add_executable(test_vectordb_dirty_ranges tests/test_vectordb_dirty_ranges.cpp s
 target_include_directories(test_vectordb_dirty_ranges PRIVATE include)
 add_test(NAME test_vectordb_dirty_ranges COMMAND test_vectordb_dirty_ranges)
 
+add_executable(test_vectordb_shared_index_contract tests/test_vectordb_shared_index_contract.c)
+target_compile_definitions(test_vectordb_shared_index_contract
+                           PRIVATE VECTORDB_SOURCE_PATH="${CMAKE_SOURCE_DIR}/qemu_integration/guest_libcuda/vectordb_shared_index.c"
+                                   VECTORDB_KERNEL_SOURCE_PATH="${CMAKE_SOURCE_DIR}/qemu_integration/guest_libcuda/vectordb_shared_index_kernel.cu")
+target_compile_options(test_vectordb_shared_index_contract PRIVATE -std=gnu11)
+add_test(NAME test_vectordb_shared_index_contract COMMAND test_vectordb_shared_index_contract)
+
 add_executable(test_type2_device_litmus_contract tests/test_type2_device_litmus_contract.c)
 target_compile_options(test_type2_device_litmus_contract PRIVATE -std=gnu11)
 add_test(NAME test_type2_device_litmus_contract COMMAND test_type2_device_litmus_contract)
