@@ -411,6 +411,90 @@ Status CoherenceEndpointCache::load(std::uint64_t address, std::span<std::byte> 
     return install.installed ? Status::Ok : Status::IoError;
 }
 
+Status CoherenceEndpointCache::acquireLine(std::uint64_t line_address, RangeIntent intent) {
+    if ((line_address & kLineMask) != 0)
+        return Status::InvalidState;
+
+    auto operation = impl_->beginOperation(line_address);
+    if (!operation)
+        return Status::HostFenced;
+
+    Impl::CacheLine cached;
+    bool found_line = false;
+    {
+        std::lock_guard lock(impl_->mutex);
+        const auto found = impl_->lines.find(line_address);
+        if (found != impl_->lines.end() && !impl_->hasCompletion(line_address)) {
+            ++impl_->counters.hits;
+            impl_->touch(found->second);
+            if (intent == RangeIntent::Read || found->second.state == LineState::M)
+                return Status::Ok;
+            cached = found->second;
+            found_line = true;
+        } else {
+            ++impl_->counters.misses;
+        }
+    }
+
+    if (found_line) {
+        {
+            std::lock_guard lock(impl_->mutex);
+            ++impl_->counters.upgrades;
+        }
+        Impl::GrantInstallContext install{impl_.get(), line_address, 0, {}, {}, cached.data, true};
+        const auto result = impl_->engine.upgrade(
+            line_address, impl_->request(cached.state, cached.epoch, &install, &Impl::installGrant));
+        if (const auto status = grantedStatus(result); status != Status::Ok)
+            return status;
+        return install.installed ? Status::Ok : Status::IoError;
+    }
+
+    if (const auto status = ensureCapacity(line_address); status != Status::Ok)
+        return status;
+
+    Impl::GrantInstallContext install{impl_.get(), line_address};
+    TransactionResult result;
+    if (intent == RangeIntent::Read) {
+        {
+            std::lock_guard lock(impl_->mutex);
+            ++impl_->counters.gets;
+        }
+        result = impl_->engine.gets(line_address, impl_->request(LineState::I, 0, &install, &Impl::installGrant));
+    } else {
+        {
+            std::lock_guard lock(impl_->mutex);
+            ++impl_->counters.getm;
+        }
+        result = impl_->engine.getm(line_address, impl_->request(LineState::I, 0, &install, &Impl::installGrant));
+    }
+    if (const auto status = grantedStatus(result); status != Status::Ok)
+        return status;
+    return install.installed ? Status::Ok : Status::IoError;
+}
+
+RangeAcquireResult CoherenceEndpointCache::acquireRange(std::uint64_t address, std::size_t size, RangeIntent intent) {
+    if (size == 0)
+        return {.status = Status::Ok, .complete = true};
+    if (size - 1 > std::numeric_limits<std::uint64_t>::max() - address)
+        return {};
+
+    const auto first_line = lineAddress(address);
+    const auto last_line = lineAddress(address + size - 1);
+    const auto line_count = static_cast<std::size_t>((last_line - first_line) / protocol_v2::kLineSize + 1);
+    RangeAcquireResult result{.status = Status::Ok, .lines_requested = line_count};
+
+    for (std::size_t index = 0; index < line_count; ++index) {
+        const auto status = acquireLine(first_line + index * protocol_v2::kLineSize, intent);
+        if (status != Status::Ok) {
+            result.status = status;
+            return result;
+        }
+        ++result.lines_granted;
+    }
+    result.complete = true;
+    return result;
+}
+
 Status CoherenceEndpointCache::writeThrough(std::uint64_t line_address) {
     Impl::CacheLine line;
     {

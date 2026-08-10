@@ -11,6 +11,14 @@
 namespace cxlmemsim {
 
 enum class EndpointWritePolicy : std::uint8_t { WriteBack, WriteThrough };
+enum class RangeIntent : std::uint8_t { Read, Write };
+
+struct RangeAcquireResult {
+    protocol_v2::Status status{protocol_v2::Status::InvalidState};
+    std::size_t lines_requested{};
+    std::size_t lines_granted{};
+    bool complete{};
+};
 
 struct CoherenceEndpointConfig {
     std::uint16_t endpoint_id{};
@@ -86,6 +94,7 @@ public:
 
     protocol_v2::Status load(std::uint64_t address, std::span<std::byte> destination);
     protocol_v2::Status store(std::uint64_t address, std::span<const std::byte> source);
+    RangeAcquireResult acquireRange(std::uint64_t address, std::size_t size, RangeIntent intent);
     mesi_v2::TransactionResult fetchAdd(std::uint64_t address, std::uint64_t value);
     mesi_v2::TransactionResult compareExchange(std::uint64_t address, std::uint64_t expected, std::uint64_t desired);
 
@@ -105,6 +114,7 @@ private:
     bool commitPreparedSnoop(std::uint64_t line_address, std::uint64_t token,
                              const protocol_v2::CoherenceFrame &ack) noexcept;
     void cancelPreparedSnoop(std::uint64_t line_address, std::uint64_t token) noexcept;
+    protocol_v2::Status acquireLine(std::uint64_t line_address, RangeIntent intent);
     protocol_v2::Status ensureCapacity(std::uint64_t incoming_line);
     protocol_v2::Status writeThrough(std::uint64_t line_address);
 
