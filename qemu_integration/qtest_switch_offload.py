@@ -41,6 +41,22 @@ CXL_GPU_CMD_SWITCH_REDUCE_ADD64 = 0xE2
 CXL_GPU_CMD_SWITCH_DOT_I32 = 0xE3
 CXL_GPU_CMD_SWITCH_MATMUL_I32 = 0xE4
 CXL_GPU_CMD_SWITCH_GET_STATS = 0xE5
+CXL_GPU_CMD_SWITCH_HWJIT = 0xE6
+CXL_GPU_CMD_SWITCH_HWJIT_STATS = 0xE7
+
+DAMER_HWJIT_QUANTIZE = 1 << 0
+DAMER_HWJIT_COMPRESS = 1 << 1
+DAMER_HWJIT_CHECKSUM = 1 << 2
+DAMER_HWJIT_FILTER = 1 << 3
+DAMER_HWJIT_REDUCE = 1 << 4
+DAMER_HWJIT_SCATTER_GATHER = 1 << 5
+DAMER_HWJIT_REPLICATE = 1 << 6
+DAMER_HWJIT_PERSIST = 1 << 7
+DAMER_QWEN27B_KV_PACK = 1
+DAMER_QWEN27B_PREFILL_ACTIVATION_SPILL = 2
+DAMER_QWEN27B_DECODE_KV_FETCH = 3
+DAMER_QWEN27B_ATTENTION_MASK_FILTER = 4
+DAMER_QWEN27B_TP_LOGITS_REDUCE = 5
 
 TYPE2_VENDOR_ID = 0x8086
 TYPE2_DEVICE_ID = 0x0D92
@@ -112,6 +128,18 @@ class MemSimClient:
             "general_cores": values[6],
             "ai_cores": values[7],
         }
+
+
+def pack_hwjit_control(ttl: int = 4, max_ops: int = 1, flags: int = 0) -> int:
+    return (flags << 32) | ((max_ops & 0xFFFF) << 16) | (ttl & 0xFFFF)
+
+
+def hwjit_quantize(payload: bytes) -> bytes:
+    out = bytearray()
+    for idx in range(0, len(payload), 2):
+        hi = payload[idx + 1] if idx + 1 < len(payload) else 0
+        out.append((payload[idx] + hi) // 2)
+    return bytes(out)
 
 
 class QTest:
@@ -311,8 +339,13 @@ def main() -> int:
         "--switch-ai-cores=1",
         "--switch-general-latency=40",
         "--switch-ai-latency=30",
+        "--switch-hwjit-lanes=1",
+        "--switch-hwjit-latency=8",
+        "--switch-hwjit-state-latency=4",
         "--switch-general-bandwidth=64",
         "--switch-ai-ops-per-ns=128",
+        "--switch-hwjit-bandwidth=256",
+        "--switch-hwjit-ops-per-ns=512",
         "--verbose=1",
     ], stdout=server_log, stderr=subprocess.STDOUT)
 
@@ -330,12 +363,17 @@ def main() -> int:
         copy_dst = 192
         memset_dst = 224
         matmul_dst = 256
+        hwjit_src = 320
+        hwjit_dst = 384
 
         client.write64(reduce_addr, struct.pack("<4Q", 1, 2, 3, 4))
         client.write64(a_addr, struct.pack("<4i", 1, 2, 3, 4))
         client.write64(b_addr, struct.pack("<4i", 5, 6, 7, 8))
         client.write64(copy_dst, b"\0" * 64)
         client.write64(matmul_dst, b"\0" * 64)
+        hwjit_payload = bytes(range(64))
+        client.write64(hwjit_src, hwjit_payload)
+        client.write64(hwjit_dst, b"\0" * 64)
 
         before = client.stats()
         expect("switch_enabled", before["enabled"], 1)
@@ -392,6 +430,27 @@ def main() -> int:
                [19, 22, 43, 50])
         print(f"LATENCY qemu_matmul_ns={latency}")
 
+        result, latency = qemu_gpu_cmd(
+            qt,
+            bar2,
+            CXL_GPU_CMD_SWITCH_HWJIT,
+            [
+                hwjit_src,
+                hwjit_dst,
+                len(hwjit_payload),
+                DAMER_QWEN27B_KV_PACK,
+                DAMER_HWJIT_QUANTIZE,
+                len(hwjit_payload) // 64,
+                pack_hwjit_control(),
+                0,
+            ],
+        )
+        expected_hwjit = hwjit_quantize(hwjit_payload)
+        expect("qemu_hwjit_kv_pack_bytes", result, len(expected_hwjit))
+        expect("qemu_hwjit_kv_pack_payload", client.read(hwjit_dst, len(expected_hwjit)),
+               expected_hwjit)
+        print(f"LATENCY qemu_hwjit_kv_pack_ns={latency}")
+
         qemu_gpu_cmd(qt, bar2, CXL_GPU_CMD_SWITCH_GET_STATS, [])
         stats_words = [qt.readq(bar2 + CXL_GPU_DATA_OFFSET + i * 8) for i in range(8)]
         after = {
@@ -408,10 +467,16 @@ def main() -> int:
         expect("qemu_stats_ai_ops_delta", after["ai_ops"] - before["ai_ops"], 2)
         expect("qemu_stats_general_bytes_delta", after["general_bytes"] - before["general_bytes"], 64)
         expect("qemu_stats_ai_bytes_delta", after["ai_bytes"] - before["ai_bytes"], 80)
+        qemu_gpu_cmd(qt, bar2, CXL_GPU_CMD_SWITCH_HWJIT_STATS, [])
+        hwjit_words = [qt.readq(bar2 + CXL_GPU_DATA_OFFSET + i * 8) for i in range(8)]
+        expect("qemu_stats_hwjit_ops", hwjit_words[0], 1)
+        expect("qemu_stats_hwjit_commands", hwjit_words[1], 1)
+        expect("qemu_stats_hwjit_bytes", hwjit_words[2], len(hwjit_payload))
         print(
             "STATS "
             f"qemu_queued_ns_delta={after['queued_ns'] - before['queued_ns']} "
-            f"qemu_service_ns_delta={after['service_ns'] - before['service_ns']}"
+            f"qemu_service_ns_delta={after['service_ns'] - before['service_ns']} "
+            f"qemu_hwjit_service_ns={hwjit_words[5]}"
         )
         print(f"LOG server={server_log_path}")
         print(f"LOG qemu={qemu_log_path}")

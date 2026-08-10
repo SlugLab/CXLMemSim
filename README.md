@@ -122,9 +122,25 @@ The server adds switch-core latency and queueing while still using the same
 cacheline metadata and coherency transitions as normal CXL.mem reads and writes.
 General cores currently handle switch-side `memcpy`, `memset`, and `uint64`
 reduction. AI cores handle `int32` dot product and small `int32` matrix
-multiplication. QEMU Type 2 exposes these through BAR2 commands
-`CXL_GPU_CMD_SWITCH_*` when Type 2 is connected to the server over the TCP
-MemSim transport; direct TCP clients can use server opcodes 19-24.
+multiplication. The switch runtime also has a `hardware_jit` core class for
+Damer-generated data-movement switchlets. The hardware-JIT path models a small
+switch-local control engine that keeps policy state next to the CXL fabric,
+emits bounded dataflow commands, and runs the transformed operation without
+round-tripping bytes through the host.
+
+The current embedded Qwen27B policy bundle is split into:
+
+```text
+include/damer_hwjit_policy.h                     Behavioral policy metadata
+fpga/damer_cxl_switch_hwjit_qwen27b_policy.sv    Generated switch Verilog policy
+```
+
+The Qwen27B switchlets cover move-only, KV quantization, prefill compression,
+decode KV checksum/prefetch, attention-mask filtering, tensor-parallel logits
+reduction, shard scatter/gather, KV replica refresh, and checkpoint persist.
+QEMU Type 2 exposes these through BAR2 commands `CXL_GPU_CMD_SWITCH_*` when
+Type 2 is connected to the server over the TCP MemSim transport; direct TCP
+clients can use server opcodes 19-26.
 
 The memory pool is managed by `SharedMemoryManager`. It can use POSIX shared memory or a regular file as a backing store. The shared-memory header records a magic value, format version, total size, data offset, base address, and cache-line count. The default cache-line data area is mapped with `mmap()` and is reused when the backing object already exists.
 

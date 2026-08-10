@@ -22,6 +22,12 @@ STAT_KEYS = (
     "ai_ops",
     "general_bytes",
     "ai_bytes",
+    "hw_jit_ops",
+    "hw_jit_commands",
+    "hw_jit_bytes",
+    "hw_jit_output_bytes",
+    "hw_jit_work_items",
+    "hw_jit_service_ns",
     "queued_ns",
     "service_ns",
 )
@@ -68,6 +74,26 @@ class BenchmarkContext:
             chunks.append(self.client.read(addr + offset, chunk_size))
         return b"".join(chunks)
 
+    def read_bytes_with_latency(self, addr: int, size: int) -> tuple[bytes, int]:
+        chunks = []
+        latency_ns = 0
+        for offset in range(0, size, 64):
+            chunk_size = min(64, size - offset)
+            latency, _, data = self.client.request(qtest.OP_READ, addr=addr + offset,
+                                                   size=chunk_size)
+            chunks.append(data[:chunk_size])
+            latency_ns += latency
+        return b"".join(chunks), latency_ns
+
+    def write_bytes_with_latency(self, addr: int, payload: bytes) -> int:
+        latency_ns = 0
+        for offset in range(0, len(payload), 64):
+            chunk = payload[offset:offset + 64]
+            latency, _, _ = self.client.request(qtest.OP_WRITE, addr=addr + offset,
+                                                size=len(chunk), data=chunk)
+            latency_ns += latency
+        return latency_ns
+
     def offload(self, label: str, cmd: int, params: list[int]) -> tuple[int, int]:
         result, latency_ns = qtest.qemu_gpu_cmd(self.qt, self.bar2, cmd, params)
         self.commands.append({
@@ -106,6 +132,97 @@ def deterministic_bytes(size: int, seed: int) -> bytes:
     return bytes(((idx * 17 + seed) & 0xFF) for idx in range(size))
 
 
+def ceil_div(value: int, divisor: int) -> int:
+    return (value + divisor - 1) // divisor
+
+
+def checksum64(payload: bytes) -> int:
+    acc = 0xCBF29CE484222325
+    for byte in payload:
+        acc ^= byte
+        acc = (acc * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return acc
+
+
+def hwjit_transform_payload(payload: bytes, transform_mask: int) -> tuple[bytes, int]:
+    current = payload
+    scalar = len(current)
+
+    if transform_mask & qtest.DAMER_HWJIT_QUANTIZE:
+        current = bytes(
+            (current[idx] + (current[idx + 1] if idx + 1 < len(current) else 0)) // 2
+            for idx in range(0, len(current), 2)
+        )
+
+    if transform_mask & qtest.DAMER_HWJIT_COMPRESS:
+        current = current[::2]
+
+    if transform_mask & qtest.DAMER_HWJIT_FILTER:
+        filtered = bytes(byte for byte in current if (byte & 1) == 0)
+        current = filtered or current[:1]
+
+    if transform_mask & qtest.DAMER_HWJIT_SCATTER_GATHER:
+        chunks = []
+        for offset in range(0, len(current), 64):
+            chunks.append(current[offset:offset + 64][::-1])
+        current = b"".join(chunks)
+
+    if transform_mask & qtest.DAMER_HWJIT_REPLICATE:
+        current = bytes(
+            current[idx ^ 1] if (idx ^ 1) < len(current) else current[idx]
+            for idx in range(len(current))
+        )
+
+    if transform_mask & qtest.DAMER_HWJIT_REDUCE:
+        total = 0
+        for offset in range(0, len(current), 8):
+            total = (total + int.from_bytes(current[offset:offset + 8].ljust(8, b"\0"), "little")) & 0xFFFFFFFFFFFFFFFF
+        current = total.to_bytes(8, "little")
+        scalar = total
+    elif transform_mask & qtest.DAMER_HWJIT_CHECKSUM:
+        scalar = checksum64(current)
+    else:
+        scalar = len(current)
+
+    return current, scalar
+
+
+def run_host_transform_baseline(ctx: BenchmarkContext, src: int, dst: int, size: int,
+                                transform_mask: int) -> dict[str, object]:
+    payload, read_latency_ns = ctx.read_bytes_with_latency(src, size)
+    output, scalar = hwjit_transform_payload(payload, transform_mask)
+    write_latency_ns = ctx.write_bytes_with_latency(dst, output)
+    cpu_latency_ns = ceil_div(max(size, len(output)), 32)
+    return {
+        "output": output,
+        "scalar": scalar,
+        "latency_ns": read_latency_ns + write_latency_ns + cpu_latency_ns,
+        "read_latency_ns": read_latency_ns,
+        "write_latency_ns": write_latency_ns,
+        "cpu_latency_ns": cpu_latency_ns,
+    }
+
+
+def run_hwjit_switchlet(ctx: BenchmarkContext, label: str, src: int, dst: int,
+                        size: int, switchlet_id: int, transform_mask: int,
+                        tile_count: int | None = None) -> tuple[int, int]:
+    tiles = tile_count if tile_count is not None else max(1, ceil_div(size, 64))
+    return ctx.offload(
+        label,
+        qtest.CXL_GPU_CMD_SWITCH_HWJIT,
+        [
+            src,
+            dst,
+            size,
+            switchlet_id,
+            transform_mask,
+            tiles,
+            qtest.pack_hwjit_control(),
+            0,
+        ],
+    )
+
+
 def matmul_expected(a: list[int], b: list[int], m: int, n: int, k: int) -> list[int]:
     out = []
     for row in range(m):
@@ -124,7 +241,7 @@ def stats_from_bar(ctx: BenchmarkContext) -> dict[str, int]:
         ctx.qt.readq(ctx.bar2 + qtest.CXL_GPU_DATA_OFFSET + idx * 8)
         for idx in range(8)
     ]
-    return {
+    stats = {
         "enabled": enabled,
         "general_ops": words[0],
         "ai_ops": words[1],
@@ -135,6 +252,22 @@ def stats_from_bar(ctx: BenchmarkContext) -> dict[str, int]:
         "general_cores": words[6],
         "ai_cores": words[7],
     }
+    qtest.qemu_gpu_cmd(ctx.qt, ctx.bar2, qtest.CXL_GPU_CMD_SWITCH_HWJIT_STATS, [])
+    hwjit_words = [
+        ctx.qt.readq(ctx.bar2 + qtest.CXL_GPU_DATA_OFFSET + idx * 8)
+        for idx in range(8)
+    ]
+    stats.update({
+        "hw_jit_ops": hwjit_words[0],
+        "hw_jit_commands": hwjit_words[1],
+        "hw_jit_bytes": hwjit_words[2],
+        "hw_jit_output_bytes": hwjit_words[3],
+        "hw_jit_work_items": hwjit_words[4],
+        "hw_jit_service_ns": hwjit_words[5],
+        "hw_jit_lanes": hwjit_words[6],
+        "hw_jit_switchlets": hwjit_words[7],
+    })
+    return stats
 
 
 def run_matmul(ctx: BenchmarkContext, label: str, m: int, n: int, k: int,
@@ -480,6 +613,121 @@ def case_qwen_prefill(ctx: BenchmarkContext) -> dict[str, object]:
     }
 
 
+def case_hwjit_qwen27b_kv_pack(ctx: BenchmarkContext) -> dict[str, object]:
+    size = ctx.profile_int("hwjit_kv_bytes", 1024 if ctx.quick else 8192)
+    if size < 64 or size % 64 != 0:
+        raise RuntimeError("HW-JIT KV pack size must be a positive 64-byte multiple")
+
+    src = ctx.alloc(size)
+    host_dst = ctx.alloc(size)
+    hwjit_dst = ctx.alloc(size)
+    payload = deterministic_bytes(size, 83)
+    ctx.write_bytes(src, payload)
+    ctx.write_bytes(host_dst, b"\0" * size)
+    ctx.write_bytes(hwjit_dst, b"\0" * size)
+
+    baseline = run_host_transform_baseline(
+        ctx, src, host_dst, size, qtest.DAMER_HWJIT_QUANTIZE)
+    result, hwjit_latency_ns = run_hwjit_switchlet(
+        ctx,
+        "hwjit_qwen27b_kv_pack",
+        src,
+        hwjit_dst,
+        size,
+        qtest.DAMER_QWEN27B_KV_PACK,
+        qtest.DAMER_HWJIT_QUANTIZE,
+    )
+    expected = baseline["output"]
+    actual = ctx.read_bytes(hwjit_dst, len(expected))
+    if actual != expected or result != baseline["scalar"]:
+        raise RuntimeError("hwjit_qwen27b_kv_pack: fused output mismatch")
+
+    speedup = baseline["latency_ns"] / hwjit_latency_ns
+    return {
+        "bytes": size + len(expected),
+        "work_items": size // 2,
+        "baseline_latency_ns": baseline["latency_ns"],
+        "hwjit_latency_ns": hwjit_latency_ns,
+        "speedup": speedup,
+        "baseline_method": "host_cxl_read_quantize_write",
+        "hwjit_policy": "qwen27b_kv_pack",
+        "result": (
+            f"out_bytes={len(expected)};baseline_ns={baseline['latency_ns']};"
+            f"hwjit_ns={hwjit_latency_ns};speedup={speedup:.2f}x"
+        ),
+    }
+
+
+def case_hwjit_qwen27b_prefill_attention_ffn_e2e(ctx: BenchmarkContext) -> dict[str, object]:
+    edge_specs = [
+        ("prefill_activation_spill", qtest.DAMER_QWEN27B_PREFILL_ACTIVATION_SPILL,
+         qtest.DAMER_HWJIT_COMPRESS, 1536 if ctx.quick else 12288, 97),
+        ("decode_kv_fetch", qtest.DAMER_QWEN27B_DECODE_KV_FETCH,
+         qtest.DAMER_HWJIT_CHECKSUM, 1024 if ctx.quick else 8192, 113),
+        ("attention_mask_filter", qtest.DAMER_QWEN27B_ATTENTION_MASK_FILTER,
+         qtest.DAMER_HWJIT_FILTER, 1024 if ctx.quick else 8192, 131),
+        ("tp_logits_reduce", qtest.DAMER_QWEN27B_TP_LOGITS_REDUCE,
+         qtest.DAMER_HWJIT_REDUCE, 1024 if ctx.quick else 8192, 149),
+    ]
+
+    baseline_latency_ns = 0
+    hwjit_latency_ns = 0
+    total_bytes = 0
+    total_work = 0
+    scalar_acc = 0
+
+    for name, switchlet_id, transform_mask, size, seed in edge_specs:
+        src = ctx.alloc(size)
+        host_dst = ctx.alloc(size)
+        hwjit_dst = ctx.alloc(size)
+        payload = deterministic_bytes(size, seed)
+        if transform_mask & qtest.DAMER_HWJIT_REDUCE:
+            values = [((idx + seed) % 29) + 1 for idx in range(size // 8)]
+            payload = pack_u64(values)
+            size = len(payload)
+        ctx.write_bytes(src, payload)
+        ctx.write_bytes(host_dst, b"\0" * size)
+        ctx.write_bytes(hwjit_dst, b"\0" * size)
+
+        baseline = run_host_transform_baseline(ctx, src, host_dst, size,
+                                               transform_mask)
+        result, latency_ns = run_hwjit_switchlet(
+            ctx,
+            f"hwjit_qwen27b_{name}",
+            src,
+            hwjit_dst,
+            size,
+            switchlet_id,
+            transform_mask,
+        )
+        expected = baseline["output"]
+        actual = ctx.read_bytes(hwjit_dst, len(expected))
+        if actual != expected or result != baseline["scalar"]:
+            raise RuntimeError(f"hwjit_qwen27b_prefill_attention_ffn_e2e: {name} mismatch")
+
+        baseline_latency_ns += int(baseline["latency_ns"])
+        hwjit_latency_ns += latency_ns
+        total_bytes += size + len(expected)
+        total_work += max(size // 64, len(expected))
+        scalar_acc = (scalar_acc + int(result)) & 0xFFFFFFFFFFFFFFFF
+
+    speedup = baseline_latency_ns / hwjit_latency_ns
+    return {
+        "bytes": total_bytes,
+        "work_items": total_work,
+        "baseline_latency_ns": baseline_latency_ns,
+        "hwjit_latency_ns": hwjit_latency_ns,
+        "speedup": speedup,
+        "baseline_method": "host_cxl_read_transform_write",
+        "hwjit_policy": "qwen27b_prefill_attention_ffn_dataflow",
+        "result": (
+            f"edges={len(edge_specs)};baseline_ns={baseline_latency_ns};"
+            f"hwjit_ns={hwjit_latency_ns};speedup={speedup:.2f}x;"
+            f"scalar_acc={scalar_acc}"
+        ),
+    }
+
+
 def case_graph_bfs_frontier(ctx: BenchmarkContext) -> dict[str, object]:
     frontier_bytes = 1024 if ctx.quick else 4096
     bitmap_bytes = 1024 if ctx.quick else 4096
@@ -731,6 +979,13 @@ def case_specs() -> list[CaseSpec]:
         CaseSpec("mixed_qwen_prefill_gemm",
                  "Damer Qwen prefill KV/GEMM pipeline",
                  "qwen_prefill_gemm", case_qwen_prefill),
+        CaseSpec("hwjit_qwen27b_kv_pack",
+                 "Damer Hardware-JIT Qwen27B KV pack near CXL switch",
+                 "qwen27b_kv_pack", case_hwjit_qwen27b_kv_pack),
+        CaseSpec("hwjit_qwen27b_prefill_attention_ffn_e2e",
+                 "Damer Hardware-JIT Qwen27B prefill/attention/FFN dataflow",
+                 "qwen27b_prefill_attention_ffn",
+                 case_hwjit_qwen27b_prefill_attention_ffn_e2e),
         CaseSpec("mixed_graph_bfs_frontier",
                  "Graph500-style frontier expansion",
                  "synthetic", case_graph_bfs_frontier),
@@ -805,10 +1060,21 @@ def run_case(ctx: BenchmarkContext, spec: CaseSpec, iteration: int,
         "result": details["result"],
         "status": "PASS",
     }
+    for key in (
+        "baseline_latency_ns",
+        "hwjit_latency_ns",
+        "speedup",
+        "baseline_method",
+        "hwjit_policy",
+    ):
+        if key in details:
+            row[key] = details[key]
     row.update(delta)
     row.update({
         "general_cores": after["general_cores"],
         "ai_cores": after["ai_cores"],
+        "hw_jit_lanes": after["hw_jit_lanes"],
+        "hw_jit_switchlets": after["hw_jit_switchlets"],
         "command_details": commands,
     })
     row.update(damer_trace_fields(traces, spec.damer_key))
@@ -833,14 +1099,27 @@ def write_outputs(rows: list[dict[str, object]], run_dir: Path,
         "bytes",
         "work_items",
         "modeled_latency_ns",
+        "baseline_latency_ns",
+        "hwjit_latency_ns",
+        "speedup",
+        "baseline_method",
+        "hwjit_policy",
         "general_ops",
         "ai_ops",
         "general_bytes",
         "ai_bytes",
+        "hw_jit_ops",
+        "hw_jit_commands",
+        "hw_jit_bytes",
+        "hw_jit_output_bytes",
+        "hw_jit_work_items",
+        "hw_jit_service_ns",
         "queued_ns",
         "service_ns",
         "general_cores",
         "ai_cores",
+        "hw_jit_lanes",
+        "hw_jit_switchlets",
         "result",
         "status",
         "damer_trace",
@@ -855,11 +1134,16 @@ def write_outputs(rows: list[dict[str, object]], run_dir: Path,
 
 def print_summary(rows: list[dict[str, object]]) -> None:
     print("\nBENCHMARK SUMMARY")
-    print("case,commands,latency_ns,general_ops,ai_ops,bytes,result")
+    print("case,commands,latency_ns,baseline_ns,hwjit_ns,speedup,general_ops,ai_ops,hw_jit_ops,bytes,result")
     for row in rows:
+        speedup = row.get("speedup", "")
+        if isinstance(speedup, float):
+            speedup = f"{speedup:.2f}"
         print(
             f"{row['case']},{row['commands']},{row['modeled_latency_ns']},"
-            f"{row['general_ops']},{row['ai_ops']},{row['bytes']},{row['result']}"
+            f"{row.get('baseline_latency_ns', '')},{row.get('hwjit_latency_ns', '')},"
+            f"{speedup},{row['general_ops']},{row['ai_ops']},{row['hw_jit_ops']},"
+            f"{row['bytes']},{row['result']}"
         )
 
 
@@ -919,10 +1203,17 @@ def main() -> int:
     parser.add_argument("--output-prefix", default="switch_benchmark")
     parser.add_argument("--switch-general-cores", type=int, default=4)
     parser.add_argument("--switch-ai-cores", type=int, default=2)
+    parser.add_argument("--switch-hwjit-lanes", type=int, default=1)
     parser.add_argument("--switch-general-latency", type=int, default=40)
     parser.add_argument("--switch-ai-latency", type=int, default=30)
+    parser.add_argument("--switch-hwjit-latency", type=int, default=8)
+    parser.add_argument("--switch-hwjit-state-latency", type=int, default=4)
     parser.add_argument("--switch-general-bandwidth", type=int, default=64)
     parser.add_argument("--switch-ai-ops-per-ns", type=int, default=128)
+    parser.add_argument("--switch-hwjit-bandwidth", type=int, default=256)
+    parser.add_argument("--switch-hwjit-ops-per-ns", type=int, default=512)
+    parser.add_argument("--hwjit-kv-bytes", type=int,
+                        help="bytes for the Qwen27B KV-pack HW-JIT case")
     parser.add_argument("--kimi-layers", type=int)
     parser.add_argument("--kimi-ranks", type=int)
     parser.add_argument("--kimi-dim", type=int)
@@ -955,10 +1246,15 @@ def main() -> int:
         "--enable-switch-cores",
         f"--switch-general-cores={args.switch_general_cores}",
         f"--switch-ai-cores={args.switch_ai_cores}",
+        f"--switch-hwjit-lanes={args.switch_hwjit_lanes}",
         f"--switch-general-latency={args.switch_general_latency}",
         f"--switch-ai-latency={args.switch_ai_latency}",
+        f"--switch-hwjit-latency={args.switch_hwjit_latency}",
+        f"--switch-hwjit-state-latency={args.switch_hwjit_state_latency}",
         f"--switch-general-bandwidth={args.switch_general_bandwidth}",
         f"--switch-ai-ops-per-ns={args.switch_ai_ops_per_ns}",
+        f"--switch-hwjit-bandwidth={args.switch_hwjit_bandwidth}",
+        f"--switch-hwjit-ops-per-ns={args.switch_hwjit_ops_per_ns}",
         "--verbose=1",
     ]
 
@@ -989,6 +1285,7 @@ def main() -> int:
             "kimi_reduce_count": args.kimi_reduce_count,
             "kimi_allgather_mode": args.kimi_allgather_mode,
             "kimi_allreduce_mode": args.kimi_allreduce_mode,
+            "hwjit_kv_bytes": args.hwjit_kv_bytes,
         }
         ctx = BenchmarkContext(client, qt, bar2, args.quick, profile)
         initial = stats_from_bar(ctx)
@@ -1007,6 +1304,9 @@ def main() -> int:
             "server_cmd": server_cmd,
             "qemu": args.qemu,
             "damer_root": args.damer_root,
+            "damer_hwjit_report": str(Path(args.damer_root) / "out" / "hwjit-qwen27b-final" /
+                                      "cxl_switch_hwjit_sim_report.json"),
+            "damer_hwjit_rtl": "fpga/damer_cxl_switch_hwjit_qwen27b_policy.sv",
             "damer_traces_loaded": len({id(value) for value in traces.values()}),
             "kimi_profile": profile,
         }

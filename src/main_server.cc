@@ -11,6 +11,7 @@
 #include "../include/shared_memory_manager.h"
 #include "cxl_backend.h"
 #include "cxlcontroller.h"
+#include "damer_hwjit_policy.h"
 #include "cxlendpoint.h"
 #include "distributed_server.h"
 #include "policy.h"
@@ -82,7 +83,9 @@ constexpr uint8_t OP_SWITCH_REDUCE_ADD64 = 21; // General-core uint64 reduction;
 constexpr uint8_t OP_SWITCH_DOT_I32 = 22; // Near-switch AI-core int32 dot; addr=a, value=b, expected=count
 constexpr uint8_t OP_SWITCH_MATMUL_I32 = 23; // Near-switch AI-core int32 matmul descriptor in data
 constexpr uint8_t OP_SWITCH_QUERY = 24; // Return switch-runtime stats in response
-constexpr uint8_t OP_MAX = OP_SWITCH_QUERY;
+constexpr uint8_t OP_SWITCH_HWJIT = 25; // Damer Hardware-JIT switchlet descriptor in data
+constexpr uint8_t OP_SWITCH_HWJIT_QUERY = 26; // Return Hardware-JIT switchlet stats
+constexpr uint8_t OP_MAX = OP_SWITCH_HWJIT_QUERY;
 
 // Server request/response structures (matching qemu_integration)
 struct __attribute__((packed)) ServerRequest {
@@ -115,6 +118,118 @@ struct __attribute__((packed)) SwitchMatmulI32Descriptor {
     uint32_t k;
     uint32_t flags;
 };
+
+struct __attribute__((packed)) SwitchHardwareJitDescriptor {
+    uint64_t src_addr;
+    uint64_t dst_addr;
+    uint64_t aux_addr;
+    uint64_t bytes;
+    uint32_t switchlet_id;
+    uint32_t transform_mask;
+    uint32_t tile_count;
+    uint32_t ttl;
+    uint32_t max_ops;
+    uint32_t flags;
+    uint32_t priority;
+    uint32_t reserved;
+};
+
+static uint64_t ceil_div_u64(uint64_t value, uint64_t divisor) {
+    if (divisor == 0) {
+        return 0;
+    }
+    return (value + divisor - 1) / divisor;
+}
+
+static uint64_t read_le64_partial(const std::vector<uint8_t> &data, size_t offset) {
+    uint64_t value = 0;
+    size_t count = std::min<size_t>(sizeof(value), data.size() - offset);
+    memcpy(&value, data.data() + offset, count);
+    return value;
+}
+
+static uint64_t damer_hwjit_checksum(const std::vector<uint8_t> &input) {
+    uint64_t acc = 0xcbf29ce484222325ULL;
+    for (uint8_t byte : input) {
+        acc ^= byte;
+        acc *= 0x100000001b3ULL;
+    }
+    return acc;
+}
+
+static std::vector<uint8_t> damer_hwjit_transform_payload(const std::vector<uint8_t> &input, uint32_t transform_mask,
+                                                          uint64_t &scalar_result) {
+    std::vector<uint8_t> current = input;
+    scalar_result = current.size();
+
+    if (transform_mask & DAMER_HWJIT_QUANTIZE) {
+        std::vector<uint8_t> quantized;
+        quantized.reserve(ceil_div_u64(current.size(), 2));
+        for (size_t i = 0; i < current.size(); i += 2) {
+            uint16_t lo = current[i];
+            uint16_t hi = (i + 1 < current.size()) ? current[i + 1] : 0;
+            quantized.push_back(static_cast<uint8_t>((lo + hi) / 2));
+        }
+        current.swap(quantized);
+    }
+
+    if (transform_mask & DAMER_HWJIT_COMPRESS) {
+        std::vector<uint8_t> compressed;
+        compressed.reserve(ceil_div_u64(current.size(), 2));
+        for (size_t i = 0; i < current.size(); i += 2) {
+            compressed.push_back(current[i]);
+        }
+        current.swap(compressed);
+    }
+
+    if (transform_mask & DAMER_HWJIT_FILTER) {
+        std::vector<uint8_t> filtered;
+        filtered.reserve(ceil_div_u64(current.size(), 2));
+        for (size_t i = 0; i < current.size(); i++) {
+            if ((current[i] & 1u) == 0) {
+                filtered.push_back(current[i]);
+            }
+        }
+        if (filtered.empty() && !current.empty()) {
+            filtered.push_back(current.front());
+        }
+        current.swap(filtered);
+    }
+
+    if (transform_mask & DAMER_HWJIT_SCATTER_GATHER) {
+        for (size_t base = 0; base < current.size(); base += SHM_CACHELINE_SIZE) {
+            size_t end = std::min(current.size(), base + SHM_CACHELINE_SIZE);
+            std::reverse(current.begin() + static_cast<std::ptrdiff_t>(base),
+                         current.begin() + static_cast<std::ptrdiff_t>(end));
+        }
+    }
+
+    if (transform_mask & DAMER_HWJIT_REPLICATE) {
+        std::vector<uint8_t> replicated;
+        replicated.reserve(current.size());
+        for (size_t i = 0; i < current.size(); i++) {
+            size_t peer = i ^ 1u;
+            replicated.push_back(peer < current.size() ? current[peer] : current[i]);
+        }
+        current.swap(replicated);
+    }
+
+    if (transform_mask & DAMER_HWJIT_REDUCE) {
+        uint64_t sum = 0;
+        for (size_t offset = 0; offset < current.size(); offset += sizeof(uint64_t)) {
+            sum += read_le64_partial(current, offset);
+        }
+        current.assign(sizeof(sum), 0);
+        memcpy(current.data(), &sum, sizeof(sum));
+        scalar_result = sum;
+    } else if (transform_mask & DAMER_HWJIT_CHECKSUM) {
+        scalar_result = damer_hwjit_checksum(current);
+    } else {
+        scalar_result = current.size();
+    }
+
+    return current;
+}
 
 // Extended response for shared memory info
 struct __attribute__((packed)) SharedMemoryInfoResponse {
@@ -210,6 +325,7 @@ private:
     std::atomic<uint64_t> bi_writeback_requests{0};
     std::atomic<uint64_t> switch_general_requests{0};
     std::atomic<uint64_t> switch_ai_requests{0};
+    std::atomic<uint64_t> switch_hwjit_requests{0};
     std::atomic<uint64_t> total_latency_ns{0}; // accumulated latency for avg calculation
     SwitchRuntime switch_runtime;
 
@@ -305,6 +421,8 @@ private:
     bool switch_write_bytes(uint64_t addr, const uint8_t *buffer, size_t size, int core_id, uint64_t timestamp,
                             uint64_t &lines_touched);
     uint64_t switch_dispatch_latency(SwitchCoreKind core, uint64_t bytes, uint64_t work_items, uint64_t timestamp);
+    uint64_t switch_dispatch_hwjit_latency(const SwitchHardwareJitDescriptor &desc, uint64_t output_bytes,
+                                           uint64_t work_items, uint64_t emitted_commands, uint64_t timestamp);
     bool check_fabric_access(int thread_id, const ServerRequest &req, bool is_write, bool is_atomic,
                              double &fabric_latency_ns, ServerResponse &resp);
     uint64_t calculate_total_latency(uint64_t base_latency, double congestion_factor, bool had_coherency_miss,
@@ -403,11 +521,19 @@ static void print_server_help(const char *program) {
               << "                                      Enable near-switch offload cores\n"
               << "      --switch-general-cores <count> General-purpose cores near the switch\n"
               << "      --switch-ai-cores <count>      AI cores near the switch\n"
+              << "      --switch-hwjit-lanes <count>   Hardware-JIT datapath lanes near the switch\n"
               << "      --switch-general-latency <ns>  Base latency for general-core work\n"
               << "      --switch-ai-latency <ns>       Base latency for AI-core work\n"
+              << "      --switch-hwjit-latency <ns>    Base latency for Hardware-JIT work\n"
+              << "      --switch-hwjit-state-latency <ns>\n"
+              << "                                      Small-core state/JIT dispatch latency\n"
               << "      --switch-general-bandwidth <GB/s>\n"
               << "                                      General-core memory bandwidth\n"
-              << "      --switch-ai-ops-per-ns <ops>   AI-core throughput model\n";
+              << "      --switch-ai-ops-per-ns <ops>   AI-core throughput model\n"
+              << "      --switch-hwjit-bandwidth <GB/s>\n"
+              << "                                      Hardware-JIT datapath bandwidth\n"
+              << "      --switch-hwjit-ops-per-ns <ops>\n"
+              << "                                      Hardware-JIT transform throughput model\n";
 }
 
 static bool option_has_value(const std::string &arg) { return !arg.empty() && arg[0] != '-'; }
@@ -589,14 +715,24 @@ static bool parse_server_options(int argc, char *argv[], ServerOptions &opts, st
                 opts.switch_config.general_cores = static_cast<uint32_t>(std::stoul(get_value(key)));
             } else if (key == "switch-ai-cores") {
                 opts.switch_config.ai_cores = static_cast<uint32_t>(std::stoul(get_value(key)));
+            } else if (key == "switch-hwjit-lanes") {
+                opts.switch_config.hw_jit_lanes = static_cast<uint32_t>(std::stoul(get_value(key)));
             } else if (key == "switch-general-latency") {
                 opts.switch_config.general_base_latency_ns = std::stoull(get_value(key));
             } else if (key == "switch-ai-latency") {
                 opts.switch_config.ai_base_latency_ns = std::stoull(get_value(key));
+            } else if (key == "switch-hwjit-latency") {
+                opts.switch_config.hw_jit_base_latency_ns = std::stoull(get_value(key));
+            } else if (key == "switch-hwjit-state-latency") {
+                opts.switch_config.hw_jit_state_latency_ns = std::stoull(get_value(key));
             } else if (key == "switch-general-bandwidth") {
                 opts.switch_config.general_bandwidth_gbps = std::stod(get_value(key));
             } else if (key == "switch-ai-ops-per-ns") {
                 opts.switch_config.ai_ops_per_ns = std::stod(get_value(key));
+            } else if (key == "switch-hwjit-bandwidth") {
+                opts.switch_config.hw_jit_bandwidth_gbps = std::stod(get_value(key));
+            } else if (key == "switch-hwjit-ops-per-ns") {
+                opts.switch_config.hw_jit_ops_per_ns = std::stod(get_value(key));
             } else {
                 throw std::invalid_argument("Unknown option: --" + key);
             }
@@ -792,6 +928,12 @@ int main(int argc, char *argv[]) {
                     switch_config.general_bandwidth_gbps);
         SPDLOG_INFO("    AI cores: {}, base latency: {} ns, throughput: {:.2f} ops/ns", switch_config.ai_cores,
                     switch_config.ai_base_latency_ns, switch_config.ai_ops_per_ns);
+        SPDLOG_INFO(
+            "    Hardware-JIT lanes: {}, base latency: {} ns, state latency: {} ns, bandwidth: {:.2f} GB/s, "
+            "throughput: {:.2f} ops/ns",
+            switch_config.hw_jit_lanes, switch_config.hw_jit_base_latency_ns,
+            switch_config.hw_jit_state_latency_ns, switch_config.hw_jit_bandwidth_gbps,
+            switch_config.hw_jit_ops_per_ns);
     }
     SPDLOG_INFO("CXL Type3 Operations Supported:");
     SPDLOG_INFO("  - CXL_TYPE3_READ");
@@ -1765,7 +1907,8 @@ void ThreadPerConnectionServer::handle_bi_request(int thread_id, const ServerReq
 
 bool ThreadPerConnectionServer::is_switch_op(uint8_t op_type) const {
     return op_type == OP_SWITCH_MEMCPY || op_type == OP_SWITCH_MEMSET || op_type == OP_SWITCH_REDUCE_ADD64 ||
-           op_type == OP_SWITCH_DOT_I32 || op_type == OP_SWITCH_MATMUL_I32 || op_type == OP_SWITCH_QUERY;
+           op_type == OP_SWITCH_DOT_I32 || op_type == OP_SWITCH_MATMUL_I32 || op_type == OP_SWITCH_QUERY ||
+           op_type == OP_SWITCH_HWJIT || op_type == OP_SWITCH_HWJIT_QUERY;
 }
 
 bool ThreadPerConnectionServer::check_switch_range_access(int thread_id, const ServerRequest &req, uint64_t addr,
@@ -1866,9 +2009,29 @@ uint64_t ThreadPerConnectionServer::switch_dispatch_latency(SwitchCoreKind core,
     uint64_t latency = switch_runtime.dispatch(core, bytes, work_items, timestamp);
     if (core == SwitchCoreKind::AI) {
         switch_ai_requests++;
+    } else if (core == SwitchCoreKind::HardwareJIT) {
+        switch_hwjit_requests++;
     } else {
         switch_general_requests++;
     }
+    return latency;
+}
+
+uint64_t ThreadPerConnectionServer::switch_dispatch_hwjit_latency(const SwitchHardwareJitDescriptor &desc,
+                                                                  uint64_t output_bytes, uint64_t work_items,
+                                                                  uint64_t emitted_commands, uint64_t timestamp) {
+    SwitchHardwareJitWork work;
+    work.bytes = desc.bytes;
+    work.output_bytes = output_bytes;
+    work.work_items = work_items;
+    work.emitted_commands = emitted_commands;
+    work.transform_mask = desc.transform_mask;
+    work.switchlet_id = desc.switchlet_id;
+    work.ttl = desc.ttl;
+    work.max_ops = desc.max_ops;
+
+    uint64_t latency = switch_runtime.dispatch_hardware_jit(work, timestamp);
+    switch_hwjit_requests++;
     return latency;
 }
 
@@ -1901,6 +2064,21 @@ void ThreadPerConnectionServer::handle_switch_request(int thread_id, const Serve
         add_u64(40, stats.service_ns);
         add_u64(48, switch_runtime.config().general_cores);
         add_u64(56, switch_runtime.config().ai_cores);
+        return;
+    }
+
+    if (req.op_type == OP_SWITCH_HWJIT_QUERY) {
+        auto stats = switch_runtime.get_stats();
+        resp.status = 0;
+        resp.old_value = switch_runtime.enabled() ? 1 : 0;
+        add_u64(0, stats.hw_jit_ops);
+        add_u64(8, stats.hw_jit_commands);
+        add_u64(16, stats.hw_jit_bytes);
+        add_u64(24, stats.hw_jit_output_bytes);
+        add_u64(32, stats.hw_jit_work_items);
+        add_u64(40, stats.hw_jit_service_ns);
+        add_u64(48, switch_runtime.config().hw_jit_lanes);
+        add_u64(56, kDamerQwen27BHwjitSwitchlets.size());
         return;
     }
 
@@ -2159,6 +2337,84 @@ void ThreadPerConnectionServer::handle_switch_request(int thread_id, const Serve
         resp.latency_ns = switch_dispatch_latency(SwitchCoreKind::AI, bytes, work_items, req.timestamp) +
                           static_cast<uint64_t>(a_fabric_ns + b_fabric_ns + c_fabric_ns);
         total_latency_ns += resp.latency_ns;
+        return;
+    }
+
+    case OP_SWITCH_HWJIT: {
+        if (req.size < sizeof(SwitchHardwareJitDescriptor)) {
+            fail();
+            return;
+        }
+
+        SwitchHardwareJitDescriptor desc;
+        memcpy(&desc, req.data, sizeof(desc));
+
+        const DamerHwjitSwitchletSpec *spec = damer_hwjit_lookup(desc.switchlet_id);
+        if (!spec || desc.transform_mask != spec->transform_mask || desc.bytes == 0 || desc.ttl == 0 ||
+            desc.max_ops == 0 || desc.max_ops > 8 || desc.bytes > 64ULL * 1024ULL * 1024ULL) {
+            fail();
+            return;
+        }
+
+        uint64_t tile_count = desc.tile_count == 0 ? ceil_div_u64(desc.bytes, SHM_CACHELINE_SIZE) : desc.tile_count;
+        if (tile_count == 0) {
+            fail();
+            return;
+        }
+
+        double src_fabric_ns = 0.0;
+        double dst_fabric_ns = 0.0;
+        if (!range_valid(desc.src_addr, desc.bytes) ||
+            !check_switch_range_access(thread_id, req, desc.src_addr, desc.bytes, false, false, resp,
+                                       src_fabric_ns)) {
+            fail();
+            return;
+        }
+
+        constexpr int kSwitchHardwareJitCoreId = -3000;
+        std::vector<uint8_t> input(static_cast<size_t>(desc.bytes));
+        uint64_t lines = 0;
+        if (!switch_read_bytes(desc.src_addr, input.data(), input.size(), kSwitchHardwareJitCoreId, req.timestamp,
+                               lines)) {
+            fail();
+            return;
+        }
+
+        uint64_t scalar_result = 0;
+        std::vector<uint8_t> output = damer_hwjit_transform_payload(input, desc.transform_mask, scalar_result);
+        if (output.empty()) {
+            fail();
+            return;
+        }
+
+        if (!range_valid(desc.dst_addr, output.size()) ||
+            !check_switch_range_access(thread_id, req, desc.dst_addr, output.size(), true, false, resp,
+                                       dst_fabric_ns)) {
+            fail();
+            return;
+        }
+        if (!switch_write_bytes(desc.dst_addr, output.data(), output.size(), kSwitchHardwareJitCoreId, req.timestamp,
+                                lines)) {
+            fail();
+            return;
+        }
+
+        uint64_t transform_work = std::max<uint64_t>(tile_count, output.size());
+        if (desc.transform_mask & DAMER_HWJIT_REDUCE) {
+            transform_work = std::max<uint64_t>(transform_work, desc.bytes / sizeof(uint64_t));
+        } else if (desc.transform_mask & DAMER_HWJIT_QUANTIZE) {
+            transform_work = std::max<uint64_t>(transform_work, desc.bytes / 2);
+        }
+
+        resp.status = 0;
+        resp.old_value = scalar_result;
+        resp.latency_ns = switch_dispatch_hwjit_latency(desc, output.size(), transform_work, 1, req.timestamp) +
+                          static_cast<uint64_t>(src_fabric_ns + dst_fabric_ns);
+        total_latency_ns += resp.latency_ns;
+        SPDLOG_DEBUG(
+            "Thread {}: switch hwjit {} src=0x{:x} dst=0x{:x} bytes={} out={} mask=0x{:x} latency={}ns",
+            thread_id, spec->name, desc.src_addr, desc.dst_addr, desc.bytes, output.size(), desc.transform_mask,
+            resp.latency_ns);
         return;
     }
 

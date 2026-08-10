@@ -218,9 +218,16 @@ transport:
 | `CXL_GPU_CMD_SWITCH_DOT_I32` | `a, b, count` | `RESULT0=dot`, `RESULT1=latency_ns` |
 | `CXL_GPU_CMD_SWITCH_MATMUL_I32` | `a, b, c, m, n, k` | `RESULT0=output_elements`, `RESULT1=latency_ns` |
 | `CXL_GPU_CMD_SWITCH_GET_STATS` | none | `RESULT0=enabled`, stats in BAR2 data buffer |
+| `CXL_GPU_CMD_SWITCH_HWJIT` | `src, dst, bytes, switchlet_id, transform_mask, tile_count, control, aux` | `RESULT0=scalar/result`, `RESULT1=latency_ns` |
+| `CXL_GPU_CMD_SWITCH_HWJIT_STATS` | none | hardware-JIT stats in BAR2 data buffer |
 
 The memory server executes these operations near the switch, updates CXL
 cacheline metadata, and accounts for core queueing/service time.
+`CXL_GPU_CMD_SWITCH_HWJIT` uses the embedded Damer Qwen27B switch policy from
+`fpga/damer_cxl_switch_hwjit_qwen27b_policy.sv` and the matching server-side
+behavioral metadata in `include/damer_hwjit_policy.h`. The command validates
+the switchlet id, transform mask, TTL, max operation count, and memory bounds
+before applying the data-movement transform.
 
 Run the host-side qtest experiment to exercise those commands through QEMU BAR2
 MMIO without booting a guest:
@@ -232,8 +239,9 @@ python3 ./qtest_switch_offload.py
 The script starts a switch-enabled `cxlmemsim_server`, launches
 `qemu-system-x86_64` with `-accel qtest`, assigns the Type2 BAR2 and root-port
 prefetchable window, writes the BAR2 command registers for memcpy, memset,
-reduce, dot, matmul, and stats, then verifies the resulting CXLMemSim memory
-contents. Logs are written under `build/qtest-switch-offload/`.
+reduce, dot, matmul, hardware-JIT KV pack, and stats, then verifies the
+resulting CXLMemSim memory contents. Logs are written under
+`build/qtest-switch-offload/`.
 
 Run the broader Damer-mapped benchmark suite from the same host-side QEMU qtest
 path:
@@ -252,8 +260,34 @@ present, the result rows include the matching
 Use `--quick` for smaller matrices/vectors, or
 `--cases=ai_gemm_i32,mixed_qwen_prefill_gemm` to select a subset. Results are
 written under `build/qtest-switch-bench/` as `switch_benchmark.csv` and
-`switch_benchmark.json`. For repeated measurements, prefer independent trials
-so switch queue state does not carry across repeats:
+`switch_benchmark.json`.
+
+For the focused hardware-JIT end-to-end path, compare a host baseline
+`CXL read -> CPU transform -> CXL write` against a single near-switch
+hardware-JIT command:
+
+```bash
+python3 ./qtest_switch_benchmark.py \
+  --cases hwjit_qwen27b_kv_pack,hwjit_qwen27b_prefill_attention_ffn_e2e \
+  --repeat 1 \
+  --output-prefix hwjit_qwen27b_switch_e2e \
+  --run-dir ../build/qtest-switch-hwjit-qwen27b
+```
+
+On the default model parameters, this run produced:
+
+| Case | Baseline | HW-JIT | Speedup |
+| --- | ---: | ---: | ---: |
+| `hwjit_qwen27b_kv_pack` | 21184 ns | 70 ns | 302.63x |
+| `hwjit_qwen27b_prefill_attention_ffn_e2e` | 95430 ns | 1143 ns | 83.49x |
+
+The measured speedup comes from eliminating the host read/compute/write loop
+for data-movement-heavy LLM edges and replacing it with a switch-local
+dataflow command whose latency is dominated by policy state access, bounded
+command issue, and switch fabric bandwidth.
+
+For repeated measurements, prefer independent trials so switch queue state does
+not carry across repeats:
 
 ```bash
 python3 ./qtest_cxlbench_repeat.py --trials=3
