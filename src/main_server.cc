@@ -1275,6 +1275,7 @@ void ThreadPerConnectionServer::stop() {
         SPDLOG_INFO("  Timeout: {}", audit.timeout);
         SPDLOG_INFO("  Partial ACK: {}", audit.partial_ack);
         SPDLOG_INFO("  Stale ACK: {}", audit.stale_ack);
+        SPDLOG_INFO("  Snoop ACK: {}", audit.accepted_snoop_ack);
         SPDLOG_INFO("  Invalid Ownership: {}", audit.invalid_ownership);
         SPDLOG_INFO("Legacy controller counters below exclude coherence v2 endpoint traffic");
     }

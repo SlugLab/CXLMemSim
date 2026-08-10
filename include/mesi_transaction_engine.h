@@ -83,6 +83,7 @@ struct CoherenceAuditCounters {
     std::uint64_t forced_dirty_loss{};
     std::uint64_t stale_ack{};
     std::uint64_t invalid_ownership{};
+    std::uint64_t accepted_snoop_ack{};
 };
 
 struct CoherenceAuditRecord {
@@ -271,6 +272,7 @@ private:
     std::atomic<std::uint64_t> forced_dirty_losses_{};
     std::atomic<std::uint64_t> stale_acks_{};
     std::atomic<std::uint64_t> invalid_ownership_events_{};
+    std::atomic<std::uint64_t> accepted_snoop_acks_{};
     mutable std::mutex audit_mutex_;
     std::vector<CoherenceAuditRecord> audit_records_;
     AuditSink *audit_sink_{};

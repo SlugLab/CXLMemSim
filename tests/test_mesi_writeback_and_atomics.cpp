@@ -917,6 +917,70 @@ void testTimeoutPartialAckStaleAckAndInvalidOwnershipAreAudited() {
     CHECK(audit.records >= 3);
 }
 
+void testAcceptedSnoopAckAuditCounterExcludesRejectedAcks() {
+    MesiDirectory directory;
+    CHECK(directory.gets(kLineA, 1).committed());
+    CHECK(directory.gets(kLineA, 2).committed());
+    TestMemory memory;
+    memory.seed(kLineA, bytes(0x55));
+    TestTransport transport;
+    MesiTransactionEngine engine(directory, memory, transport, kWait);
+    CHECK(engine.bindSession(1, 101));
+    CHECK(engine.bindSession(2, 102));
+    CHECK(engine.bindSession(3, 103));
+
+    auto transaction = std::async(std::launch::async, [&] { return engine.getm(kLineA, {3, 103, 1}); });
+    const auto sent = transport.waitFor(2);
+    CHECK(engine.auditCounters().accepted_snoop_ack == 0);
+
+    auto malformed = ackFor(sent[0].second);
+    setAckStrength(malformed, AckStrength::NONE);
+    CHECK(engine.handleSnoopAck(malformed) == AckDisposition::Invalid);
+    CHECK(engine.auditCounters().accepted_snoop_ack == 0);
+
+    auto wrong_host = ackFor(sent[0].second);
+    setSrcHost(wrong_host, srcHost(wrong_host) + 1);
+    CHECK(engine.handleSnoopAck(wrong_host) == AckDisposition::Stale);
+    CHECK(engine.auditCounters().accepted_snoop_ack == 0);
+
+    auto stale_epoch = ackFor(sent[0].second);
+    setEpoch(stale_epoch, epoch(stale_epoch) - 1);
+    CHECK(engine.handleSnoopAck(stale_epoch) == AckDisposition::Stale);
+    CHECK(engine.auditCounters().accepted_snoop_ack == 0);
+
+    const auto first = ackFor(sent[0].second);
+    CHECK(engine.handleSnoopAck(first) == AckDisposition::Accepted);
+    CHECK(engine.auditCounters().accepted_snoop_ack == 1);
+    CHECK(engine.handleSnoopAck(first) == AckDisposition::Duplicate);
+    CHECK(engine.auditCounters().accepted_snoop_ack == 1);
+
+    CHECK(engine.handleSnoopAck(ackFor(sent[1].second)) == AckDisposition::Accepted);
+    CHECK(engine.auditCounters().accepted_snoop_ack == 2);
+    CHECK(ready(transaction, "accepted snoop ACK audit").status == Status::Ok);
+
+    MesiDirectory dirty_directory;
+    CHECK(dirty_directory.getm(kLineB, 4).committed());
+    TestMemory dirty_memory;
+    dirty_memory.seed(kLineB, bytes(0x66));
+    dirty_memory.blockWrites();
+    TestTransport dirty_transport;
+    MesiTransactionEngine dirty_engine(dirty_directory, dirty_memory, dirty_transport, kWait);
+    CHECK(dirty_engine.bindSession(4, 104));
+    CHECK(dirty_engine.bindSession(5, 105));
+
+    auto dirty_transaction = std::async(std::launch::async, [&] { return dirty_engine.getm(kLineB, {5, 105, 1}); });
+    const auto dirty_snoop = dirty_transport.waitFor(1).front().second;
+    CHECK(opcode(dirty_snoop) == Opcode::SnpDataInv);
+    const auto dirty_ack = ackFor(dirty_snoop, bytes(0xa5));
+    CHECK(dirty_engine.handleSnoopAck(dirty_ack) == AckDisposition::Deferred);
+    CHECK(dirty_engine.auditCounters().accepted_snoop_ack == 1);
+    dirty_memory.waitForWrite();
+    CHECK(dirty_engine.handleSnoopAck(dirty_ack) == AckDisposition::Deferred);
+    CHECK(dirty_engine.auditCounters().accepted_snoop_ack == 1);
+    dirty_memory.releaseWrites();
+    CHECK(ready(dirty_transaction, "accepted dirty snoop ACK audit").status == Status::Ok);
+}
+
 void testHostFenceAuthorizationIsContextualOneShotAndFailClosed() {
     const auto run = [](auto mutate_ack, bool send_failure = false) {
         MesiDirectory directory;
@@ -993,9 +1057,11 @@ void testHostFenceAuthorizationIsContextualOneShotAndFailClosed() {
     CHECK(task5AddClean(registry, live.session_id, live.binding_id, kLineB));
     CoherenceFrame accepted_ack{};
     transport.onSend([&](std::uint16_t, const CoherenceFrame &fence) {
+        const auto snoop_ack_before = engine.auditCounters().accepted_snoop_ack;
         accepted_ack = ackFor(fence);
         CHECK(task5ControlFrame(engine, registry, live.session_id, live.binding_id, accepted_ack) ==
               AckDisposition::Accepted);
+        CHECK(engine.auditCounters().accepted_snoop_ack == snoop_ack_before);
         const auto stale_before = engine.auditCounters().stale_ack;
         CHECK(task5ControlFrame(engine, registry, live.session_id, live.binding_id, accepted_ack) ==
               AckDisposition::Stale);
@@ -1709,6 +1775,7 @@ int main() {
     testForcedDirtyLossIsExplicitRecordedAndNeverCoherentSuccess();
     testHostFenceWakesTransactionsWaitingOnThatHost();
     testTimeoutPartialAckStaleAckAndInvalidOwnershipAreAudited();
+    testAcceptedSnoopAckAuditCounterExcludesRejectedAcks();
     testHostFenceAuthorizationIsContextualOneShotAndFailClosed();
     testFencedOrdinaryAdmissionIsBoundedAndControlUsesContext();
     testEvictionWaitsForAdmittedAtomicHolderPublicationAndFencesNewWork();

@@ -1150,14 +1150,18 @@ AckDisposition MesiTransactionEngine::handleSnoopAck(const protocol_v2::Coherenc
     if (returned_data) {
         if (expected->returned_data && *expected->returned_data != *returned_data)
             return AckDisposition::Invalid;
+        const bool first_accepted_ack = !expected->returned_data;
         expected->returned_data = returned_data;
         expected->persistence_retry_requested = true;
+        if (first_accepted_ack)
+            accepted_snoop_acks_.fetch_add(1, std::memory_order_relaxed);
         pending->changed.notify_all();
         return AckDisposition::Deferred;
     }
 
     expected->acknowledged = true;
     ++pending->acknowledged_count;
+    accepted_snoop_acks_.fetch_add(1, std::memory_order_relaxed);
     if (pending->disconnect_requested) {
         pending->phase = PendingPhase::Disconnected;
     } else if (pending->timeout_requested) {
@@ -1593,7 +1597,8 @@ CoherenceAuditCounters MesiTransactionEngine::auditCounters() const noexcept {
             forced_clean_removals_.load(std::memory_order_relaxed),
             forced_dirty_losses_.load(std::memory_order_relaxed),
             stale_acks_.load(std::memory_order_relaxed),
-            invalid_ownership_events_.load(std::memory_order_relaxed)};
+            invalid_ownership_events_.load(std::memory_order_relaxed),
+            accepted_snoop_acks_.load(std::memory_order_relaxed)};
 }
 
 std::vector<CoherenceAuditRecord> MesiTransactionEngine::auditRecords() const {
