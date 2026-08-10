@@ -262,7 +262,7 @@ Use `--quick` for smaller matrices/vectors, or
 written under `build/qtest-switch-bench/` as `switch_benchmark.csv` and
 `switch_benchmark.json`.
 
-For the focused hardware-JIT end-to-end path, compare a host baseline
+For the focused hardware-JIT data-movement edge path, compare a host baseline
 `CXL read -> CPU transform -> CXL write` against a single near-switch
 hardware-JIT command:
 
@@ -281,10 +281,13 @@ On the default model parameters, this run produced:
 | `hwjit_qwen27b_kv_pack` | 21184 ns | 70 ns | 302.63x |
 | `hwjit_qwen27b_prefill_attention_ffn_e2e` | 95430 ns | 1143 ns | 83.49x |
 
-The measured speedup comes from eliminating the host read/compute/write loop
-for data-movement-heavy LLM edges and replacing it with a switch-local
-dataflow command whose latency is dominated by policy state access, bounded
-command issue, and switch fabric bandwidth.
+These are edge-level data-movement speedups, not full-token inference speedups.
+They come from eliminating the host read/compute/write loop for
+data-movement-heavy LLM edges and replacing it with a switch-local dataflow
+command whose latency is dominated by policy state access, bounded command
+issue, and switch fabric bandwidth. Full inference speedup is Amdahl-limited by
+the fraction of token latency spent on fabric data movement; compute-heavy
+prefill can therefore show much smaller end-to-end gains.
 
 For repeated measurements, prefer independent trials so switch queue state does
 not carry across repeats:

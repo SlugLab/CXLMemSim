@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot Qwen27B inference end-to-end CXL switch HW-JIT results."""
+"""Plot Qwen27B inference data-movement edge HW-JIT results."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--csv",
-        default="build/qtest-switch-hwjit-qwen27b-final2/hwjit_qwen27b_switch_e2e.csv",
+        default="artifact/hwjit_inference_e2e/hwjit_qwen27b_switch_edge.csv",
         help="Input qtest_switch_benchmark CSV.",
     )
     parser.add_argument(
@@ -81,7 +81,7 @@ def main() -> None:
     ax_latency.bar(x + width / 2, hwjit_us, width, label="CXL switch HW-JIT",
                    color=hwjit_color)
     ax_latency.set_yscale("log")
-    ax_latency.set_ylabel("Modeled e2e latency (us, log)")
+    ax_latency.set_ylabel("Modeled edge latency (us, log)")
     ax_latency.set_xticks(x, labels)
     ax_latency.grid(axis="y", which="major", linestyle=":", linewidth=0.6, alpha=0.7)
     ax_latency.legend(loc="upper right", frameon=False)
@@ -96,7 +96,7 @@ def main() -> None:
     ax_speedup.set_ylabel("Speedup over host baseline")
     ax_speedup.set_xticks(x, labels)
     ax_speedup.grid(axis="y", linestyle=":", linewidth=0.6, alpha=0.7)
-    ax_speedup.set_title("End-to-end speedup")
+    ax_speedup.set_title("Data-movement edge speedup")
     ax_speedup.set_ylim(0, max(speedup) * 1.22)
     for xpos, value in zip(x, speedup):
         ax_speedup.text(xpos, value + max(speedup) * 0.035, f"{value:.1f}x",
@@ -105,7 +105,7 @@ def main() -> None:
     fig.text(
         0.01,
         0.01,
-        f"Source: {csv_path}; qtest CXL Type2 BAR2 to CXLMemSim switch HW-JIT model.",
+        f"Source: {csv_path}; data-movement edge only, not full-token inference latency.",
         fontsize=6.5,
         color="#374151",
     )
