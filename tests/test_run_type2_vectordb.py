@@ -2,6 +2,7 @@ import contextlib
 import csv
 import io
 import json
+import os
 import signal
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ from unittest import mock
 
 from script.run_type2_vectordb import (
     Workload,
+    configured_path,
     enrich_rows,
     main,
     parse_benchmark_jsonl,
@@ -412,6 +414,14 @@ class EnrichRowsTests(unittest.TestCase):
 
 
 class DryRunTests(unittest.TestCase):
+    def test_configured_path_honors_environment_override(self):
+        default = Path("/default/base.img")
+        with mock.patch.dict(os.environ, {"VECTORDB_BASE_IMAGE": "/mnt/disk0/isolated.img"}):
+            self.assertEqual(
+                Path("/mnt/disk0/isolated.img"),
+                configured_path("VECTORDB_BASE_IMAGE", default),
+            )
+
     def test_smoke_dry_run_prints_audited_configuration(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):

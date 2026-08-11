@@ -23,6 +23,13 @@ from typing import Any, Iterable, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def configured_path(env_name: str, default: Path) -> Path:
+    """Return an explicit experiment path override without changing defaults."""
+    return Path(os.environ.get(env_name, str(default))).expanduser()
+
+
 ARTIFACT_ROOT = REPO_ROOT / "artifact" / "type2_vectordb"
 BENCH_DIR = REPO_ROOT / "qemu_integration" / "guest_libcuda"
 NATIVE_BINARY = BENCH_DIR / "vectordb_shared_index_native"
@@ -30,7 +37,7 @@ GUEST_BINARY = BENCH_DIR / "vectordb_shared_index_guest"
 GUEST_LIBCUDA = BENCH_DIR / "libcuda.so.1"
 SERVER_BINARY = REPO_ROOT / "build" / "cxlmemsim_server"
 QEMU_BINARY = REPO_ROOT / "build" / "qemu-vectordb" / "qemu-system-x86_64"
-BASE_IMAGE = Path("/home/victoryang00/CXLMemSim/build/qemu.img")
+BASE_IMAGE = configured_path("VECTORDB_BASE_IMAGE", Path("/home/victoryang00/CXLMemSim/build/qemu.img"))
 KERNEL_IMAGE = Path("/home/victoryang00/cxl/arch/x86/boot/bzImage")
 REAL_LIBCUDA = Path("/usr/lib/x86_64-linux-gnu/libcuda.so.1")
 SETUP_SCRIPT = REPO_ROOT / "qemu_integration" / "setup_cxl_numa.sh"
@@ -1125,6 +1132,13 @@ def execute_run(workloads: list[Workload]) -> Path:
         "budget_seconds": 28800,
         "commits": commits,
         "gpu_inventory": inventory,
+        "inputs": {
+            "base_image": str(BASE_IMAGE),
+            "kernel_image": str(KERNEL_IMAGE),
+            "qemu_binary": str(QEMU_BINARY),
+            "server_binary": str(SERVER_BINARY),
+            "real_libcuda": str(REAL_LIBCUDA),
+        },
         "workloads": [asdict(workload) for workload in workloads],
         "commands": commands,
         "evidence_paths": [
