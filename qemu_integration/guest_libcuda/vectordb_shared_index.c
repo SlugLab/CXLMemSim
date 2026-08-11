@@ -147,6 +147,17 @@ static float random_float(uint64_t *state) {
     return (float)(uint32_t)(next_random(state) >> 40) * (2.0f / 16777216.0f) - 1.0f;
 }
 
+__attribute__((noinline)) static void mmio_store_u32(volatile uint32_t *base, size_t index, uint32_t value) {
+    base[index] = value;
+}
+
+static void mmio_store_float(float *base, size_t index, float value) {
+    uint32_t bits;
+
+    memcpy(&bits, &value, sizeof(bits));
+    mmio_store_u32((volatile uint32_t *)base, index, bits);
+}
+
 static BenchmarkMode parse_mode(const char *value) {
     if (strcmp(value, "type2-hwcc") == 0)
         return MODE_TYPE2_HWCC;
@@ -383,7 +394,8 @@ static void mark_dirty_range(DirtyLines *dirty, size_t offset, size_t bytes) {
 
 __attribute__((target("clflushopt"))) static void flush_cache_line(void *address) { _mm_clflushopt(address); }
 
-static bool publish_software_cc(float *source, CUdeviceptr replica, const DirtyLines *dirty, uint64_t *copied_bytes) {
+static bool publish_software_cc(float *source, const float *copy_source, CUdeviceptr replica, const DirtyLines *dirty,
+                                uint64_t *copied_bytes) {
     size_t line = 0;
 
     if (!__builtin_cpu_supports("clflushopt")) {
@@ -408,8 +420,8 @@ static bool publish_software_cc(float *source, CUdeviceptr replica, const DirtyL
         if (first == line)
             continue;
         bytes = (line - first) * CACHE_LINE_BYTES;
-        if (!cuda_ok(cuMemcpyHtoD_v2(replica + first * CACHE_LINE_BYTES, (uint8_t *)source + first * CACHE_LINE_BYTES,
-                                     bytes),
+        if (!cuda_ok(cuMemcpyHtoD_v2(replica + first * CACHE_LINE_BYTES,
+                                     (const uint8_t *)copy_source + first * CACHE_LINE_BYTES, bytes),
                      "cuMemcpyHtoD_v2(dirty range)"))
             return false;
         *copied_bytes += bytes;
@@ -428,8 +440,8 @@ static size_t update_count_for(const Options *options) {
     return count > options->rows ? options->rows : count;
 }
 
-static void update_source(float *source, const Options *options, uint32_t iteration, DirtyLines *dirty,
-                          uint32_t *target_query, uint32_t *target_label) {
+static void update_source(float *source, float *oracle_source, bool source_is_cxl, const Options *options,
+                          uint32_t iteration, DirtyLines *dirty, uint32_t *target_query, uint32_t *target_label) {
     size_t row_bytes = (size_t)options->dim * sizeof(float);
     size_t count = update_count_for(options);
 
@@ -439,8 +451,12 @@ static void update_source(float *source, const Options *options, uint32_t iterat
     for (size_t updated = 0; updated < count; ++updated) {
         uint32_t row = updated == 0 ? *target_label : (*target_label + (uint32_t)(updated * 7919U)) % options->rows;
         for (uint32_t dimension = 0; dimension < options->dim; ++dimension) {
-            source[(size_t)row * options->dim + dimension] =
-                8.0f + (float)iteration * 0.01f + (float)row * 0.000001f + (float)dimension * 0.0001f;
+            size_t index = (size_t)row * options->dim + dimension;
+            float value = 8.0f + (float)iteration * 0.01f + (float)row * 0.000001f + (float)dimension * 0.0001f;
+
+            oracle_source[index] = value;
+            if (source_is_cxl)
+                mmio_store_float(source, index, value);
         }
         mark_dirty_range(dirty, (size_t)row * row_bytes, row_bytes);
     }
@@ -637,6 +653,7 @@ int main(int argc, char **argv) {
     CxlApi cxl;
     Gpu gpu;
     float *source = NULL;
+    float *oracle_source = NULL;
     float *host_queries = NULL;
     int *gpu_labels = NULL;
     int *cpu_labels = NULL;
@@ -721,6 +738,16 @@ int main(int argc, char **argv) {
         fprintf(stderr, "source matrix is not cache-line aligned\n");
         goto cleanup;
     }
+    if (source_is_cxl) {
+        void *aligned_oracle_source = NULL;
+        if (posix_memalign(&aligned_oracle_source, CACHE_LINE_BYTES, index_bytes) != 0) {
+            fprintf(stderr, "oracle index allocation failed\n");
+            goto cleanup;
+        }
+        oracle_source = aligned_oracle_source;
+    } else {
+        oracle_source = source;
+    }
     {
         void *aligned_queries = NULL;
         if (posix_memalign(&aligned_queries, CACHE_LINE_BYTES, query_bytes) != 0) {
@@ -745,15 +772,20 @@ int main(int argc, char **argv) {
     }
 
     random_state = options.seed != 0 ? options.seed : UINT64_C(0x9e3779b97f4a7c15);
-    for (size_t index = 0; index < index_elements; ++index)
-        source[index] = random_float(&random_state);
+    for (size_t index = 0; index < index_elements; ++index) {
+        float value = random_float(&random_state);
+
+        oracle_source[index] = value;
+        if (source_is_cxl)
+            mmio_store_float(source, index, value);
+    }
     for (uint32_t query = 0; query < options.queries; ++query)
-        memcpy(host_queries + (size_t)query * options.dim, source + (size_t)(query % options.rows) * options.dim,
+        memcpy(host_queries + (size_t)query * options.dim, oracle_source + (size_t)(query % options.rows) * options.dim,
                (size_t)options.dim * sizeof(float));
 
     if (options.mode != MODE_TYPE2_HWCC &&
         (!cuda_ok(cuMemAlloc_v2(&device_index, index_bytes), "cuMemAlloc_v2(index)") ||
-         !cuda_ok(cuMemcpyHtoD_v2(device_index, source, index_bytes), "cuMemcpyHtoD_v2(initial index)")))
+         !cuda_ok(cuMemcpyHtoD_v2(device_index, oracle_source, index_bytes), "cuMemcpyHtoD_v2(initial index)")))
         goto cleanup;
     if (!cuda_ok(cuMemAlloc_v2(&device_queries, query_bytes), "cuMemAlloc_v2(queries)") ||
         !cuda_ok(cuMemAlloc_v2(&device_labels, label_bytes), "cuMemAlloc_v2(labels)") ||
@@ -809,7 +841,8 @@ int main(int argc, char **argv) {
         double p99_query_ms;
 
         if (options.mode != MODE_NATIVE_GPU)
-            update_source(source, &options, iteration, &dirty, &target_query, &target_label);
+            update_source(source, oracle_source, source_is_cxl, &options, iteration, &dirty, &target_query,
+                          &target_label);
         else
             clear_dirty_lines(&dirty);
         update_end = now_ms();
@@ -829,10 +862,10 @@ int main(int argc, char **argv) {
                 goto cleanup;
             }
         } else if (options.mode == MODE_SOFTWARE_CC) {
-            if (!publish_software_cc(source, device_index, &dirty, &copied_bytes))
+            if (!publish_software_cc(source, oracle_source, device_index, &dirty, &copied_bytes))
                 goto cleanup;
         } else if (options.mode == MODE_FULL_COPY) {
-            if (!cuda_ok(cuMemcpyHtoD_v2(device_index, source, index_bytes), "cuMemcpyHtoD_v2(full index)") ||
+            if (!cuda_ok(cuMemcpyHtoD_v2(device_index, oracle_source, index_bytes), "cuMemcpyHtoD_v2(full index)") ||
                 !cuda_ok(cuCtxSynchronize(), "cuCtxSynchronize(full-copy)"))
                 goto cleanup;
             copied_bytes = index_bytes;
@@ -855,7 +888,7 @@ int main(int argc, char **argv) {
         epoch_end = now_ms();
 
         oracle_start = now_ms();
-        cpu_exact_oracle(source, host_queries, &options, cpu_labels, cpu_distances);
+        cpu_exact_oracle(oracle_source, host_queries, &options, cpu_labels, cpu_distances);
         oracle_end = now_ms();
         correct = results_match(&options, gpu_labels, gpu_distances, cpu_labels, cpu_distances, &maximum_error);
         stale_observed = options.mode == MODE_NEGATIVE_STALE &&
@@ -916,6 +949,8 @@ cleanup:
     free(cpu_labels);
     free(gpu_labels);
     free(host_queries);
+    if (source_is_cxl)
+        free(oracle_source);
     if (source != NULL) {
         if (source_is_cxl && cxl.free != NULL) {
             if (cxl.free(source) != CUDA_SUCCESS)

@@ -139,6 +139,10 @@ int main(void) {
         "gpu_labels",
         "cpu_labels",
         "options.mode == MODE_TYPE2_HWCC && copied_bytes != 0",
+        "mmio_store_float",
+        "mmio_store_u32",
+        "float *oracle_source = NULL;",
+        "cpu_exact_oracle(oracle_source",
     };
     static const char *const kernel_required[] = {
         "__global__ void vectordb_distance_tiled",
@@ -176,6 +180,7 @@ int main(void) {
         }
     }
     if (!rejects(source, "options->queries, 1, 1, 1, 1, 1") || !rejects(source, "kExactL2Top10Ptx") ||
+        !rejects(source, "source[index] = random_float") || !rejects(source, "cpu_exact_oracle(source") ||
         !rejects(source, "double qps = kernel_ms") || !contains(source, "double qps = end_to_end_ms > 0.0") ||
         !contains_at_least(source, "record_coherent_grant(&grant_evidence", 2) ||
         !ordered(source, "grant->lines_granted = device_lines_granted;", "++grant->partial_grants;") ||
