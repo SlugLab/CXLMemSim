@@ -1,0 +1,23 @@
+$ cxl list -M -m -r -u
+returncode=0
+--- stdout ---
+--- stderr ---
+$ daxctl list -R -D -u
+returncode=0
+--- stdout ---
+{
+  "path":"\/platform\/ACPI0017:00\/root0\/decoder0.0\/region0\/dax_region0",
+  "id":0,
+  "size":"128.00 GiB (137.44 GB)",
+  "align":2097152,
+  "devices":[
+    {
+      "chardev":"dax0.0",
+      "size":"128.00 GiB (137.44 GB)",
+      "target_node":2,
+      "align":4096,
+      "mode":"devdax"
+    }
+  ]
+}
+--- stderr ---

@@ -1,0 +1,9 @@
+{
+  "errors": [
+    "r01-cxlmem-message-passing-cross-numa returned errors=1 stale=1 after 1000000 completed iterations; no retry performed",
+    "positive proof gate rejected because stale != 0"
+  ],
+  "git_commit": "26e34082ae615a2f1aa2f32d9785abd6c6d67997",
+  "schema": "splash.cxlmem-hwcc-validation.v1",
+  "status": "fail"
+}

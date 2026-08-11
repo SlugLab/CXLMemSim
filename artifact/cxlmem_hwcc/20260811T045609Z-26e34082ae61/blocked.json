@@ -1,0 +1,52 @@
+{
+  "completed_commands": 34,
+  "correctness": {
+    "cas_errors": 0,
+    "errors": 1,
+    "stale": 1,
+    "ticket_errors": 0
+  },
+  "failed_results": [
+    {
+      "atomics_lock_free": true,
+      "attempts": 0,
+      "average_ns": 792.271,
+      "backend": "cxlmem",
+      "cas_errors": 0,
+      "cpu_a": 0,
+      "cpu_b": 43,
+      "errors": 1,
+      "failures": 0,
+      "final_value": 1000000,
+      "flushes_in_hot_path": 0,
+      "iterations": 1000000,
+      "mapped_length": 2097152,
+      "max_written_offset": 384,
+      "mode": "message-passing",
+      "operations": 1000000,
+      "p50_ns": 0.0,
+      "p95_ns": 0.0,
+      "p99_ns": 0.0,
+      "placement": "cross-numa",
+      "repetition": 1,
+      "schema": "splash.cxlmem-hwcc.v1",
+      "stale": 1,
+      "stem": "r01-cxlmem-message-passing-cross-numa",
+      "successes": 0,
+      "ticket_errors": 0,
+      "tsc_ghz": 1.999941
+    }
+  ],
+  "failure": "r01-cxlmem-message-passing-cross-numa returned errors=1 stale=1 after 1000000 completed iterations; no retry performed",
+  "git_commit": "26e34082ae615a2f1aa2f32d9785abd6c6d67997",
+  "safety": {
+    "aer_status_changed": false,
+    "approved_length": 2097152,
+    "device_holders_after": [],
+    "max_written_offset": 2097096,
+    "new_kernel_errors": [],
+    "retry_performed": false
+  },
+  "schema": "splash.cxlmem-hwcc-blocked.v1",
+  "status": "blocked"
+}

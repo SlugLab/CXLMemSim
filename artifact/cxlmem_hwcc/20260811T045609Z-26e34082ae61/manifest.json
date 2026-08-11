@@ -1,0 +1,8 @@
+{
+  "approved_range": "[0, 0x200000)",
+  "device": "/dev/dax0.0",
+  "git_commit": "26e34082ae615a2f1aa2f32d9785abd6c6d67997",
+  "run_id": "20260811T045609Z-26e34082ae61",
+  "schema": "splash.cxlmem-hwcc-manifest.v1",
+  "status": "blocked"
+}
