@@ -18,7 +18,7 @@ It is therefore a CXL 2.0 Type-3 memory device, not a Type-2 accelerator. The
 experiment may establish all of the following:
 
 - CPU cache lines backed by physical CXL.mem remain coherent across cores and
-  sockets without software cache-line flushes.
+  NUMA domains without software cache-line flushes.
 - Cold cache misses are supplied by the CXL.mem device.
 - A modified line can move directly between CPU caches through the host
   coherence fabric while its home address remains in CXL.mem.
@@ -115,8 +115,9 @@ accesses can be served above the media path.
 Producer and consumer threads communicate through data and flag lines in the
 CXL.mem mapping. The producer writes a sequence and publishes it with a C11
 release store; the consumer observes it with an acquire load and verifies the
-corresponding payload. Tests run on two cores in the local socket and across
-the two sockets. No `CLFLUSH`, `CLFLUSHOPT`, or `CLWB` appears in this path.
+corresponding payload. The installed one-socket SNC topology is tested on two
+cores in one NUMA node and across its two NUMA nodes. No `CLFLUSH`,
+`CLFLUSHOPT`, or `CLWB` appears in this path.
 
 Required evidence:
 
@@ -128,20 +129,19 @@ Required evidence:
 
 Two pinned threads alternate ownership of one CXL.mem-backed cache line using
 release/acquire atomics. Each turn writes and checks a monotonically increasing
-token. Same-socket and cross-socket variants report handoff latency and
+token. Same-NUMA and cross-NUMA variants report handoff latency and
 throughput.
 
 Required evidence:
 
 - zero token errors and exact completion count;
 - nonzero `mem_load_l3_hit_retired.xsnp_fwd`, an equivalent local HITM event,
-  or a supported CHA snoop-forward event for same-socket handoff;
-- nonzero `mem_load_l3_miss_retired.remote_hitm` or equivalent remote-cache
-  HITM evidence for cross-socket handoff when supported; and
+  or a supported CHA snoop-forward event for the same-NUMA and cross-NUMA core
+  pairs; and
 - CXL media reads per handoff remain below the explicitly cold CXL.mem case.
 
 Unavailable model-specific PMU events are recorded as unsupported, but the
-run is publication-ready only if at least one same-socket or cross-socket
+run is publication-ready only if at least one same-NUMA or cross-NUMA
 cache-to-cache ownership event is observed.
 
 ### 4. Atomic linearizability

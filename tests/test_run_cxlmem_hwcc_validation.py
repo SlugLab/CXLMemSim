@@ -10,9 +10,13 @@ import unittest
 from script.run_cxlmem_hwcc_validation import (
     APPROVED_LENGTH,
     HardwarePaths,
+    PMU_GROUPS,
     ValidationError,
     attest_hardware,
+    discover_supported_events,
     parse_benchmark_output,
+    parse_perf_stat,
+    select_topology_cpus,
     validate_run_directory,
 )
 
@@ -61,7 +65,7 @@ def write_run_fixture(root: Path) -> Path:
         {
             "backend": "cxlmem",
             "mode": "cold-load",
-            "placement": "same-socket",
+            "placement": "same-numa",
             "repetition": "0",
             "event": "mem_load_retired.local_cxl_mem",
             "value": "100",
@@ -69,7 +73,7 @@ def write_run_fixture(root: Path) -> Path:
         {
             "backend": "cxlmem",
             "mode": "handoff",
-            "placement": "cross-socket",
+            "placement": "cross-numa",
             "repetition": "0",
             "event": "mem_load_l3_miss_retired.remote_hitm",
             "value": "20",
@@ -281,6 +285,67 @@ class BenchmarkOutputTest(unittest.TestCase):
             payload.pop(missing)
             with self.subTest(missing=missing), self.assertRaisesRegex(ValidationError, "missing"):
                 parse_benchmark_output(json.dumps(payload))
+
+
+class PerfAndTopologyTest(unittest.TestCase):
+    def test_discovers_first_supported_event_in_each_group(self):
+        perf_list = """
+          mem_load_retired.local_cxl_mem
+          ocr.demand_data_rd.l3_hit.snoop_hitm
+          cxl_pmu_mem0.0/m2s_req_memrd/
+        """
+        selected = discover_supported_events(perf_list)
+        self.assertEqual(selected["cxl_source"], "mem_load_retired.local_cxl_mem")
+        self.assertEqual(selected["cache_to_cache"], "ocr.demand_data_rd.l3_hit.snoop_hitm")
+        self.assertEqual(selected["device_reads"], "cxl_pmu_mem0.0/m2s_req_memrd/")
+
+    def test_rejects_missing_pmu_group(self):
+        with self.assertRaisesRegex(ValidationError, "device_reads"):
+            discover_supported_events(
+                "\n".join(
+                    candidates[0] for group, candidates in PMU_GROUPS.items() if group != "device_reads"
+                )
+            )
+
+    def test_parses_perf_csv_and_rejects_unsupported_values(self):
+        parsed = parse_perf_stat(
+            "1,234;;mem_load_retired.local_cxl_mem;100.00;100.00;\n"
+            "20;;mem_load_l3_miss_retired.remote_hitm;100.00;100.00;\n",
+            separator=";",
+        )
+        self.assertEqual(parsed["mem_load_retired.local_cxl_mem"], 1234.0)
+        self.assertEqual(parsed["mem_load_l3_miss_retired.remote_hitm"], 20.0)
+        for marker in ("<not supported>", "<not counted>"):
+            with self.subTest(marker=marker), self.assertRaisesRegex(ValidationError, "PMU event"):
+                parse_perf_stat(f"{marker};;event;;\n", separator=";")
+
+    def test_selects_distinct_same_numa_cores_and_remote_numa_core(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cpu_root = Path(temporary)
+            topology = {0: (0, 0, 0), 1: (0, 0, 1), 2: (0, 0, 0), 43: (0, 1, 64)}
+            for cpu, (package, node, core) in topology.items():
+                directory = cpu_root / f"cpu{cpu}/topology"
+                directory.mkdir(parents=True)
+                (directory / "physical_package_id").write_text(f"{package}\n")
+                (directory / "core_id").write_text(f"{core}\n")
+                (cpu_root / f"cpu{cpu}/online").write_text("1\n")
+                (cpu_root / f"cpu{cpu}/node{node}").mkdir()
+            selected = select_topology_cpus(cpu_root, allowed_cpus={0, 1, 2, 43})
+        self.assertEqual(selected.same_numa_a, 0)
+        self.assertEqual(selected.same_numa_b, 1)
+        self.assertEqual(selected.remote_numa, 43)
+
+    def test_topology_rejects_single_package_or_sibling_only(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cpu_root = Path(temporary)
+            for cpu in (0, 1):
+                directory = cpu_root / f"cpu{cpu}/topology"
+                directory.mkdir(parents=True)
+                (directory / "physical_package_id").write_text("0\n")
+                (directory / "core_id").write_text("0\n")
+                (cpu_root / f"cpu{cpu}/node0").mkdir()
+            with self.assertRaisesRegex(ValidationError, "two NUMA nodes"):
+                select_topology_cpus(cpu_root, allowed_cpus={0, 1})
 
 
 if __name__ == "__main__":

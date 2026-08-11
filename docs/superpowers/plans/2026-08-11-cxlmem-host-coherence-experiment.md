@@ -190,8 +190,7 @@ Parse `perf list` and choose supported events from ordered candidate groups:
 ```python
 PMU_GROUPS = {
     "cxl_source": ("mem_load_retired.local_cxl_mem", "ocr.demand_data_rd.local_cxl_mem"),
-    "same_socket_handoff": ("mem_load_l3_hit_retired.xsnp_fwd", "ocr.demand_data_rd.l3_hit.snoop_hitm"),
-    "remote_handoff": ("mem_load_l3_miss_retired.remote_hitm", "ocr.demand_data_rd.remote_cache.snoop_hitm"),
+    "cache_to_cache": ("mem_load_l3_hit_retired.xsnp_fwd", "ocr.demand_data_rd.l3_hit.snoop_hitm"),
     "device_reads": ("cxl_pmu_mem0.0/m2s_req_memrd/", "cxl_pmu_mem0.0/s2m_drs_memdata/"),
 }
 ```
@@ -202,9 +201,9 @@ event aliases.
 - [ ] **Step 2: Implement topology-aware CPU selection**
 
 Read `/sys/devices/system/cpu/cpu*/topology/{physical_package_id,core_id}`.
-Select two distinct physical cores on package 0 and one core on package 1.
-Record exact selections; fail if only one package or fewer than two physical
-cores are online.
+Select two distinct physical cores in NUMA node 0 and one core in NUMA node 1
+of the installed one-socket SNC topology. Record exact selections; fail if
+fewer than two NUMA nodes or fewer than two local physical cores are online.
 
 - [ ] **Step 3: Implement exclusive acquisition and live holder check**
 
@@ -216,7 +215,7 @@ already opened descriptor to the benchmark through `/proc/self/fd/N` with
 - [ ] **Step 4: Run each measurement under perf**
 
 Use `perf stat -x, -o RAW --event EVENT... -- BENCHMARK ...` for five measured
-repetitions of DRAM/CXL warm/cold and same/cross-socket litmus, handoff, FAA,
+repetitions of DRAM/CXL warm/cold and same/cross-NUMA litmus, handoff, FAA,
 and CAS. Capture stdout/stderr and return codes. A failed or timed-out command
 invalidates the run.
 
@@ -307,7 +306,7 @@ data ordering.
 
 Panel (a) reports DRAM/CXL warm/cold and ownership-handoff latency with p25-p75.
 Panel (b) reports normalized PMU events per operation for cold CXL and
-same/cross-socket handoff. Include correctness counts in the companion CSV,
+same/cross-NUMA handoff. Include correctness counts in the companion CSV,
 not as decorative chart text.
 
 - [ ] **Step 3: Regenerate twice and compare**
