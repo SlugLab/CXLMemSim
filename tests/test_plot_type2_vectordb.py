@@ -6,7 +6,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from script.plot_type2_vectordb import PlotValidationError, _use_log_scale, generate_paper_subset_plots
+from script.plot_type2_vectordb import (
+    UPDATE_MODES,
+    PlotValidationError,
+    _use_log_scale,
+    generate_paper_subset_plots,
+)
 from script.run_type2_vectordb import MODES, Workload, write_summary
 
 
@@ -114,24 +119,39 @@ def write_valid_run(root):
     write_summary(rows, root / "summary.csv")
     (root / "evidence.txt").write_text("validated fixture evidence\n", encoding="utf-8")
     manifest = {
+        "schema": "splash.vectordb.v1",
         "status": "pass",
         "budget_seconds": 28800,
         "row_count": len(rows),
-        "commands": ["python3 script/run_type2_vectordb.py --sweep --paper-subset"],
+        "commands": [
+            "cmake --build build --target cxlmemsim_server -j",
+            "ssh root@127.0.0.1 'vectordb_shared_index --mode type2-hwcc --rows 16384'",
+        ],
         "commits": {
             "superproject": "a" * 40,
             "qemu": "b" * 40,
             "qemu_gitlink": "b" * 40,
         },
         "gpu_inventory": rows[0]["gpu_inventory"],
+        "inputs": {
+            "base_image": "/images/qemu-node0.img",
+            "kernel_image": "/images/bzImage",
+            "qemu_binary": "/build/qemu-system-x86_64",
+            "real_libcuda": "/usr/lib/x86_64-linux-gnu/libcuda.so.1",
+            "server_binary": "/build/cxlmemsim_server",
+        },
         "workloads": [workload.__dict__ for workload in workloads],
         "evidence_paths": ["evidence.txt"],
+        "started_utc": "2026-08-11T00:00:00+00:00",
         "completed_utc": "2026-08-11T01:02:03+00:00",
     }
     (root / "manifest.json").write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
 
 
 class PlotType2VectorDbTests(unittest.TestCase):
+    def test_update_panels_exclude_compute_only_native_mode(self):
+        self.assertEqual(("type2-hwcc", "software-cc", "full-copy"), UPDATE_MODES)
+
     def test_script_entrypoint_is_runnable_from_repository_root(self):
         result = subprocess.run(
             [sys.executable, "script/plot_type2_vectordb.py", "--help"],
@@ -142,7 +162,7 @@ class PlotType2VectorDbTests(unittest.TestCase):
         )
 
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("validated Type-2 VectorDB paper-subset run directory", result.stdout)
+        self.assertIn("validated run directory or its summary.csv", result.stdout)
 
     def test_uses_log_scale_only_for_material_metric_range(self):
         self.assertFalse(_use_log_scale([1200.0, 1500.0]))
@@ -158,13 +178,16 @@ class PlotType2VectorDbTests(unittest.TestCase):
             self.assertEqual(
                 {
                     root / "figures" / "type2_vectordb_paper_subset.csv",
-                    root / "figures" / "type2_vectordb_paper_subset.pdf",
-                    root / "figures" / "type2_vectordb_paper_subset.png",
+                    root / "figures" / "type2_vectordb_performance.pdf",
+                    root / "figures" / "type2_vectordb_performance.png",
+                    root / "figures" / "type2_vectordb_update_cost.pdf",
+                    root / "figures" / "type2_vectordb_update_cost.png",
                 },
                 set(outputs),
             )
-            self.assertTrue(outputs[1].read_bytes().startswith(b"%PDF"))
-            self.assertTrue(outputs[2].read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
+            for output in outputs[1:]:
+                expected = b"%PDF" if output.suffix == ".pdf" else b"\x89PNG\r\n\x1a\n"
+                self.assertTrue(output.read_bytes().startswith(expected))
             with outputs[0].open(newline="", encoding="utf-8") as source:
                 records = list(csv.DictReader(source))
             self.assertEqual(32, len(records))
@@ -178,6 +201,36 @@ class PlotType2VectorDbTests(unittest.TestCase):
             self.assertTrue(all(len(record["manifest_sha256"]) == 64 for record in records))
             self.assertTrue(all(len(record["results_sha256"]) == 64 for record in records))
             self.assertTrue(all(len(record["summary_sha256"]) == 64 for record in records))
+            self.assertTrue(all(len(record["plotter_sha256"]) == 64 for record in records))
+            self.assertEqual({"2026-08-11T00:00:00+00:00"}, {record["started_utc"] for record in records})
+            self.assertEqual({"/images/qemu-node0.img"}, {record["base_image"] for record in records})
+            self.assertEqual(
+                {"ssh root@127.0.0.1 'vectordb_shared_index --mode type2-hwcc --rows 16384'"},
+                {record["experiment_command"] for record in records},
+            )
+
+    def test_cli_accepts_summary_csv_and_generates_all_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_valid_run(root)
+            output_dir = root / "paper-figures"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "script/plot_type2_vectordb.py",
+                    str(root / "summary.csv"),
+                    "--output-dir",
+                    str(output_dir),
+                ],
+                cwd=Path(__file__).resolve().parents[1],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(5, len(list(output_dir.iterdir())))
 
     def assert_fails_without_outputs(self, mutate, expected):
         with tempfile.TemporaryDirectory() as directory:
@@ -221,6 +274,14 @@ class PlotType2VectorDbTests(unittest.TestCase):
                 writer.writerows(records)
 
         self.assert_fails_without_outputs(mutate, "summary.csv .* qps_median does not match results.jsonl")
+
+    def test_rejects_incomplete_provenance(self):
+        def mutate(root):
+            manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+            del manifest["completed_utc"]
+            (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+        self.assert_fails_without_outputs(mutate, "completed_utc")
 
 
 if __name__ == "__main__":
