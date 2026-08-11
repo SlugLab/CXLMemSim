@@ -40,7 +40,6 @@ QEMU_BINARY = REPO_ROOT / "build" / "qemu-vectordb" / "qemu-system-x86_64"
 BASE_IMAGE = configured_path("VECTORDB_BASE_IMAGE", Path("/home/victoryang00/CXLMemSim/build/qemu.img"))
 KERNEL_IMAGE = Path("/home/victoryang00/cxl/arch/x86/boot/bzImage")
 REAL_LIBCUDA = Path("/usr/lib/x86_64-linux-gnu/libcuda.so.1")
-SETUP_SCRIPT = REPO_ROOT / "qemu_integration" / "setup_cxl_numa.sh"
 
 SCHEMA = "splash.vectordb.v1"
 MODES = ("type2-hwcc", "software-cc", "full-copy", "native-gpu", "negative-stale")
@@ -655,6 +654,19 @@ def benchmark_command(binary: str, mode: str, workload: Workload) -> list[str]:
     ]
 
 
+def guest_type2_probe_command() -> str:
+    return (
+        "set -eu; chmod 0755 /root/vectordb/vectordb_shared_index; device=; "
+        "for candidate in /sys/bus/pci/devices/*; do "
+        "[ \"$(cat \"$candidate/vendor\" 2>/dev/null)\" = 0x8086 ] || continue; "
+        "[ \"$(cat \"$candidate/device\" 2>/dev/null)\" = 0x0d92 ] || continue; "
+        "device=$candidate; break; done; "
+        "[ -n \"$device\" ]; [ -e \"$device/resource2\" ]; [ -e \"$device/resource4\" ]; "
+        "printf 'bdf=%s\\nvendor=0x8086\\ndevice=0x0d92\\n' \"${device##*/}\"; "
+        "awk 'NR == 3 { print \"bar2=\" $0 } NR == 5 { print \"bar4=\" $0 }' \"$device/resource\""
+    )
+
+
 def server_command(port: int) -> list[str]:
     return [
         str(SERVER_BINARY),
@@ -909,7 +921,6 @@ def run_guest_mode(
         transfers = (
             [*scp_base, str(GUEST_BINARY), f"{target}:/root/vectordb/vectordb_shared_index"],
             [*scp_base, str(GUEST_LIBCUDA), f"{target}:/root/vectordb/libcuda.so.1"],
-            [*scp_base, str(SETUP_SCRIPT), f"{target}:/root/vectordb/setup_cxl_numa.sh"],
         )
         mkdir = [*ssh_base, "mkdir -p /root/vectordb"]
         commands.append(command_text(mkdir))
@@ -921,16 +932,9 @@ def run_guest_mode(
                 point_dir / f"scp-{transfer_index}.log",
                 timeout=_budget_remaining(deadline),
             )
-        setup_remote = (
-            "chmod 0755 /root/vectordb/vectordb_shared_index /root/vectordb/setup_cxl_numa.sh && "
-            "systemctl mask cxl-numa-setup.service >/dev/null 2>&1 || true; "
-            "LOG_FILE=/root/vectordb/cxl-setup.log REGION_SIZE=512M CXL_REGION_TYPE=ram "
-            "CXL_CREATE_DAX=1 CXL_DAX_MODE=devdax CXL_TOUCH_DAX=0 CXL_CONFIGURE_NET=0 "
-            "/root/vectordb/setup_cxl_numa.sh"
-        )
-        setup = [*ssh_base, setup_remote]
-        commands.append(command_text(setup))
-        _run_capture(setup, point_dir / "guest-setup.log", timeout=_budget_remaining(deadline))
+        topology_probe = [*ssh_base, guest_type2_probe_command()]
+        commands.append(command_text(topology_probe))
+        _run_capture(topology_probe, point_dir / "guest-topology.log", timeout=_budget_remaining(deadline))
 
         if mode == "type2-hwcc" and workload.update_ratio == 0:
             qualification = Workload(
@@ -1071,14 +1075,8 @@ def dry_run(workloads: list[Workload]) -> None:
                 print(command_text(server_command(server_port)))
                 print(command_text(qemu_command(overlay, server_port, ssh_port, max(64, workload.matrix_bytes))))
                 print(f"ssh -p {ssh_port} root@127.0.0.1 mkdir -p /root/vectordb")
-                print(
-                    f"scp -P {ssh_port} {GUEST_BINARY} {GUEST_LIBCUDA} {SETUP_SCRIPT} "
-                    "root@127.0.0.1:/root/vectordb/"
-                )
-                print(
-                    f"ssh -p {ssh_port} root@127.0.0.1 systemctl mask cxl-numa-setup.service; "
-                    "REGION_SIZE=512M /root/vectordb/setup_cxl_numa.sh"
-                )
+                print(f"scp -P {ssh_port} {GUEST_BINARY} {GUEST_LIBCUDA} root@127.0.0.1:/root/vectordb/")
+                print(f"ssh -p {ssh_port} root@127.0.0.1 {shlex.quote(guest_type2_probe_command())}")
                 if mode == "type2-hwcc" and workload.update_ratio == 0:
                     qualification = Workload(
                         rows=workload.rows,

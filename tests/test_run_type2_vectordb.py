@@ -447,6 +447,10 @@ class DryRunTests(unittest.TestCase):
             "-cpu host",
             "systemd.mask=cxl-numa-setup.service",
             "LD_LIBRARY_PATH=/root/vectordb",
+            "resource2",
+            "resource4",
+            "0x8086",
+            "0x0d92",
             "qemu-img create -f qcow2",
             "git rev-parse HEAD:lib/qemu",
             "lscpu",
@@ -455,6 +459,7 @@ class DryRunTests(unittest.TestCase):
         ):
             with self.subTest(token=token):
                 self.assertIn(token, text)
+        self.assertNotIn("setup_cxl_numa.sh", text)
         self.assertNotIn("gpu-mode=1", text)
         self.assertNotIn("backend=5", text)
         self.assertNotIn("simulation", text.lower())
