@@ -12,6 +12,7 @@ from script.run_cxlmem_hwcc_validation import (
     HardwarePaths,
     ValidationError,
     attest_hardware,
+    parse_benchmark_output,
     validate_run_directory,
 )
 
@@ -220,6 +221,66 @@ class ArtifactValidationTest(unittest.TestCase):
                 line = f"{digest}  {relative}"
             lines.append(line)
         (run_dir / "SHA256SUMS").write_text("\n".join(lines) + "\n")
+
+
+class BenchmarkOutputTest(unittest.TestCase):
+    def test_accepts_single_complete_benchmark_object(self):
+        payload = {
+            "schema": "splash.cxlmem-hwcc.v1",
+            "mode": "handoff",
+            "backend": "cxlmem",
+            "cpu_a": 0,
+            "cpu_b": 43,
+            "iterations": 1000,
+            "operations": 2000,
+            "errors": 0,
+            "flushes_in_hot_path": 0,
+            "average_ns": 42.5,
+        }
+        self.assertEqual(parse_benchmark_output(json.dumps(payload) + "\n"), payload)
+
+    def test_rejects_non_json_extra_output(self):
+        valid = json.dumps(
+            {
+                "schema": "splash.cxlmem-hwcc.v1",
+                "mode": "warm-load",
+                "backend": "dram",
+                "cpu_a": 0,
+                "cpu_b": 1,
+                "iterations": 1,
+                "operations": 1,
+                "errors": 0,
+                "flushes_in_hot_path": 0,
+                "average_ns": 1.0,
+            }
+        )
+        for output in (f"debug\n{valid}\n", f"{valid}\ntrailer\n", f"{valid}\n{valid}\n"):
+            with self.subTest(output=output), self.assertRaisesRegex(ValidationError, "exactly one JSON"):
+                parse_benchmark_output(output)
+
+    def test_rejects_unknown_or_incomplete_benchmark_object(self):
+        base = {
+            "schema": "splash.cxlmem-hwcc.v1",
+            "mode": "handoff",
+            "backend": "dram",
+            "cpu_a": 0,
+            "cpu_b": 1,
+            "iterations": 1,
+            "operations": 2,
+            "errors": 0,
+            "flushes_in_hot_path": 0,
+            "average_ns": 1.0,
+        }
+        for field, value in (("schema", "bad"), ("mode", "bad"), ("backend", "bad")):
+            payload = dict(base)
+            payload[field] = value
+            with self.subTest(field=field), self.assertRaises(ValidationError):
+                parse_benchmark_output(json.dumps(payload))
+        for missing in base:
+            payload = dict(base)
+            payload.pop(missing)
+            with self.subTest(missing=missing), self.assertRaisesRegex(ValidationError, "missing"):
+                parse_benchmark_output(json.dumps(payload))
 
 
 if __name__ == "__main__":

@@ -160,3 +160,7 @@ target_compile_definitions(st_serial256 PRIVATE -DFENCE_COUNT=256)
 
 add_executable(type2_device_litmus type2_device_litmus.c)
 target_compile_options(type2_device_litmus PRIVATE -std=gnu11)
+
+add_executable(cxlmem_host_cc_validation cxlmem_host_cc_validation.c)
+target_compile_options(cxlmem_host_cc_validation PRIVATE -std=gnu11)
+target_link_libraries(cxlmem_host_cc_validation PRIVATE pthread m)

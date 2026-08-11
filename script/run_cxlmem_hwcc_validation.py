@@ -21,6 +21,8 @@ EXPECTED_BDF = "0000:64:00.0"
 EXPECTED_PCI_ID = "1b00:c002"
 EXPECTED_SERIAL = "0x8a0af738c2820407"
 EXPECTED_REGION_SIZE = 128 * 1024**3
+BENCHMARK_MODES = {"warm-load", "cold-load", "message-passing", "handoff", "fetch-add", "cas"}
+BENCHMARK_BACKENDS = {"dram", "cxlmem"}
 
 
 class ValidationError(RuntimeError):
@@ -49,6 +51,45 @@ class Attestation:
     offset: int
     length: int
     checks: tuple[str, ...]
+
+
+def parse_benchmark_output(output: str) -> dict:
+    lines = output.splitlines()
+    if len(lines) != 1:
+        raise ValidationError("benchmark stdout must contain exactly one JSON object")
+    try:
+        payload = json.loads(lines[0])
+    except json.JSONDecodeError as error:
+        raise ValidationError("benchmark stdout must contain exactly one JSON object") from error
+    if not isinstance(payload, dict):
+        raise ValidationError("benchmark output must be a JSON object")
+    required = {
+        "schema",
+        "mode",
+        "backend",
+        "cpu_a",
+        "cpu_b",
+        "iterations",
+        "operations",
+        "errors",
+        "flushes_in_hot_path",
+        "average_ns",
+    }
+    missing = sorted(required - payload.keys())
+    if missing:
+        raise ValidationError(f"benchmark output missing fields: {missing}")
+    if payload["schema"] != "splash.cxlmem-hwcc.v1":
+        raise ValidationError("benchmark schema mismatch")
+    if payload["mode"] not in BENCHMARK_MODES:
+        raise ValidationError(f"unknown benchmark mode: {payload['mode']}")
+    if payload["backend"] not in BENCHMARK_BACKENDS:
+        raise ValidationError(f"unknown benchmark backend: {payload['backend']}")
+    for field in ("cpu_a", "cpu_b", "iterations", "operations", "errors", "flushes_in_hot_path"):
+        if not isinstance(payload[field], int) or payload[field] < 0:
+            raise ValidationError(f"invalid benchmark integer field {field}")
+    if not isinstance(payload["average_ns"], (int, float)) or payload["average_ns"] < 0:
+        raise ValidationError("invalid benchmark average_ns")
+    return payload
 
 
 def _read(path: Path, description: str) -> str:
