@@ -1,0 +1,20 @@
+{
+  "bdf": "0000:64:00.0",
+  "checks": [
+    "approved-range",
+    "identity",
+    "dvsec-cache-disabled-mem-enabled",
+    "committed-ram-region",
+    "devdax-resource-match",
+    "no-open-holders",
+    "advisory-lock-available"
+  ],
+  "dax_size": 137438953472,
+  "firmware": "20.00.0.0609.00",
+  "length": 2097152,
+  "offset": 0,
+  "pci_id": "1b00:c002",
+  "region_resource": 139586437120,
+  "region_size": 137438953472,
+  "serial": "0x8a0af738c2820407"
+}

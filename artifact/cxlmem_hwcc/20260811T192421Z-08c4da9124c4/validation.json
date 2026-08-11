@@ -1,0 +1,14 @@
+{
+  "checksummed_files": 412,
+  "git_commit": "08c4da9124c46f741ca86d5960ed958093749775",
+  "proof_gates": {
+    "atomics": "pass",
+    "cache_to_cache_pmu": "pass",
+    "cxl_source_pmu": "pass",
+    "litmus": "pass",
+    "write_boundary": "pass"
+  },
+  "result_rows": 600,
+  "schema": "splash.cxlmem-hwcc-validation.v1",
+  "status": "pass"
+}

@@ -1,0 +1,850 @@
+{
+  "atomic": {
+    "cas_errors": 0,
+    "ticket_errors": 0
+  },
+  "commands": [
+    {
+      "name": "r00-dram-warm-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-dram-cold-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-dram-message-passing-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-dram-message-passing-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-dram-handoff-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-dram-handoff-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-dram-fetch-add-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-dram-fetch-add-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-dram-cas-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-dram-cas-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-cxlmem-warm-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-cxlmem-cold-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-cxlmem-message-passing-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-cxlmem-message-passing-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-cxlmem-handoff-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-cxlmem-handoff-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-cxlmem-fetch-add-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-cxlmem-fetch-add-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-cxlmem-cas-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r00-cxlmem-cas-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-dram-warm-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-dram-cold-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-dram-message-passing-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-dram-message-passing-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-dram-handoff-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-dram-handoff-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-dram-fetch-add-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-dram-fetch-add-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-dram-cas-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-dram-cas-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-cxlmem-warm-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-cxlmem-cold-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-cxlmem-message-passing-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-cxlmem-message-passing-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-cxlmem-handoff-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-cxlmem-handoff-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-cxlmem-fetch-add-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-cxlmem-fetch-add-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-cxlmem-cas-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r01-cxlmem-cas-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-dram-warm-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-dram-cold-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-dram-message-passing-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-dram-message-passing-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-dram-handoff-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-dram-handoff-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-dram-fetch-add-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-dram-fetch-add-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-dram-cas-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-dram-cas-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-cxlmem-warm-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-cxlmem-cold-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-cxlmem-message-passing-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-cxlmem-message-passing-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-cxlmem-handoff-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-cxlmem-handoff-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-cxlmem-fetch-add-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-cxlmem-fetch-add-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-cxlmem-cas-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r02-cxlmem-cas-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-dram-warm-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-dram-cold-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-dram-message-passing-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-dram-message-passing-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-dram-handoff-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-dram-handoff-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-dram-fetch-add-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-dram-fetch-add-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-dram-cas-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-dram-cas-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-cxlmem-warm-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-cxlmem-cold-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-cxlmem-message-passing-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-cxlmem-message-passing-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-cxlmem-handoff-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-cxlmem-handoff-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-cxlmem-fetch-add-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-cxlmem-fetch-add-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-cxlmem-cas-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r03-cxlmem-cas-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-dram-warm-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-dram-cold-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-dram-message-passing-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-dram-message-passing-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-dram-handoff-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-dram-handoff-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-dram-fetch-add-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-dram-fetch-add-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-dram-cas-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-dram-cas-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-cxlmem-warm-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-cxlmem-cold-load-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-cxlmem-message-passing-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-cxlmem-message-passing-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-cxlmem-handoff-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-cxlmem-handoff-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-cxlmem-fetch-add-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-cxlmem-fetch-add-cross-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-cxlmem-cas-same-numa",
+      "returncode": 0
+    },
+    {
+      "name": "r04-cxlmem-cas-cross-numa",
+      "returncode": 0
+    }
+  ],
+  "cpus": {
+    "local_node": 0,
+    "package": 0,
+    "remote_node": 1,
+    "remote_numa": 43,
+    "same_numa_a": 0,
+    "same_numa_b": 1
+  },
+  "git_commit": "08c4da9124c46f741ca86d5960ed958093749775",
+  "iterations": 1000000,
+  "litmus": {
+    "stale": 0
+  },
+  "pmu": {
+    "cache_to_cache_events": 29891490.0,
+    "cold_cxl_media_per_operation": 1.0547288,
+    "cold_cxl_reads": 10271741.0,
+    "events": {
+      "cache_to_cache": "mem_load_l3_hit_retired.xsnp_fwd",
+      "cxl_source": "mem_load_retired.local_cxl_mem",
+      "device_reads": "cxl_pmu_mem0.0/m2s_req_memrd/"
+    },
+    "warm_cxl_media_per_operation": 0.0626066
+  },
+  "raw_evidence": [
+    "aer-after.txt",
+    "aer-before.txt",
+    "attestation.json",
+    "cxl-topology.txt",
+    "dmesg-after.txt",
+    "dmesg-before.txt",
+    "dvsec.txt",
+    "preflight.json",
+    "raw/r00-cxlmem-cas-cross-numa.cpu-perf.csv",
+    "raw/r00-cxlmem-cas-cross-numa.device-perf.csv",
+    "raw/r00-cxlmem-cas-cross-numa.stderr.txt",
+    "raw/r00-cxlmem-cas-cross-numa.stdout.json",
+    "raw/r00-cxlmem-cas-same-numa.cpu-perf.csv",
+    "raw/r00-cxlmem-cas-same-numa.device-perf.csv",
+    "raw/r00-cxlmem-cas-same-numa.stderr.txt",
+    "raw/r00-cxlmem-cas-same-numa.stdout.json",
+    "raw/r00-cxlmem-cold-load-same-numa.cpu-perf.csv",
+    "raw/r00-cxlmem-cold-load-same-numa.device-perf.csv",
+    "raw/r00-cxlmem-cold-load-same-numa.stderr.txt",
+    "raw/r00-cxlmem-cold-load-same-numa.stdout.json",
+    "raw/r00-cxlmem-fetch-add-cross-numa.cpu-perf.csv",
+    "raw/r00-cxlmem-fetch-add-cross-numa.device-perf.csv",
+    "raw/r00-cxlmem-fetch-add-cross-numa.stderr.txt",
+    "raw/r00-cxlmem-fetch-add-cross-numa.stdout.json",
+    "raw/r00-cxlmem-fetch-add-same-numa.cpu-perf.csv",
+    "raw/r00-cxlmem-fetch-add-same-numa.device-perf.csv",
+    "raw/r00-cxlmem-fetch-add-same-numa.stderr.txt",
+    "raw/r00-cxlmem-fetch-add-same-numa.stdout.json",
+    "raw/r00-cxlmem-handoff-cross-numa.cpu-perf.csv",
+    "raw/r00-cxlmem-handoff-cross-numa.device-perf.csv",
+    "raw/r00-cxlmem-handoff-cross-numa.stderr.txt",
+    "raw/r00-cxlmem-handoff-cross-numa.stdout.json",
+    "raw/r00-cxlmem-handoff-same-numa.cpu-perf.csv",
+    "raw/r00-cxlmem-handoff-same-numa.device-perf.csv",
+    "raw/r00-cxlmem-handoff-same-numa.stderr.txt",
+    "raw/r00-cxlmem-handoff-same-numa.stdout.json",
+    "raw/r00-cxlmem-message-passing-cross-numa.cpu-perf.csv",
+    "raw/r00-cxlmem-message-passing-cross-numa.device-perf.csv",
+    "raw/r00-cxlmem-message-passing-cross-numa.stderr.txt",
+    "raw/r00-cxlmem-message-passing-cross-numa.stdout.json",
+    "raw/r00-cxlmem-message-passing-same-numa.cpu-perf.csv",
+    "raw/r00-cxlmem-message-passing-same-numa.device-perf.csv",
+    "raw/r00-cxlmem-message-passing-same-numa.stderr.txt",
+    "raw/r00-cxlmem-message-passing-same-numa.stdout.json",
+    "raw/r00-cxlmem-warm-load-same-numa.cpu-perf.csv",
+    "raw/r00-cxlmem-warm-load-same-numa.device-perf.csv",
+    "raw/r00-cxlmem-warm-load-same-numa.stderr.txt",
+    "raw/r00-cxlmem-warm-load-same-numa.stdout.json",
+    "raw/r00-dram-cas-cross-numa.cpu-perf.csv",
+    "raw/r00-dram-cas-cross-numa.device-perf.csv",
+    "raw/r00-dram-cas-cross-numa.stderr.txt",
+    "raw/r00-dram-cas-cross-numa.stdout.json",
+    "raw/r00-dram-cas-same-numa.cpu-perf.csv",
+    "raw/r00-dram-cas-same-numa.device-perf.csv",
+    "raw/r00-dram-cas-same-numa.stderr.txt",
+    "raw/r00-dram-cas-same-numa.stdout.json",
+    "raw/r00-dram-cold-load-same-numa.cpu-perf.csv",
+    "raw/r00-dram-cold-load-same-numa.device-perf.csv",
+    "raw/r00-dram-cold-load-same-numa.stderr.txt",
+    "raw/r00-dram-cold-load-same-numa.stdout.json",
+    "raw/r00-dram-fetch-add-cross-numa.cpu-perf.csv",
+    "raw/r00-dram-fetch-add-cross-numa.device-perf.csv",
+    "raw/r00-dram-fetch-add-cross-numa.stderr.txt",
+    "raw/r00-dram-fetch-add-cross-numa.stdout.json",
+    "raw/r00-dram-fetch-add-same-numa.cpu-perf.csv",
+    "raw/r00-dram-fetch-add-same-numa.device-perf.csv",
+    "raw/r00-dram-fetch-add-same-numa.stderr.txt",
+    "raw/r00-dram-fetch-add-same-numa.stdout.json",
+    "raw/r00-dram-handoff-cross-numa.cpu-perf.csv",
+    "raw/r00-dram-handoff-cross-numa.device-perf.csv",
+    "raw/r00-dram-handoff-cross-numa.stderr.txt",
+    "raw/r00-dram-handoff-cross-numa.stdout.json",
+    "raw/r00-dram-handoff-same-numa.cpu-perf.csv",
+    "raw/r00-dram-handoff-same-numa.device-perf.csv",
+    "raw/r00-dram-handoff-same-numa.stderr.txt",
+    "raw/r00-dram-handoff-same-numa.stdout.json",
+    "raw/r00-dram-message-passing-cross-numa.cpu-perf.csv",
+    "raw/r00-dram-message-passing-cross-numa.device-perf.csv",
+    "raw/r00-dram-message-passing-cross-numa.stderr.txt",
+    "raw/r00-dram-message-passing-cross-numa.stdout.json",
+    "raw/r00-dram-message-passing-same-numa.cpu-perf.csv",
+    "raw/r00-dram-message-passing-same-numa.device-perf.csv",
+    "raw/r00-dram-message-passing-same-numa.stderr.txt",
+    "raw/r00-dram-message-passing-same-numa.stdout.json",
+    "raw/r00-dram-warm-load-same-numa.cpu-perf.csv",
+    "raw/r00-dram-warm-load-same-numa.device-perf.csv",
+    "raw/r00-dram-warm-load-same-numa.stderr.txt",
+    "raw/r00-dram-warm-load-same-numa.stdout.json",
+    "raw/r01-cxlmem-cas-cross-numa.cpu-perf.csv",
+    "raw/r01-cxlmem-cas-cross-numa.device-perf.csv",
+    "raw/r01-cxlmem-cas-cross-numa.stderr.txt",
+    "raw/r01-cxlmem-cas-cross-numa.stdout.json",
+    "raw/r01-cxlmem-cas-same-numa.cpu-perf.csv",
+    "raw/r01-cxlmem-cas-same-numa.device-perf.csv",
+    "raw/r01-cxlmem-cas-same-numa.stderr.txt",
+    "raw/r01-cxlmem-cas-same-numa.stdout.json",
+    "raw/r01-cxlmem-cold-load-same-numa.cpu-perf.csv",
+    "raw/r01-cxlmem-cold-load-same-numa.device-perf.csv",
+    "raw/r01-cxlmem-cold-load-same-numa.stderr.txt",
+    "raw/r01-cxlmem-cold-load-same-numa.stdout.json",
+    "raw/r01-cxlmem-fetch-add-cross-numa.cpu-perf.csv",
+    "raw/r01-cxlmem-fetch-add-cross-numa.device-perf.csv",
+    "raw/r01-cxlmem-fetch-add-cross-numa.stderr.txt",
+    "raw/r01-cxlmem-fetch-add-cross-numa.stdout.json",
+    "raw/r01-cxlmem-fetch-add-same-numa.cpu-perf.csv",
+    "raw/r01-cxlmem-fetch-add-same-numa.device-perf.csv",
+    "raw/r01-cxlmem-fetch-add-same-numa.stderr.txt",
+    "raw/r01-cxlmem-fetch-add-same-numa.stdout.json",
+    "raw/r01-cxlmem-handoff-cross-numa.cpu-perf.csv",
+    "raw/r01-cxlmem-handoff-cross-numa.device-perf.csv",
+    "raw/r01-cxlmem-handoff-cross-numa.stderr.txt",
+    "raw/r01-cxlmem-handoff-cross-numa.stdout.json",
+    "raw/r01-cxlmem-handoff-same-numa.cpu-perf.csv",
+    "raw/r01-cxlmem-handoff-same-numa.device-perf.csv",
+    "raw/r01-cxlmem-handoff-same-numa.stderr.txt",
+    "raw/r01-cxlmem-handoff-same-numa.stdout.json",
+    "raw/r01-cxlmem-message-passing-cross-numa.cpu-perf.csv",
+    "raw/r01-cxlmem-message-passing-cross-numa.device-perf.csv",
+    "raw/r01-cxlmem-message-passing-cross-numa.stderr.txt",
+    "raw/r01-cxlmem-message-passing-cross-numa.stdout.json",
+    "raw/r01-cxlmem-message-passing-same-numa.cpu-perf.csv",
+    "raw/r01-cxlmem-message-passing-same-numa.device-perf.csv",
+    "raw/r01-cxlmem-message-passing-same-numa.stderr.txt",
+    "raw/r01-cxlmem-message-passing-same-numa.stdout.json",
+    "raw/r01-cxlmem-warm-load-same-numa.cpu-perf.csv",
+    "raw/r01-cxlmem-warm-load-same-numa.device-perf.csv",
+    "raw/r01-cxlmem-warm-load-same-numa.stderr.txt",
+    "raw/r01-cxlmem-warm-load-same-numa.stdout.json",
+    "raw/r01-dram-cas-cross-numa.cpu-perf.csv",
+    "raw/r01-dram-cas-cross-numa.device-perf.csv",
+    "raw/r01-dram-cas-cross-numa.stderr.txt",
+    "raw/r01-dram-cas-cross-numa.stdout.json",
+    "raw/r01-dram-cas-same-numa.cpu-perf.csv",
+    "raw/r01-dram-cas-same-numa.device-perf.csv",
+    "raw/r01-dram-cas-same-numa.stderr.txt",
+    "raw/r01-dram-cas-same-numa.stdout.json",
+    "raw/r01-dram-cold-load-same-numa.cpu-perf.csv",
+    "raw/r01-dram-cold-load-same-numa.device-perf.csv",
+    "raw/r01-dram-cold-load-same-numa.stderr.txt",
+    "raw/r01-dram-cold-load-same-numa.stdout.json",
+    "raw/r01-dram-fetch-add-cross-numa.cpu-perf.csv",
+    "raw/r01-dram-fetch-add-cross-numa.device-perf.csv",
+    "raw/r01-dram-fetch-add-cross-numa.stderr.txt",
+    "raw/r01-dram-fetch-add-cross-numa.stdout.json",
+    "raw/r01-dram-fetch-add-same-numa.cpu-perf.csv",
+    "raw/r01-dram-fetch-add-same-numa.device-perf.csv",
+    "raw/r01-dram-fetch-add-same-numa.stderr.txt",
+    "raw/r01-dram-fetch-add-same-numa.stdout.json",
+    "raw/r01-dram-handoff-cross-numa.cpu-perf.csv",
+    "raw/r01-dram-handoff-cross-numa.device-perf.csv",
+    "raw/r01-dram-handoff-cross-numa.stderr.txt",
+    "raw/r01-dram-handoff-cross-numa.stdout.json",
+    "raw/r01-dram-handoff-same-numa.cpu-perf.csv",
+    "raw/r01-dram-handoff-same-numa.device-perf.csv",
+    "raw/r01-dram-handoff-same-numa.stderr.txt",
+    "raw/r01-dram-handoff-same-numa.stdout.json",
+    "raw/r01-dram-message-passing-cross-numa.cpu-perf.csv",
+    "raw/r01-dram-message-passing-cross-numa.device-perf.csv",
+    "raw/r01-dram-message-passing-cross-numa.stderr.txt",
+    "raw/r01-dram-message-passing-cross-numa.stdout.json",
+    "raw/r01-dram-message-passing-same-numa.cpu-perf.csv",
+    "raw/r01-dram-message-passing-same-numa.device-perf.csv",
+    "raw/r01-dram-message-passing-same-numa.stderr.txt",
+    "raw/r01-dram-message-passing-same-numa.stdout.json",
+    "raw/r01-dram-warm-load-same-numa.cpu-perf.csv",
+    "raw/r01-dram-warm-load-same-numa.device-perf.csv",
+    "raw/r01-dram-warm-load-same-numa.stderr.txt",
+    "raw/r01-dram-warm-load-same-numa.stdout.json",
+    "raw/r02-cxlmem-cas-cross-numa.cpu-perf.csv",
+    "raw/r02-cxlmem-cas-cross-numa.device-perf.csv",
+    "raw/r02-cxlmem-cas-cross-numa.stderr.txt",
+    "raw/r02-cxlmem-cas-cross-numa.stdout.json",
+    "raw/r02-cxlmem-cas-same-numa.cpu-perf.csv",
+    "raw/r02-cxlmem-cas-same-numa.device-perf.csv",
+    "raw/r02-cxlmem-cas-same-numa.stderr.txt",
+    "raw/r02-cxlmem-cas-same-numa.stdout.json",
+    "raw/r02-cxlmem-cold-load-same-numa.cpu-perf.csv",
+    "raw/r02-cxlmem-cold-load-same-numa.device-perf.csv",
+    "raw/r02-cxlmem-cold-load-same-numa.stderr.txt",
+    "raw/r02-cxlmem-cold-load-same-numa.stdout.json",
+    "raw/r02-cxlmem-fetch-add-cross-numa.cpu-perf.csv",
+    "raw/r02-cxlmem-fetch-add-cross-numa.device-perf.csv",
+    "raw/r02-cxlmem-fetch-add-cross-numa.stderr.txt",
+    "raw/r02-cxlmem-fetch-add-cross-numa.stdout.json",
+    "raw/r02-cxlmem-fetch-add-same-numa.cpu-perf.csv",
+    "raw/r02-cxlmem-fetch-add-same-numa.device-perf.csv",
+    "raw/r02-cxlmem-fetch-add-same-numa.stderr.txt",
+    "raw/r02-cxlmem-fetch-add-same-numa.stdout.json",
+    "raw/r02-cxlmem-handoff-cross-numa.cpu-perf.csv",
+    "raw/r02-cxlmem-handoff-cross-numa.device-perf.csv",
+    "raw/r02-cxlmem-handoff-cross-numa.stderr.txt",
+    "raw/r02-cxlmem-handoff-cross-numa.stdout.json",
+    "raw/r02-cxlmem-handoff-same-numa.cpu-perf.csv",
+    "raw/r02-cxlmem-handoff-same-numa.device-perf.csv",
+    "raw/r02-cxlmem-handoff-same-numa.stderr.txt",
+    "raw/r02-cxlmem-handoff-same-numa.stdout.json",
+    "raw/r02-cxlmem-message-passing-cross-numa.cpu-perf.csv",
+    "raw/r02-cxlmem-message-passing-cross-numa.device-perf.csv",
+    "raw/r02-cxlmem-message-passing-cross-numa.stderr.txt",
+    "raw/r02-cxlmem-message-passing-cross-numa.stdout.json",
+    "raw/r02-cxlmem-message-passing-same-numa.cpu-perf.csv",
+    "raw/r02-cxlmem-message-passing-same-numa.device-perf.csv",
+    "raw/r02-cxlmem-message-passing-same-numa.stderr.txt",
+    "raw/r02-cxlmem-message-passing-same-numa.stdout.json",
+    "raw/r02-cxlmem-warm-load-same-numa.cpu-perf.csv",
+    "raw/r02-cxlmem-warm-load-same-numa.device-perf.csv",
+    "raw/r02-cxlmem-warm-load-same-numa.stderr.txt",
+    "raw/r02-cxlmem-warm-load-same-numa.stdout.json",
+    "raw/r02-dram-cas-cross-numa.cpu-perf.csv",
+    "raw/r02-dram-cas-cross-numa.device-perf.csv",
+    "raw/r02-dram-cas-cross-numa.stderr.txt",
+    "raw/r02-dram-cas-cross-numa.stdout.json",
+    "raw/r02-dram-cas-same-numa.cpu-perf.csv",
+    "raw/r02-dram-cas-same-numa.device-perf.csv",
+    "raw/r02-dram-cas-same-numa.stderr.txt",
+    "raw/r02-dram-cas-same-numa.stdout.json",
+    "raw/r02-dram-cold-load-same-numa.cpu-perf.csv",
+    "raw/r02-dram-cold-load-same-numa.device-perf.csv",
+    "raw/r02-dram-cold-load-same-numa.stderr.txt",
+    "raw/r02-dram-cold-load-same-numa.stdout.json",
+    "raw/r02-dram-fetch-add-cross-numa.cpu-perf.csv",
+    "raw/r02-dram-fetch-add-cross-numa.device-perf.csv",
+    "raw/r02-dram-fetch-add-cross-numa.stderr.txt",
+    "raw/r02-dram-fetch-add-cross-numa.stdout.json",
+    "raw/r02-dram-fetch-add-same-numa.cpu-perf.csv",
+    "raw/r02-dram-fetch-add-same-numa.device-perf.csv",
+    "raw/r02-dram-fetch-add-same-numa.stderr.txt",
+    "raw/r02-dram-fetch-add-same-numa.stdout.json",
+    "raw/r02-dram-handoff-cross-numa.cpu-perf.csv",
+    "raw/r02-dram-handoff-cross-numa.device-perf.csv",
+    "raw/r02-dram-handoff-cross-numa.stderr.txt",
+    "raw/r02-dram-handoff-cross-numa.stdout.json",
+    "raw/r02-dram-handoff-same-numa.cpu-perf.csv",
+    "raw/r02-dram-handoff-same-numa.device-perf.csv",
+    "raw/r02-dram-handoff-same-numa.stderr.txt",
+    "raw/r02-dram-handoff-same-numa.stdout.json",
+    "raw/r02-dram-message-passing-cross-numa.cpu-perf.csv",
+    "raw/r02-dram-message-passing-cross-numa.device-perf.csv",
+    "raw/r02-dram-message-passing-cross-numa.stderr.txt",
+    "raw/r02-dram-message-passing-cross-numa.stdout.json",
+    "raw/r02-dram-message-passing-same-numa.cpu-perf.csv",
+    "raw/r02-dram-message-passing-same-numa.device-perf.csv",
+    "raw/r02-dram-message-passing-same-numa.stderr.txt",
+    "raw/r02-dram-message-passing-same-numa.stdout.json",
+    "raw/r02-dram-warm-load-same-numa.cpu-perf.csv",
+    "raw/r02-dram-warm-load-same-numa.device-perf.csv",
+    "raw/r02-dram-warm-load-same-numa.stderr.txt",
+    "raw/r02-dram-warm-load-same-numa.stdout.json",
+    "raw/r03-cxlmem-cas-cross-numa.cpu-perf.csv",
+    "raw/r03-cxlmem-cas-cross-numa.device-perf.csv",
+    "raw/r03-cxlmem-cas-cross-numa.stderr.txt",
+    "raw/r03-cxlmem-cas-cross-numa.stdout.json",
+    "raw/r03-cxlmem-cas-same-numa.cpu-perf.csv",
+    "raw/r03-cxlmem-cas-same-numa.device-perf.csv",
+    "raw/r03-cxlmem-cas-same-numa.stderr.txt",
+    "raw/r03-cxlmem-cas-same-numa.stdout.json",
+    "raw/r03-cxlmem-cold-load-same-numa.cpu-perf.csv",
+    "raw/r03-cxlmem-cold-load-same-numa.device-perf.csv",
+    "raw/r03-cxlmem-cold-load-same-numa.stderr.txt",
+    "raw/r03-cxlmem-cold-load-same-numa.stdout.json",
+    "raw/r03-cxlmem-fetch-add-cross-numa.cpu-perf.csv",
+    "raw/r03-cxlmem-fetch-add-cross-numa.device-perf.csv",
+    "raw/r03-cxlmem-fetch-add-cross-numa.stderr.txt",
+    "raw/r03-cxlmem-fetch-add-cross-numa.stdout.json",
+    "raw/r03-cxlmem-fetch-add-same-numa.cpu-perf.csv",
+    "raw/r03-cxlmem-fetch-add-same-numa.device-perf.csv",
+    "raw/r03-cxlmem-fetch-add-same-numa.stderr.txt",
+    "raw/r03-cxlmem-fetch-add-same-numa.stdout.json",
+    "raw/r03-cxlmem-handoff-cross-numa.cpu-perf.csv",
+    "raw/r03-cxlmem-handoff-cross-numa.device-perf.csv",
+    "raw/r03-cxlmem-handoff-cross-numa.stderr.txt",
+    "raw/r03-cxlmem-handoff-cross-numa.stdout.json",
+    "raw/r03-cxlmem-handoff-same-numa.cpu-perf.csv",
+    "raw/r03-cxlmem-handoff-same-numa.device-perf.csv",
+    "raw/r03-cxlmem-handoff-same-numa.stderr.txt",
+    "raw/r03-cxlmem-handoff-same-numa.stdout.json",
+    "raw/r03-cxlmem-message-passing-cross-numa.cpu-perf.csv",
+    "raw/r03-cxlmem-message-passing-cross-numa.device-perf.csv",
+    "raw/r03-cxlmem-message-passing-cross-numa.stderr.txt",
+    "raw/r03-cxlmem-message-passing-cross-numa.stdout.json",
+    "raw/r03-cxlmem-message-passing-same-numa.cpu-perf.csv",
+    "raw/r03-cxlmem-message-passing-same-numa.device-perf.csv",
+    "raw/r03-cxlmem-message-passing-same-numa.stderr.txt",
+    "raw/r03-cxlmem-message-passing-same-numa.stdout.json",
+    "raw/r03-cxlmem-warm-load-same-numa.cpu-perf.csv",
+    "raw/r03-cxlmem-warm-load-same-numa.device-perf.csv",
+    "raw/r03-cxlmem-warm-load-same-numa.stderr.txt",
+    "raw/r03-cxlmem-warm-load-same-numa.stdout.json",
+    "raw/r03-dram-cas-cross-numa.cpu-perf.csv",
+    "raw/r03-dram-cas-cross-numa.device-perf.csv",
+    "raw/r03-dram-cas-cross-numa.stderr.txt",
+    "raw/r03-dram-cas-cross-numa.stdout.json",
+    "raw/r03-dram-cas-same-numa.cpu-perf.csv",
+    "raw/r03-dram-cas-same-numa.device-perf.csv",
+    "raw/r03-dram-cas-same-numa.stderr.txt",
+    "raw/r03-dram-cas-same-numa.stdout.json",
+    "raw/r03-dram-cold-load-same-numa.cpu-perf.csv",
+    "raw/r03-dram-cold-load-same-numa.device-perf.csv",
+    "raw/r03-dram-cold-load-same-numa.stderr.txt",
+    "raw/r03-dram-cold-load-same-numa.stdout.json",
+    "raw/r03-dram-fetch-add-cross-numa.cpu-perf.csv",
+    "raw/r03-dram-fetch-add-cross-numa.device-perf.csv",
+    "raw/r03-dram-fetch-add-cross-numa.stderr.txt",
+    "raw/r03-dram-fetch-add-cross-numa.stdout.json",
+    "raw/r03-dram-fetch-add-same-numa.cpu-perf.csv",
+    "raw/r03-dram-fetch-add-same-numa.device-perf.csv",
+    "raw/r03-dram-fetch-add-same-numa.stderr.txt",
+    "raw/r03-dram-fetch-add-same-numa.stdout.json",
+    "raw/r03-dram-handoff-cross-numa.cpu-perf.csv",
+    "raw/r03-dram-handoff-cross-numa.device-perf.csv",
+    "raw/r03-dram-handoff-cross-numa.stderr.txt",
+    "raw/r03-dram-handoff-cross-numa.stdout.json",
+    "raw/r03-dram-handoff-same-numa.cpu-perf.csv",
+    "raw/r03-dram-handoff-same-numa.device-perf.csv",
+    "raw/r03-dram-handoff-same-numa.stderr.txt",
+    "raw/r03-dram-handoff-same-numa.stdout.json",
+    "raw/r03-dram-message-passing-cross-numa.cpu-perf.csv",
+    "raw/r03-dram-message-passing-cross-numa.device-perf.csv",
+    "raw/r03-dram-message-passing-cross-numa.stderr.txt",
+    "raw/r03-dram-message-passing-cross-numa.stdout.json",
+    "raw/r03-dram-message-passing-same-numa.cpu-perf.csv",
+    "raw/r03-dram-message-passing-same-numa.device-perf.csv",
+    "raw/r03-dram-message-passing-same-numa.stderr.txt",
+    "raw/r03-dram-message-passing-same-numa.stdout.json",
+    "raw/r03-dram-warm-load-same-numa.cpu-perf.csv",
+    "raw/r03-dram-warm-load-same-numa.device-perf.csv",
+    "raw/r03-dram-warm-load-same-numa.stderr.txt",
+    "raw/r03-dram-warm-load-same-numa.stdout.json",
+    "raw/r04-cxlmem-cas-cross-numa.cpu-perf.csv",
+    "raw/r04-cxlmem-cas-cross-numa.device-perf.csv",
+    "raw/r04-cxlmem-cas-cross-numa.stderr.txt",
+    "raw/r04-cxlmem-cas-cross-numa.stdout.json",
+    "raw/r04-cxlmem-cas-same-numa.cpu-perf.csv",
+    "raw/r04-cxlmem-cas-same-numa.device-perf.csv",
+    "raw/r04-cxlmem-cas-same-numa.stderr.txt",
+    "raw/r04-cxlmem-cas-same-numa.stdout.json",
+    "raw/r04-cxlmem-cold-load-same-numa.cpu-perf.csv",
+    "raw/r04-cxlmem-cold-load-same-numa.device-perf.csv",
+    "raw/r04-cxlmem-cold-load-same-numa.stderr.txt",
+    "raw/r04-cxlmem-cold-load-same-numa.stdout.json",
+    "raw/r04-cxlmem-fetch-add-cross-numa.cpu-perf.csv",
+    "raw/r04-cxlmem-fetch-add-cross-numa.device-perf.csv",
+    "raw/r04-cxlmem-fetch-add-cross-numa.stderr.txt",
+    "raw/r04-cxlmem-fetch-add-cross-numa.stdout.json",
+    "raw/r04-cxlmem-fetch-add-same-numa.cpu-perf.csv",
+    "raw/r04-cxlmem-fetch-add-same-numa.device-perf.csv",
+    "raw/r04-cxlmem-fetch-add-same-numa.stderr.txt",
+    "raw/r04-cxlmem-fetch-add-same-numa.stdout.json",
+    "raw/r04-cxlmem-handoff-cross-numa.cpu-perf.csv",
+    "raw/r04-cxlmem-handoff-cross-numa.device-perf.csv",
+    "raw/r04-cxlmem-handoff-cross-numa.stderr.txt",
+    "raw/r04-cxlmem-handoff-cross-numa.stdout.json",
+    "raw/r04-cxlmem-handoff-same-numa.cpu-perf.csv",
+    "raw/r04-cxlmem-handoff-same-numa.device-perf.csv",
+    "raw/r04-cxlmem-handoff-same-numa.stderr.txt",
+    "raw/r04-cxlmem-handoff-same-numa.stdout.json",
+    "raw/r04-cxlmem-message-passing-cross-numa.cpu-perf.csv",
+    "raw/r04-cxlmem-message-passing-cross-numa.device-perf.csv",
+    "raw/r04-cxlmem-message-passing-cross-numa.stderr.txt",
+    "raw/r04-cxlmem-message-passing-cross-numa.stdout.json",
+    "raw/r04-cxlmem-message-passing-same-numa.cpu-perf.csv",
+    "raw/r04-cxlmem-message-passing-same-numa.device-perf.csv",
+    "raw/r04-cxlmem-message-passing-same-numa.stderr.txt",
+    "raw/r04-cxlmem-message-passing-same-numa.stdout.json",
+    "raw/r04-cxlmem-warm-load-same-numa.cpu-perf.csv",
+    "raw/r04-cxlmem-warm-load-same-numa.device-perf.csv",
+    "raw/r04-cxlmem-warm-load-same-numa.stderr.txt",
+    "raw/r04-cxlmem-warm-load-same-numa.stdout.json",
+    "raw/r04-dram-cas-cross-numa.cpu-perf.csv",
+    "raw/r04-dram-cas-cross-numa.device-perf.csv",
+    "raw/r04-dram-cas-cross-numa.stderr.txt",
+    "raw/r04-dram-cas-cross-numa.stdout.json",
+    "raw/r04-dram-cas-same-numa.cpu-perf.csv",
+    "raw/r04-dram-cas-same-numa.device-perf.csv",
+    "raw/r04-dram-cas-same-numa.stderr.txt",
+    "raw/r04-dram-cas-same-numa.stdout.json",
+    "raw/r04-dram-cold-load-same-numa.cpu-perf.csv",
+    "raw/r04-dram-cold-load-same-numa.device-perf.csv",
+    "raw/r04-dram-cold-load-same-numa.stderr.txt",
+    "raw/r04-dram-cold-load-same-numa.stdout.json",
+    "raw/r04-dram-fetch-add-cross-numa.cpu-perf.csv",
+    "raw/r04-dram-fetch-add-cross-numa.device-perf.csv",
+    "raw/r04-dram-fetch-add-cross-numa.stderr.txt",
+    "raw/r04-dram-fetch-add-cross-numa.stdout.json",
+    "raw/r04-dram-fetch-add-same-numa.cpu-perf.csv",
+    "raw/r04-dram-fetch-add-same-numa.device-perf.csv",
+    "raw/r04-dram-fetch-add-same-numa.stderr.txt",
+    "raw/r04-dram-fetch-add-same-numa.stdout.json",
+    "raw/r04-dram-handoff-cross-numa.cpu-perf.csv",
+    "raw/r04-dram-handoff-cross-numa.device-perf.csv",
+    "raw/r04-dram-handoff-cross-numa.stderr.txt",
+    "raw/r04-dram-handoff-cross-numa.stdout.json",
+    "raw/r04-dram-handoff-same-numa.cpu-perf.csv",
+    "raw/r04-dram-handoff-same-numa.device-perf.csv",
+    "raw/r04-dram-handoff-same-numa.stderr.txt",
+    "raw/r04-dram-handoff-same-numa.stdout.json",
+    "raw/r04-dram-message-passing-cross-numa.cpu-perf.csv",
+    "raw/r04-dram-message-passing-cross-numa.device-perf.csv",
+    "raw/r04-dram-message-passing-cross-numa.stderr.txt",
+    "raw/r04-dram-message-passing-cross-numa.stdout.json",
+    "raw/r04-dram-message-passing-same-numa.cpu-perf.csv",
+    "raw/r04-dram-message-passing-same-numa.device-perf.csv",
+    "raw/r04-dram-message-passing-same-numa.stderr.txt",
+    "raw/r04-dram-message-passing-same-numa.stdout.json",
+    "raw/r04-dram-warm-load-same-numa.cpu-perf.csv",
+    "raw/r04-dram-warm-load-same-numa.device-perf.csv",
+    "raw/r04-dram-warm-load-same-numa.stderr.txt",
+    "raw/r04-dram-warm-load-same-numa.stdout.json",
+    "topology.txt"
+  ],
+  "repetitions": 5,
+  "safety": {
+    "approved_length": 2097152,
+    "max_written_offset": 2097096,
+    "range": "[0, 0x200000)"
+  },
+  "schema": "splash.cxlmem-hwcc-summary.v1"
+}

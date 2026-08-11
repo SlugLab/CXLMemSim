@@ -1,0 +1,177 @@
+$ lscpu -e=CPU,CORE,SOCKET,NODE,ONLINE
+returncode=0
+--- stdout ---
+CPU CORE SOCKET NODE ONLINE
+  0    0      0    0    yes
+  1    1      0    0    yes
+  2    2      0    0    yes
+  3    3      0    0    yes
+  4    4      0    0    yes
+  5    5      0    0    yes
+  6    6      0    0    yes
+  7    7      0    0    yes
+  8    8      0    0    yes
+  9    9      0    0    yes
+ 10   10      0    0    yes
+ 11   11      0    0    yes
+ 12   12      0    0    yes
+ 13   13      0    0    yes
+ 14   14      0    0    yes
+ 15   15      0    0    yes
+ 16   16      0    0    yes
+ 17   17      0    0    yes
+ 18   18      0    0    yes
+ 19   19      0    0    yes
+ 20   20      0    0    yes
+ 21   21      0    0    yes
+ 22   22      0    0    yes
+ 23   23      0    0    yes
+ 24   24      0    0    yes
+ 25   25      0    0    yes
+ 26   26      0    0    yes
+ 27   27      0    0    yes
+ 28   28      0    0    yes
+ 29   29      0    0    yes
+ 30   30      0    0    yes
+ 31   31      0    0    yes
+ 32   32      0    0    yes
+ 33   33      0    0    yes
+ 34   34      0    0    yes
+ 35   35      0    0    yes
+ 36   36      0    0    yes
+ 37   37      0    0    yes
+ 38   38      0    0    yes
+ 39   39      0    0    yes
+ 40   40      0    0    yes
+ 41   41      0    0    yes
+ 42   42      0    0    yes
+ 43   43      0    1    yes
+ 44   44      0    1    yes
+ 45   45      0    1    yes
+ 46   46      0    1    yes
+ 47   47      0    1    yes
+ 48   48      0    1    yes
+ 49   49      0    1    yes
+ 50   50      0    1    yes
+ 51   51      0    1    yes
+ 52   52      0    1    yes
+ 53   53      0    1    yes
+ 54   54      0    1    yes
+ 55   55      0    1    yes
+ 56   56      0    1    yes
+ 57   57      0    1    yes
+ 58   58      0    1    yes
+ 59   59      0    1    yes
+ 60   60      0    1    yes
+ 61   61      0    1    yes
+ 62   62      0    1    yes
+ 63   63      0    1    yes
+ 64   64      0    1    yes
+ 65   65      0    1    yes
+ 66   66      0    1    yes
+ 67   67      0    1    yes
+ 68   68      0    1    yes
+ 69   69      0    1    yes
+ 70   70      0    1    yes
+ 71   71      0    1    yes
+ 72   72      0    1    yes
+ 73   73      0    1    yes
+ 74   74      0    1    yes
+ 75   75      0    1    yes
+ 76   76      0    1    yes
+ 77   77      0    1    yes
+ 78   78      0    1    yes
+ 79   79      0    1    yes
+ 80   80      0    1    yes
+ 81   81      0    1    yes
+ 82   82      0    1    yes
+ 83   83      0    1    yes
+ 84   84      0    1    yes
+ 85   85      0    1    yes
+ 86    0      0    0    yes
+ 87    1      0    0    yes
+ 88    2      0    0    yes
+ 89    3      0    0    yes
+ 90    4      0    0    yes
+ 91    5      0    0    yes
+ 92    6      0    0    yes
+ 93    7      0    0    yes
+ 94    8      0    0    yes
+ 95    9      0    0    yes
+ 96   10      0    0    yes
+ 97   11      0    0    yes
+ 98   12      0    0    yes
+ 99   13      0    0    yes
+100   14      0    0    yes
+101   15      0    0    yes
+102   16      0    0    yes
+103   17      0    0    yes
+104   18      0    0    yes
+105   19      0    0    yes
+106   20      0    0    yes
+107   21      0    0    yes
+108   22      0    0    yes
+109   23      0    0    yes
+110   24      0    0    yes
+111   25      0    0    yes
+112   26      0    0    yes
+113   27      0    0    yes
+114   28      0    0    yes
+115   29      0    0    yes
+116   30      0    0    yes
+117   31      0    0    yes
+118   32      0    0    yes
+119   33      0    0    yes
+120   34      0    0    yes
+121   35      0    0    yes
+122   36      0    0    yes
+123   37      0    0    yes
+124   38      0    0    yes
+125   39      0    0    yes
+126   40      0    0    yes
+127   41      0    0    yes
+128   42      0    0    yes
+129   43      0    1    yes
+130   44      0    1    yes
+131   45      0    1    yes
+132   46      0    1    yes
+133   47      0    1    yes
+134   48      0    1    yes
+135   49      0    1    yes
+136   50      0    1    yes
+137   51      0    1    yes
+138   52      0    1    yes
+139   53      0    1    yes
+140   54      0    1    yes
+141   55      0    1    yes
+142   56      0    1    yes
+143   57      0    1    yes
+144   58      0    1    yes
+145   59      0    1    yes
+146   60      0    1    yes
+147   61      0    1    yes
+148   62      0    1    yes
+149   63      0    1    yes
+150   64      0    1    yes
+151   65      0    1    yes
+152   66      0    1    yes
+153   67      0    1    yes
+154   68      0    1    yes
+155   69      0    1    yes
+156   70      0    1    yes
+157   71      0    1    yes
+158   72      0    1    yes
+159   73      0    1    yes
+160   74      0    1    yes
+161   75      0    1    yes
+162   76      0    1    yes
+163   77      0    1    yes
+164   78      0    1    yes
+165   79      0    1    yes
+166   80      0    1    yes
+167   81      0    1    yes
+168   82      0    1    yes
+169   83      0    1    yes
+170   84      0    1    yes
+171   85      0    1    yes
+--- stderr ---

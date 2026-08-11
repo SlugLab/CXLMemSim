@@ -1,0 +1,144 @@
+$ lspci -vv -s 0000:64:00.0
+returncode=0
+--- stdout ---
+64:00.0 CXL: Montage Technology Co., Ltd. Device c002 (rev 03) (prog-if 10 [CXL Memory Device (CXL 2.0 or later)])
+	Physical Slot: 4043
+	Control: I/O- Mem+ BusMaster+ SpecCycle- MemWINV- VGASnoop- ParErr+ Stepping- SERR+ FastB2B- DisINTx+
+	Status: Cap+ 66MHz- UDF- FastB2B- ParErr- DEVSEL=fast >TAbort- <TAbort- <MAbort- >SERR- <PERR- INTx-
+	Latency: 0, Cache Line Size: 64 bytes
+	NUMA node: 0
+	IOMMU group: 41
+	Region 0: Memory at 24fffe000000 (64-bit, prefetchable) [size=16M]
+	Capabilities: [40] Power Management version 3
+		Flags: PMEClk- DSI- D1- D2- AuxCurrent=0mA PME(D0-,D1-,D2-,D3hot-,D3cold-)
+		Status: D0 NoSoftRst+ PME-Enable- DSel=0 DScale=0 PME-
+	Capabilities: [50] MSI: Enable- Count=1/16 Maskable+ 64bit+
+		Address: 0000000000000000  Data: 0000
+		Masking: 00000000  Pending: 00000000
+	Capabilities: [70] Express (v2) Endpoint, IntMsgNum 0
+		DevCap:	MaxPayload 128 bytes, PhantFunc 0, Latency L0s unlimited, L1 unlimited
+			ExtTag- AttnBtn- AttnInd- PwrInd- RBE+ FLReset+ SlotPowerLimit 75W TEE-IO-
+		DevCtl:	CorrErr- NonFatalErr- FatalErr+ UnsupReq-
+			RlxdOrd+ ExtTag- PhantFunc- AuxPwr- NoSnoop- FLReset-
+			MaxPayload 128 bytes, MaxReadReq 4096 bytes
+		DevSta:	CorrErr+ NonFatalErr- FatalErr- UnsupReq+ AuxPwr- TransPend-
+		LnkCap:	Port #0, Speed 32GT/s, Width x8, ASPM not supported
+			ClockPM- Surprise- LLActRep- BwNot- ASPMOptComp+
+		LnkCtl:	ASPM Disabled; RCB 64 bytes, LnkDisable- CommClk-
+			ExtSynch- ClockPM- AutWidDis- BWInt- AutBWInt- FltModeDis-
+		LnkSta:	Speed 32GT/s, Width x8
+			TrErr- Train- SlotClk+ DLActive- BWMgmt- ABWMgmt-
+		DevCap2: Completion Timeout: Not Supported, TimeoutDis+ NROPrPrP- LTR-
+			 10BitTagComp+ 10BitTagReq- OBFF Not Supported, ExtFmt+ EETLPPrefix+, MaxEETLPPrefixes 1
+			 EmergencyPowerReduction Not Supported, EmergencyPowerReductionInit-
+			 FRS- TPHComp- ExtTPHComp-
+			 AtomicOpsCap: 32bit- 64bit- 128bitCAS-
+		DevCtl2: Completion Timeout: 50us to 50ms, TimeoutDis-
+			 AtomicOpsCtl: ReqEn-
+			 IDOReq- IDOCompl- LTR- EmergencyPowerReductionReq-
+			 10BitTagReq- OBFF Disabled, EETLPPrefixBlk-
+		LnkCap2: Supported Link Speeds: 2.5-32GT/s, Crosslink- Retimer+ 2Retimers+ DRS-
+		LnkCtl2: Target Link Speed: 32GT/s, EnterCompliance- SpeedDis-
+			 Transmit Margin: Normal Operating Range, EnterModifiedCompliance- ComplianceSOS-
+			 Compliance Preset/De-emphasis: -6dB de-emphasis, 0dB preshoot
+		LnkSta2: Current De-emphasis Level: -6dB, EqualizationComplete+ EqualizationPhase1+
+			 EqualizationPhase2+ EqualizationPhase3+ LinkEqualizationRequest-
+			 Retimer- 2Retimers- CrosslinkRes: Upstream Port, FltMode-
+	Capabilities: [b0] MSI-X: Enable+ Count=13 Masked-
+		Vector table: BAR=0 offset=00010000
+		PBA: BAR=0 offset=00011000
+	Capabilities: [100 v2] Advanced Error Reporting
+		UESta:	DLP- SDES- TLP- FCP- CmpltTO- CmpltAbrt- UnxCmplt- RxOF- MalfTLP-
+			ECRC- UnsupReq+ ACSViol- UncorrIntErr- BlockedTLP- AtomicOpBlocked- TLPBlockedErr-
+			PoisonTLPBlocked- DMWrReqBlocked- IDECheck- MisIDETLP- PCRC_CHECK- TLPXlatBlocked-
+		UEMsk:	DLP- SDES- TLP- FCP- CmpltTO- CmpltAbrt- UnxCmplt- RxOF- MalfTLP-
+			ECRC+ UnsupReq+ ACSViol- UncorrIntErr- BlockedTLP- AtomicOpBlocked- TLPBlockedErr-
+			PoisonTLPBlocked- DMWrReqBlocked- IDECheck- MisIDETLP- PCRC_CHECK- TLPXlatBlocked-
+		UESvrt:	DLP+ SDES+ TLP+ FCP+ CmpltTO- CmpltAbrt- UnxCmplt- RxOF+ MalfTLP+
+			ECRC- UnsupReq- ACSViol- UncorrIntErr+ BlockedTLP- AtomicOpBlocked- TLPBlockedErr-
+			PoisonTLPBlocked- DMWrReqBlocked- IDECheck- MisIDETLP- PCRC_CHECK- TLPXlatBlocked-
+		CESta:	RxErr- BadTLP- BadDLLP- Rollover- Timeout- AdvNonFatalErr+ CorrIntErr- HeaderOF-
+		CEMsk:	RxErr- BadTLP- BadDLLP- Rollover- Timeout- AdvNonFatalErr- CorrIntErr- HeaderOF-
+		AERCap:	First Error Pointer: 00, ECRCGenCap+ ECRCGenEn- ECRCChkCap+ ECRCChkEn-
+			MultHdrRecCap- MultHdrRecEn- TLPPfxPres- HdrLogCap-
+		HeaderLog: 00000000 00000000 00000000 00000000
+	Capabilities: [148 v1] Device Serial Number 8a-0a-f7-38-c2-82-04-07
+	Capabilities: [158 v1] Power Budgeting <?>
+	Capabilities: [168 v1] Secondary PCI Express
+		LnkCtl3: LnkEquIntrruptEn- PerformEqu-
+		LaneErrStat: 0
+	Capabilities: [188 v1] Physical Layer 16.0 GT/s
+		Phy16Sta: EquComplete+ EquPhase1+ EquPhase2+ EquPhase3+ LinkEquRequest-
+	Capabilities: [1b0 v1] Lane Margining at the Receiver
+		PortCap: Uses Driver-
+		PortSta: MargReady+ MargSoftReady-
+	Capabilities: [1d8 v1] Physical Layer 32.0 GT/s
+		Phy32Cap: EqualizationBypass- NoEqualizationNeeded-
+			  ModTsMode0+ ModTsMode1- ModTsMode2+
+		Phy32Ctl: EqualizationBypassDis- NoEqualizationNeededDis-
+			  Modified TS Usage Mode: PCI Express
+		Phy32Sta: EquComplete+ EquPhase1+ EquPhase2+ EquPhase3+ LinkEquRequest-
+			  Received Enhanced Link Behavior Control: Modified TS1/TS2 Ordered Sets supported
+			  ModTsRecv+ TxPrecodeOn- TxPrecodeReq+ NoEqualizationNeededRecv-
+	Capabilities: [338 v1] Data Link Feature <?>
+	Capabilities: [344 v1] Native PCIe Enclosure Management <?>
+	Capabilities: [354 v1] Device 3
+		DevCap3: DMWr Request Routing-, 14-Bit Tag Completer-, 14-Bit Tag Requester-
+			 L0p-
+			 UIO Mem RdWr Completer-, UIO Mem RdWr Requester-
+		DevCtl3: DMWr Requester-, DMWr Egress Blocking-, 14-Bit Tag Requester-
+			 L0p-, Target Link Width: x1
+			 UIO Mem RdWr Requester-, UIO Request 256B Boundary+
+		DevSta3: Initial Link Width: x1, Segment Captured-, Remote L0p-
+	Capabilities: [364 v1] Designated Vendor-Specific: Vendor=1e98 ID=0007 Rev=1 Len=20: CXL
+		PCIe DVSEC for Flex Bus Port
+		FBCap:	Cache- IO+ Mem+ 68BFlit+ MltLogDev-
+		FBCtl:	Cache- IO+ Mem+ SynHdrByp- DrftBuf+ 68BFlit+ MltLogDev- RCD- Retimer1- Retimer2-
+		FBSta:	Cache- IO+ Mem+ SynHdrByp- DrftBuf- 68BFlit+ MltLogDev-
+		FBModTS:	Received FB Data: 00001f
+	Capabilities: [3d4 v1] Designated Vendor-Specific: Vendor=1e98 ID=0000 Rev=2 Len=60: CXL
+		PCIe DVSEC for CXL Devices
+		CXLCap:	Cache- IO+ Mem+ MemHWInit+ HDMCount 1 Viral+
+		CXLCtl:	Cache- IO+ Mem+ CacheSFCov 0 CacheSFGran 0 CacheClean- Viral-
+		CXLSta:	Viral-
+		CXLCtl2:	DisableCaching- InitCacheWB&Inval- InitRst- RstMemClrEn- DesiredVolatileHDMStateAfterHotReset-
+		CXLSta2:	ResetComplete- ResetError- PMComplete+
+		CXLCap2:	Cache Size Not Reported
+		Range1: 0000000000000000-0000001fffffffff [size=0x2000000000]
+			Valid+ Active+ Type=CDAT Class=CDAT interleave=0 timeout=256s
+		Range2: 0000000000000000-ffffffffffffffff [size=0x0]
+			Valid- Active- Type=Volatile Class=DRAM interleave=0 timeout=1s
+		CXLCap3:	DefaultVolatile HDM State After:	ColdReset- WarmReset- HotReset- HotResetConfigurability-
+	Capabilities: [410 v1] Designated Vendor-Specific: Vendor=1e98 ID=000a Rev=0 Len=28: CXL
+		PCIe DVSEC for Test Capability <?>
+	Capabilities: [d04 v1] Designated Vendor-Specific: Vendor=1e98 ID=0008 Rev=0 Len=52: CXL
+		Register Locator DVSEC
+		Block1: BIR: bar0, ID: component registers, offset: 0000000000000000
+		Block2: BIR: bar0, ID: CXL device registers, offset: 0000000000050000
+		Block3: BIR: bar0, ID: CPMU registers, offset: 0000000000020000
+		Block4: BIR: bar0, ID: vendor-specific, offset: 0000000000030000
+		Block5: BIR: bar0, ID: vendor-specific, offset: 0000000000200000
+	Capabilities: [d48 v1] Data Object Exchange
+		DOECap: IntSup+
+			IntMsgNum 5
+		DOECtl: IntEn-
+		DOESta: Busy- IntSta- Error+ ObjectReady-
+	Capabilities: [d60 v1] Designated Vendor-Specific: Vendor=8086 ID=0050 Rev=0 Len=12 <?>
+	Capabilities: [d6c v1] Designated Vendor-Specific: Vendor=1e98 ID=0005 Rev=0 Len=16: CXL
+		GPF DVSEC for CXL Devices
+		GPF Phase 2 Duration: 0us
+		GPF Phase 2 Power: 0mW
+	Capabilities: [d80 v1] Data Object Exchange
+		DOECap: IntSup+
+			IntMsgNum 11
+		DOECtl: IntEn-
+		DOESta: Busy- IntSta- Error- ObjectReady-
+	Capabilities: [da0 v1] Data Object Exchange
+		DOECap: IntSup+
+			IntMsgNum 12
+		DOECtl: IntEn-
+		DOESta: Busy- IntSta- Error- ObjectReady-
+	Kernel driver in use: cxl_pci
+	Kernel modules: cxl_pci
+
+--- stderr ---
