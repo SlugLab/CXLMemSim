@@ -27,8 +27,10 @@
 #include <chrono>
 #include <cstring>
 #include <errno.h>
+#include <fcntl.h>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -132,6 +134,55 @@ enum class CommMode {
     DISTRIBUTED // Distributed multi-node memory server
 };
 
+struct FinalSwitchStats {
+    int id;
+    uint64_t loads;
+    uint64_t stores;
+    uint64_t conflicts;
+};
+
+struct FinalEndpointStats {
+    size_t id;
+    int internal_id;
+    uint64_t loads;
+    uint64_t stores;
+    uint64_t migrate_in;
+    uint64_t migrate_out;
+    uint64_t hit_old;
+};
+
+struct FinalServerStats {
+    uint64_t reads;
+    uint64_t writes;
+    uint64_t atomic_faa;
+    uint64_t atomic_cas;
+    uint64_t atomic_cas_success;
+    uint64_t fences;
+    uint64_t coherency_invalidations;
+    uint64_t coherency_downgrades;
+    uint64_t back_invalidations;
+    uint64_t controller_local;
+    uint64_t controller_remote;
+    uint64_t controller_hitm;
+    size_t threads_created;
+    std::vector<FinalSwitchStats> switches;
+    std::vector<FinalEndpointStats> endpoints;
+    bool has_coherence_v2 = false;
+    size_t directory_lines = 0;
+    uint64_t v2_gets = 0;
+    uint64_t v2_getm = 0;
+    uint64_t v2_upgrade = 0;
+    uint64_t v2_puts = 0;
+    uint64_t v2_putm = 0;
+    uint64_t v2_atomic = 0;
+    uint64_t v2_administrative_evict = 0;
+    uint64_t v2_timeout = 0;
+    uint64_t v2_partial_ack = 0;
+    uint64_t v2_stale_ack = 0;
+    uint64_t v2_accepted_snoop_ack = 0;
+    uint64_t v2_invalid_ownership = 0;
+};
+
 // Thread-per-connection server class
 class ThreadPerConnectionServer {
 private:
@@ -213,6 +264,9 @@ private:
     std::atomic<uint64_t> bi_invalidate_requests{0};
     std::atomic<uint64_t> bi_writeback_requests{0};
     std::atomic<uint64_t> total_latency_ns{0}; // accumulated latency for avg calculation
+    std::string stats_json_path_;
+    std::once_flag final_stats_once_;
+    std::atomic<bool> final_stats_ok_{true};
 
     // LSA (Label Storage Area) - shared across all QEMU guests
     std::vector<uint8_t> lsa_data_;
@@ -246,12 +300,12 @@ public:
         SharedMemoryManager::BackingMode backing_mode = SharedMemoryManager::BackingMode::SharedMemory,
         const SharedMemoryManager::SsdStreamingConfig &ssd_config = {}, bool coherence_v2_enabled = false,
         std::chrono::milliseconds coherence_v2_snoop_timeout = std::chrono::milliseconds(1000),
-        std::string coherence_v2_shm_name = "/cxlmemsim_coherence_v2")
+        std::string coherence_v2_shm_name = "/cxlmemsim_coherence_v2", std::string stats_json_path = "")
         : server_fd(-1), port(port), controller(ctrl), running(true), next_thread_id(0), comm_mode(mode),
           pgas_shm_name_(pgas_shm_name), pgas_shm_fd_(-1), pgas_shm_header_(nullptr), pgas_memory_(nullptr),
           pgas_memory_size_(0), backing_file_(backing_file), backing_mode_(backing_mode), ssd_config_(ssd_config),
           coherence_v2_enabled_(coherence_v2_enabled), coherence_v2_snoop_timeout_(coherence_v2_snoop_timeout),
-          coherence_v2_shm_name_(std::move(coherence_v2_shm_name)) {
+          coherence_v2_shm_name_(std::move(coherence_v2_shm_name)), stats_json_path_(std::move(stats_json_path)) {
         congestion_info.active_requests = 0;
         congestion_info.total_bandwidth_used = 0;
         congestion_info.last_reset = std::chrono::steady_clock::now();
@@ -286,6 +340,7 @@ public:
     bool start();
     void run();
     void stop();
+    bool final_stats_ok() const { return final_stats_ok_.load(std::memory_order_relaxed); }
     void handle_client(int client_fd, int thread_id);
 
     // Shared memory mode methods
@@ -300,6 +355,11 @@ public:
     void cleanup_pgas_shm();
 
 private:
+    FinalServerStats snapshot_final_stats();
+    std::string final_stats_json(const FinalServerStats &stats) const;
+    bool write_final_stats_json(const std::string &json) const;
+    void print_final_stats_once();
+
     // Coherency protocol methods
     void handle_read_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo &info);
     void handle_write_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo &info);
@@ -392,6 +452,7 @@ struct ServerOptions {
     bool coherence_v2 = false;
     std::uint64_t coherence_v2_snoop_timeout_ms = 1000;
     std::string coherence_v2_shm_name = "/cxlmemsim_coherence_v2";
+    std::string stats_json_path;
 };
 
 static void print_server_help(const char *program) {
@@ -431,7 +492,8 @@ static void print_server_help(const char *program) {
               << "      --gfam-bandwidth <GB/s>        Aggregate GFAM fabric bandwidth\n"
               << "      --coherence-v2[=true|false]    Enable registered MESI v2 endpoints\n"
               << "      --coherence-v2-snoop-timeout-ms <ms>  Synchronous snoop timeout\n"
-              << "      --coherence-v2-shm-name <name> Separate v2 duplex SHM object\n";
+              << "      --coherence-v2-shm-name <name> Separate v2 duplex SHM object\n"
+              << "      --stats-json <path>             Atomically write final server statistics\n";
 }
 
 static bool option_has_value(const std::string &arg) { return !arg.empty() && arg[0] != '-'; }
@@ -629,6 +691,8 @@ static bool parse_server_options(int argc, char *argv[], ServerOptions &opts, st
                 opts.coherence_v2_snoop_timeout_ms = std::stoull(get_value(key));
             } else if (key == "coherence-v2-shm-name") {
                 opts.coherence_v2_shm_name = get_value(key);
+            } else if (key == "stats-json") {
+                opts.stats_json_path = get_value(key);
             } else {
                 throw std::invalid_argument("Unknown option: --" + key);
             }
@@ -686,6 +750,7 @@ int main(int argc, char *argv[]) {
     bool coherence_v2 = opts.coherence_v2;
     auto coherence_v2_snoop_timeout = std::chrono::milliseconds(opts.coherence_v2_snoop_timeout_ms);
     const auto &coherence_v2_shm_name = opts.coherence_v2_shm_name;
+    const auto &stats_json_path = opts.stats_json_path;
 
     SharedMemoryManager::BackingMode backing_mode = SharedMemoryManager::BackingMode::SharedMemory;
     if (!backing_mode_str.empty()) {
@@ -1041,19 +1106,32 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
+    std::unique_ptr<ThreadPerConnectionServer> server;
+    bool server_started = false;
     try {
-        ThreadPerConnectionServer server(port, controller, capacity, backing_file, comm_mode, pgas_shm_name,
-                                         backing_mode, ssd_config, coherence_v2, coherence_v2_snoop_timeout,
-                                         coherence_v2_shm_name);
+        server = std::make_unique<ThreadPerConnectionServer>(
+            port, controller, capacity, backing_file, comm_mode, pgas_shm_name, backing_mode, ssd_config, coherence_v2,
+            coherence_v2_snoop_timeout, coherence_v2_shm_name, stats_json_path);
 
-        if (!server.start()) {
+        if (!server->start()) {
             SPDLOG_ERROR("Failed to start server");
             return 1;
         }
+        server_started = true;
 
-        server.run();
-        server.stop();
+        server->run();
+        server->stop();
+        if (!server->final_stats_ok()) {
+            return 1;
+        }
     } catch (const std::exception &e) {
+        if (server_started && server) {
+            try {
+                server->stop();
+            } catch (const std::exception &stop_error) {
+                SPDLOG_ERROR("Server shutdown error: {}", stop_error.what());
+            }
+        }
         SPDLOG_ERROR("Server error: {}", e.what());
         return 1;
     }
@@ -1206,84 +1284,276 @@ void ThreadPerConnectionServer::run() {
 
 void ThreadPerConnectionServer::stop() {
     bool was_running = running.exchange(false);
-    if (!was_running) {
-        return;
-    }
-
-    if (comm_mode == CommMode::TCP) {
-        if (server_fd >= 0) {
-            shutdown(server_fd, SHUT_RDWR);
-            close(server_fd);
-            server_fd = -1;
-        }
-    }
-    if (coherence_v2_shm_listener_)
-        coherence_v2_shm_listener_->close();
-
-    std::vector<int> fds_to_close;
-    {
-        std::lock_guard<std::mutex> lock(client_fds_mutex);
-        fds_to_close.assign(client_fds.begin(), client_fds.end());
-        client_fds.clear();
-    }
-    for (int fd : fds_to_close) {
-        shutdown(fd, SHUT_RDWR);
-        close(fd);
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(thread_list_mutex);
-        for (auto &thread : client_threads) {
-            if (thread.joinable()) {
-                thread.join();
+    if (was_running) {
+        if (comm_mode == CommMode::TCP) {
+            if (server_fd >= 0) {
+                shutdown(server_fd, SHUT_RDWR);
+                close(server_fd);
+                server_fd = -1;
             }
         }
-        client_threads.clear();
-    }
-    {
-        std::lock_guard<std::mutex> lock(coherence_v2_shm_threads_mutex_);
-        for (auto &thread : coherence_v2_shm_threads_) {
-            if (thread.joinable())
-                thread.join();
+        if (coherence_v2_shm_listener_)
+            coherence_v2_shm_listener_->close();
+
+        std::vector<int> fds_to_close;
+        {
+            std::lock_guard<std::mutex> lock(client_fds_mutex);
+            fds_to_close.assign(client_fds.begin(), client_fds.end());
+            client_fds.clear();
         }
-        coherence_v2_shm_threads_.clear();
+        for (int fd : fds_to_close) {
+            shutdown(fd, SHUT_RDWR);
+            close(fd);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(thread_list_mutex);
+            for (auto &thread : client_threads) {
+                if (thread.joinable()) {
+                    thread.join();
+                }
+            }
+            client_threads.clear();
+        }
+        {
+            std::lock_guard<std::mutex> lock(coherence_v2_shm_threads_mutex_);
+            for (auto &thread : coherence_v2_shm_threads_) {
+                if (thread.joinable())
+                    thread.join();
+            }
+            coherence_v2_shm_threads_.clear();
+        }
     }
 
-    // Print final server operation statistics
-    SPDLOG_INFO("Server Statistics:");
-    SPDLOG_INFO("  Total Reads: {}", total_reads.load());
-    SPDLOG_INFO("  Total Writes: {}", total_writes.load());
-    SPDLOG_INFO("  Atomic FAA: {}", total_atomic_faa.load());
-    SPDLOG_INFO("  Atomic CAS: {} (success: {})", total_atomic_cas.load(), total_atomic_cas_success.load());
-    SPDLOG_INFO("  Fences: {}", total_fences.load());
-    SPDLOG_INFO("  Coherency Invalidations: {}", coherency_invalidations.load());
-    SPDLOG_INFO("  Coherency Downgrades: {}", coherency_downgrades.load());
-    SPDLOG_INFO("  Back Invalidations: {}", back_invalidations.load());
+    print_final_stats_once();
+}
+
+FinalServerStats ThreadPerConnectionServer::snapshot_final_stats() {
+    FinalServerStats stats{
+        .reads = total_reads.load(),
+        .writes = total_writes.load(),
+        .atomic_faa = total_atomic_faa.load(),
+        .atomic_cas = total_atomic_cas.load(),
+        .atomic_cas_success = total_atomic_cas_success.load(),
+        .fences = total_fences.load(),
+        .coherency_invalidations = coherency_invalidations.load(),
+        .coherency_downgrades = coherency_downgrades.load(),
+        .back_invalidations = back_invalidations.load(),
+        .controller_local = 0,
+        .controller_remote = 0,
+        .controller_hitm = 0,
+        .threads_created = 0,
+    };
+
+    if (controller) {
+        stats.controller_local = controller->counter.local.get();
+        stats.controller_remote = controller->counter.remote.get();
+        stats.controller_hitm = controller->counter.hitm.get();
+        stats.threads_created = std::max(controller->thread_map.size(),
+                                         static_cast<size_t>(next_thread_id.load(std::memory_order_relaxed)));
+
+        std::function<void(const CXLSwitch *)> snapshot_switches = [&](const CXLSwitch *current) {
+            if (!current) {
+                return;
+            }
+            stats.switches.push_back({current->id, current->counter.load.get(), current->counter.store.get(),
+                                      current->counter.conflict.get()});
+            for (const auto *child : current->switches) {
+                snapshot_switches(child);
+            }
+        };
+        snapshot_switches(controller);
+
+        for (size_t i = 0; i < controller->cur_expanders.size(); ++i) {
+            const auto *endpoint = controller->cur_expanders[i];
+            if (!endpoint) {
+                continue;
+            }
+            stats.endpoints.push_back({i, endpoint->id, endpoint->counter.load.get(), endpoint->counter.store.get(),
+                                       endpoint->counter.migrate_in.get(), endpoint->counter.migrate_out.get(),
+                                       endpoint->counter.hit_old.get()});
+        }
+    }
 
     if (coherence_v2_directory_ && coherence_v2_engine_) {
         const auto transitions = coherence_v2_directory_->transitionCounters();
         const auto audit = coherence_v2_engine_->auditCounters();
-        SPDLOG_INFO("Coherence v2 MESI Statistics:");
-        SPDLOG_INFO("  Directory Lines: {}", coherence_v2_directory_->allocatedLineCount());
-        SPDLOG_INFO("  GETS: {}", transitions.gets);
-        SPDLOG_INFO("  GETM: {}", transitions.getm);
-        SPDLOG_INFO("  UPGRADE: {}", transitions.upgrade);
-        SPDLOG_INFO("  PUTS: {}", transitions.puts);
-        SPDLOG_INFO("  PUTM: {}", transitions.putm);
-        SPDLOG_INFO("  Atomic: {}", transitions.atomic);
-        SPDLOG_INFO("  Administrative Evict: {}", transitions.administrative_evict);
-        SPDLOG_INFO("  Timeout: {}", audit.timeout);
-        SPDLOG_INFO("  Partial ACK: {}", audit.partial_ack);
-        SPDLOG_INFO("  Stale ACK: {}", audit.stale_ack);
-        SPDLOG_INFO("  Snoop ACK: {}", audit.accepted_snoop_ack);
-        SPDLOG_INFO("  Invalid Ownership: {}", audit.invalid_ownership);
-        SPDLOG_INFO("Legacy controller counters below exclude coherence v2 endpoint traffic");
+        stats.has_coherence_v2 = true;
+        stats.directory_lines = coherence_v2_directory_->allocatedLineCount();
+        stats.v2_gets = transitions.gets;
+        stats.v2_getm = transitions.getm;
+        stats.v2_upgrade = transitions.upgrade;
+        stats.v2_puts = transitions.puts;
+        stats.v2_putm = transitions.putm;
+        stats.v2_atomic = transitions.atomic;
+        stats.v2_administrative_evict = transitions.administrative_evict;
+        stats.v2_timeout = audit.timeout;
+        stats.v2_partial_ack = audit.partial_ack;
+        stats.v2_stale_ack = audit.stale_ack;
+        stats.v2_accepted_snoop_ack = audit.accepted_snoop_ack;
+        stats.v2_invalid_ownership = audit.invalid_ownership;
     }
 
-    // Print CXL controller topology statistics (switches/expanders/counters)
-    if (controller) {
-        std::cout << std::format("{}", *controller) << std::endl;
+    return stats;
+}
+
+static const char *communication_mode_name(CommMode mode) {
+    switch (mode) {
+    case CommMode::TCP:
+        return "tcp";
+    case CommMode::SHM:
+        return "shm";
+    case CommMode::PGAS_SHM:
+        return "pgas-shm";
+    case CommMode::DISTRIBUTED:
+        return "distributed";
     }
+    return "unknown";
+}
+
+std::string ThreadPerConnectionServer::final_stats_json(const FinalServerStats &stats) const {
+    std::ostringstream json;
+    json << "{\n"
+         << "  \"schema\": \"cxlmemsim.server-stats.v1\",\n"
+         << "  \"communication_mode\": \"" << communication_mode_name(comm_mode) << "\",\n"
+         << "  \"server\": {\"reads\": " << stats.reads << ", \"writes\": " << stats.writes
+         << ", \"atomic_faa\": " << stats.atomic_faa << ", \"atomic_cas\": " << stats.atomic_cas
+         << ", \"atomic_cas_success\": " << stats.atomic_cas_success << ", \"fences\": " << stats.fences << "},\n"
+         << "  \"controller\": {\"local\": " << stats.controller_local << ", \"remote\": " << stats.controller_remote
+         << ", \"hitm\": " << stats.controller_hitm << ", \"threads_created\": " << stats.threads_created << "},\n"
+         << "  \"coherency\": {\"invalidations\": " << stats.coherency_invalidations
+         << ", \"downgrades\": " << stats.coherency_downgrades
+         << ", \"back_invalidations\": " << stats.back_invalidations << "},\n"
+         << "  \"switches\": [";
+
+    for (size_t i = 0; i < stats.switches.size(); ++i) {
+        const auto &item = stats.switches[i];
+        if (i != 0) {
+            json << ", ";
+        }
+        json << "{\"id\": " << item.id << ", \"loads\": " << item.loads << ", \"stores\": " << item.stores
+             << ", \"conflicts\": " << item.conflicts << "}";
+    }
+    json << "],\n  \"endpoints\": [";
+    for (size_t i = 0; i < stats.endpoints.size(); ++i) {
+        const auto &item = stats.endpoints[i];
+        if (i != 0) {
+            json << ", ";
+        }
+        json << "{\"id\": " << item.id << ", \"internal_id\": " << item.internal_id << ", \"loads\": " << item.loads
+             << ", \"stores\": " << item.stores << ", \"migrate_in\": " << item.migrate_in
+             << ", \"migrate_out\": " << item.migrate_out << ", \"hit_old\": " << item.hit_old << "}";
+    }
+    json << "],\n  \"coherence_v2\": ";
+    if (!stats.has_coherence_v2) {
+        json << "null";
+    } else {
+        json << "{\"directory_lines\": " << stats.directory_lines << ", \"gets\": " << stats.v2_gets
+             << ", \"getm\": " << stats.v2_getm << ", \"upgrade\": " << stats.v2_upgrade
+             << ", \"puts\": " << stats.v2_puts << ", \"putm\": " << stats.v2_putm
+             << ", \"atomic\": " << stats.v2_atomic << ", \"administrative_evict\": " << stats.v2_administrative_evict
+             << ", \"timeout\": " << stats.v2_timeout << ", \"partial_ack\": " << stats.v2_partial_ack
+             << ", \"stale_ack\": " << stats.v2_stale_ack << ", \"accepted_snoop_ack\": " << stats.v2_accepted_snoop_ack
+             << ", \"invalid_ownership\": " << stats.v2_invalid_ownership << "}";
+    }
+    json << "\n}\n";
+    return json.str();
+}
+
+bool ThreadPerConnectionServer::write_final_stats_json(const std::string &json) const {
+    const std::string temporary_path = stats_json_path_ + ".tmp." + std::to_string(getpid());
+    int fd = open(temporary_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0) {
+        SPDLOG_ERROR("Failed to open final statistics file {}: {}", temporary_path, strerror(errno));
+        return false;
+    }
+
+    size_t written = 0;
+    while (written < json.size()) {
+        ssize_t result = write(fd, json.data() + written, json.size() - written);
+        if (result < 0 && errno == EINTR) {
+            continue;
+        }
+        if (result <= 0) {
+            int saved_errno = errno;
+            close(fd);
+            unlink(temporary_path.c_str());
+            SPDLOG_ERROR("Failed to write final statistics file {}: {}", temporary_path, strerror(saved_errno));
+            return false;
+        }
+        written += static_cast<size_t>(result);
+    }
+
+    if (fsync(fd) != 0) {
+        int saved_errno = errno;
+        close(fd);
+        unlink(temporary_path.c_str());
+        SPDLOG_ERROR("Failed to sync final statistics file {}: {}", temporary_path, strerror(saved_errno));
+        return false;
+    }
+    if (close(fd) != 0) {
+        int saved_errno = errno;
+        unlink(temporary_path.c_str());
+        SPDLOG_ERROR("Failed to close final statistics file {}: {}", temporary_path, strerror(saved_errno));
+        return false;
+    }
+    if (rename(temporary_path.c_str(), stats_json_path_.c_str()) != 0) {
+        int saved_errno = errno;
+        unlink(temporary_path.c_str());
+        SPDLOG_ERROR("Failed to commit final statistics file {}: {}", stats_json_path_, strerror(saved_errno));
+        return false;
+    }
+    return true;
+}
+
+void ThreadPerConnectionServer::print_final_stats_once() {
+    std::call_once(final_stats_once_, [this]() {
+        const auto stats = snapshot_final_stats();
+
+        SPDLOG_INFO("Final Server Statistics:");
+        SPDLOG_INFO("  Total Reads: {}", stats.reads);
+        SPDLOG_INFO("  Total Writes: {}", stats.writes);
+        SPDLOG_INFO("  Atomic FAA: {}", stats.atomic_faa);
+        SPDLOG_INFO("  Atomic CAS: {} (success: {})", stats.atomic_cas, stats.atomic_cas_success);
+        SPDLOG_INFO("  Fences: {}", stats.fences);
+        SPDLOG_INFO("  Coherency Invalidations: {}", stats.coherency_invalidations);
+        SPDLOG_INFO("  Coherency Downgrades: {}", stats.coherency_downgrades);
+        SPDLOG_INFO("  Back Invalidations: {}", stats.back_invalidations);
+        SPDLOG_INFO("  Controller: local={} remote={} hitm={} threads_created={}", stats.controller_local,
+                    stats.controller_remote, stats.controller_hitm, stats.threads_created);
+
+        for (const auto &item : stats.switches) {
+            SPDLOG_INFO("  Switch {}: loads={} stores={} conflicts={}", item.id, item.loads, item.stores,
+                        item.conflicts);
+        }
+        for (const auto &item : stats.endpoints) {
+            SPDLOG_INFO("  Endpoint {} (internal_id={}): loads={} stores={} migrate_in={} migrate_out={} hit_old={}",
+                        item.id, item.internal_id, item.loads, item.stores, item.migrate_in, item.migrate_out,
+                        item.hit_old);
+        }
+
+        if (stats.has_coherence_v2) {
+            SPDLOG_INFO("Coherence v2 MESI Statistics:");
+            SPDLOG_INFO("  Directory Lines: {}", stats.directory_lines);
+            SPDLOG_INFO("  GETS: {}", stats.v2_gets);
+            SPDLOG_INFO("  GETM: {}", stats.v2_getm);
+            SPDLOG_INFO("  UPGRADE: {}", stats.v2_upgrade);
+            SPDLOG_INFO("  PUTS: {}", stats.v2_puts);
+            SPDLOG_INFO("  PUTM: {}", stats.v2_putm);
+            SPDLOG_INFO("  Atomic: {}", stats.v2_atomic);
+            SPDLOG_INFO("  Administrative Evict: {}", stats.v2_administrative_evict);
+            SPDLOG_INFO("  Timeout: {}", stats.v2_timeout);
+            SPDLOG_INFO("  Partial ACK: {}", stats.v2_partial_ack);
+            SPDLOG_INFO("  Stale ACK: {}", stats.v2_stale_ack);
+            SPDLOG_INFO("  Snoop ACK: {}", stats.v2_accepted_snoop_ack);
+            SPDLOG_INFO("  Invalid Ownership: {}", stats.v2_invalid_ownership);
+            SPDLOG_INFO("Legacy controller counters above exclude coherence v2 endpoint traffic");
+        }
+
+        if (!stats_json_path_.empty() && !write_final_stats_json(final_stats_json(stats))) {
+            final_stats_ok_.store(false, std::memory_order_relaxed);
+        }
+    });
 }
 
 void ThreadPerConnectionServer::handle_read_coherency(uint64_t cacheline_addr, int thread_id, CachelineInfo &info) {
@@ -2283,6 +2553,7 @@ void ThreadPerConnectionServer::run_shm_mode() {
     // Create worker threads for handling SHM requests
     const int num_workers = 4; // Configurable number of worker threads
     std::vector<std::thread> workers;
+    next_thread_id.fetch_add(num_workers + (coherence_v2_shm_listener_ ? 1 : 0), std::memory_order_relaxed);
 
     if (coherence_v2_shm_listener_)
         workers.emplace_back(&ThreadPerConnectionServer::handle_coherence_v2_shm_connections, this);
@@ -2494,6 +2765,7 @@ void ThreadPerConnectionServer::run_pgas_shm_mode() {
     // Create worker threads for handling PGAS SHM requests
     const int num_workers = 4;
     std::vector<std::thread> workers;
+    next_thread_id.fetch_add(num_workers, std::memory_order_relaxed);
 
     for (int i = 0; i < num_workers; i++) {
         workers.emplace_back([this]() {
@@ -2716,12 +2988,13 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 break;
             }
             if (slot->addr + sizeof(uint64_t) <= num_cachelines * 64) {
+                const uint64_t requested_expected = slot->expected;
                 uint64_t actual = 0;
                 bool ok = false;
                 if (use_storage_backend) {
-                    ok = shm_manager->atomic_compare_exchange_uint64(addr, slot->expected, slot->value, &actual);
+                    ok = shm_manager->atomic_compare_exchange_uint64(addr, requested_expected, slot->value, &actual);
                 } else if ((addr % 64) + sizeof(uint64_t) <= 64) {
-                    actual = slot->expected;
+                    actual = requested_expected;
                     uint64_t *ptr = (uint64_t *)(entry->data + (addr % 64));
                     __atomic_compare_exchange_n(ptr, &actual, slot->value, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
                     ok = true;
@@ -2743,6 +3016,9 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 __atomic_thread_fence(__ATOMIC_RELEASE);
                 slot->resp_status = CXL_SHM_RESP_OK;
                 total_atomic_cas++;
+                if (actual == requested_expected) {
+                    total_atomic_cas_success++;
+                }
                 controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, true);
                 log_periodic_stats("PGAS_CAS", total_atomic_cas.load());
             } else {

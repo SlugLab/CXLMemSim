@@ -36,6 +36,20 @@ static int wait_for_u32(volatile uint32_t *value, uint32_t expected, uint64_t ti
     return 0;
 }
 
+static uint32_t wait_for_response(cxl_shm_slot_t *slot, uint64_t timeout_ns) {
+    const uint64_t deadline = monotonic_ns() + timeout_ns;
+    const struct timespec sleep_time = {.tv_sec = 0, .tv_nsec = 1000000};
+
+    while (monotonic_ns() < deadline) {
+        uint32_t status = __atomic_load_n(&slot->resp_status, __ATOMIC_ACQUIRE);
+        if (status != CXL_SHM_RESP_NONE) {
+            return status;
+        }
+        nanosleep(&sleep_time, NULL);
+    }
+    return CXL_SHM_RESP_NONE;
+}
+
 static int submit(cxl_shm_slot_t *slot, uint32_t request, uint64_t address, const void *data, size_t size,
                   uint64_t value, uint64_t expected, uint64_t *returned_value) {
     __atomic_store_n(&slot->resp_status, CXL_SHM_RESP_NONE, __ATOMIC_RELEASE);
@@ -51,9 +65,9 @@ static int submit(cxl_shm_slot_t *slot, uint32_t request, uint64_t address, cons
     }
 
     __atomic_store_n(&slot->req_type, request, __ATOMIC_RELEASE);
-    if (wait_for_u32(&slot->resp_status, CXL_SHM_RESP_OK, 10000000000ULL) != 0) {
-        fprintf(stderr, "request %u timed out or failed (status=%u)\n", request,
-                __atomic_load_n(&slot->resp_status, __ATOMIC_ACQUIRE));
+    uint32_t status = wait_for_response(slot, 10000000000ULL);
+    if (status != CXL_SHM_RESP_OK) {
+        fprintf(stderr, "request %u timed out or failed (status=%u)\n", request, status);
         return -1;
     }
 

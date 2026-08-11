@@ -86,13 +86,58 @@ class ServerExitStatsTest(unittest.TestCase):
                     },
                 )
                 self.assertGreaterEqual(stats["controller"]["remote"], 4)
-                self.assertGreaterEqual(stats["controller"]["threads_created"], 1)
+                self.assertEqual(stats["controller"]["threads_created"], 4)
                 self.assertTrue(stats["switches"])
                 self.assertGreater(sum(item["loads"] for item in stats["switches"]), 0)
                 self.assertGreater(sum(item["stores"] for item in stats["switches"]), 0)
                 self.assertTrue(stats["endpoints"])
                 self.assertGreater(sum(item["loads"] for item in stats["endpoints"]), 0)
                 self.assertGreater(sum(item["stores"] for item in stats["endpoints"]), 0)
+            finally:
+                if process is not None and process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+                if shm_path.name.startswith("cxlmemsim_pgas_stats_"):
+                    try:
+                        shm_path.unlink()
+                    except FileNotFoundError:
+                        pass
+
+    def test_unwritable_stats_destination_fails_exit(self):
+        token = f"{os.getpid()}_{secrets.token_hex(6)}"
+        shm_name = f"/cxlmemsim_pgas_stats_{token}"
+        shm_path = Path("/dev/shm") / shm_name.removeprefix("/")
+
+        with tempfile.TemporaryDirectory(prefix="cxlmemsim-exit-stats-failure-") as temporary:
+            temporary_path = Path(temporary)
+            log_path = temporary_path / "server.log"
+            missing_stats_path = temporary_path / "missing" / "stats.json"
+            process = None
+
+            try:
+                with log_path.open("w") as log:
+                    process = subprocess.Popen(
+                        [
+                            SERVER_BIN,
+                            "--comm-mode=pgas-shm",
+                            f"--pgas-shm-name={shm_name}",
+                            "--capacity=16",
+                            "--backing-mode=file",
+                            f"--backing-file={temporary_path / 'backing.bin'}",
+                            f"--stats-json={missing_stats_path}",
+                        ],
+                        stdout=log,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                    )
+                    wait_for_text(log_path, "PGAS shared memory initialized", process, 10)
+                    process.send_signal(signal.SIGTERM)
+                    self.assertEqual(process.wait(timeout=10), 1)
+
+                output = log_path.read_text(errors="replace")
+                self.assertEqual(output.count("Final Server Statistics:"), 1, output)
+                self.assertIn("Failed to open final statistics file", output)
+                self.assertFalse(missing_stats_path.exists())
             finally:
                 if process is not None and process.poll() is None:
                     process.kill()
