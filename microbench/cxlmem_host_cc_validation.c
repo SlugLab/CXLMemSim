@@ -69,6 +69,9 @@ typedef struct {
     _Atomic int *start;
     _Atomic int *failed;
     uint64_t errors;
+    uint64_t payload_mismatches;
+    uint64_t first_expected;
+    uint64_t first_observed;
     uint64_t attempts;
     uint64_t successes;
     uint64_t failures;
@@ -78,6 +81,8 @@ typedef struct {
 typedef struct {
     uint64_t errors;
     uint64_t stale;
+    uint64_t first_stale_expected;
+    uint64_t first_stale_observed;
     uint64_t ticket_errors;
     uint64_t cas_errors;
     uint64_t operations;
@@ -287,8 +292,15 @@ static void *message_worker(void *opaque) {
                 args->errors++;
                 break;
             }
-            if (atomic_load_explicit(&args->state->payload, memory_order_relaxed) != sequence)
+            uint64_t observed = atomic_load_explicit(&args->state->payload, memory_order_relaxed);
+            if (observed != sequence) {
+                if (args->payload_mismatches == 0) {
+                    args->first_expected = sequence;
+                    args->first_observed = observed;
+                }
+                args->payload_mismatches++;
                 args->errors++;
+            }
             atomic_store_explicit(&args->state->ack, sequence, memory_order_release);
         }
     }
@@ -493,7 +505,9 @@ static bool run_two_workers(const options_t *options, shared_state_t *state, res
     uint64_t end = read_tsc();
 
     result->errors = args_a.errors + args_b.errors + (uint64_t)atomic_load(&failed);
-    result->stale = options->mode == MODE_MESSAGE_PASSING ? args_b.errors : 0;
+    result->stale = options->mode == MODE_MESSAGE_PASSING ? args_b.payload_mismatches : 0;
+    result->first_stale_expected = args_b.first_expected;
+    result->first_stale_observed = args_b.first_observed;
     result->attempts = args_a.attempts + args_b.attempts;
     result->successes = args_a.successes + args_b.successes;
     result->failures = args_a.failures + args_b.failures;
@@ -543,16 +557,17 @@ fail:
 static void emit_result(const options_t *options, const result_t *result, double cycles_per_ns) {
     printf("{\"schema\":\"splash.cxlmem-hwcc.v1\",\"mode\":\"%s\",\"backend\":\"%s\","
            "\"cpu_a\":%d,\"cpu_b\":%d,\"iterations\":%" PRIu64 ",\"operations\":%" PRIu64 ","
-           "\"errors\":%" PRIu64 ",\"stale\":%" PRIu64 ",\"ticket_errors\":%" PRIu64 ",\"cas_errors\":%" PRIu64
+           "\"errors\":%" PRIu64 ",\"stale\":%" PRIu64 ",\"ticket_errors\":%" PRIu64
+           ",\"first_stale_expected\":%" PRIu64 ",\"first_stale_observed\":%" PRIu64 ",\"cas_errors\":%" PRIu64
            ",\"final_value\":%" PRIu64 ",\"attempts\":%" PRIu64 ",\"successes\":%" PRIu64 ",\"failures\":%" PRIu64
            ",\"flushes_in_hot_path\":%" PRIu64 ",\"average_ns\":%.3f,\"p50_ns\":%.3f,\"p95_ns\":%.3f,\"p99_ns\":%.3f,"
            "\"tsc_ghz\":%.6f,\"mapped_length\":%zu,\"max_written_offset\":%zu,"
            "\"atomics_lock_free\":true}\n",
            mode_name(options->mode), backend_name(options->backend), options->cpu_a, options->cpu_b,
            options->iterations, result->operations, result->errors, result->stale, result->ticket_errors,
-           result->cas_errors, result->final_value, result->attempts, result->successes, result->failures,
-           result->flushes, result->average_ns, result->p50_ns, result->p95_ns, result->p99_ns, cycles_per_ns,
-           options->length, result->max_written_offset);
+           result->first_stale_expected, result->first_stale_observed, result->cas_errors, result->final_value,
+           result->attempts, result->successes, result->failures, result->flushes, result->average_ns, result->p50_ns,
+           result->p95_ns, result->p99_ns, cycles_per_ns, options->length, result->max_written_offset);
 }
 
 int main(int argc, char **argv) {

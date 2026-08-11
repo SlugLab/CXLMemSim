@@ -816,6 +816,124 @@ def execute_hardware_run(args: argparse.Namespace) -> Path:
     return run_dir
 
 
+def finalize_blocked_run(run_dir: Path, *, failure: str) -> dict:
+    """Seal a stopped run without converting partial evidence into a passing run."""
+    run_dir = run_dir.resolve()
+    if not (run_dir / "preflight.json").is_file() or not (run_dir / "raw").is_dir():
+        raise ValidationError(f"not a partial CXL.mem run directory: {run_dir}")
+    repository = Path(__file__).resolve().parents[1]
+    commit = _git_commit(repository)
+    rows: list[dict[str, str | int | float]] = []
+    completed_results: list[dict] = []
+    raw_files = sorted(path for path in (run_dir / "raw").iterdir() if path.is_file())
+    for stdout_path in sorted((run_dir / "raw").glob("r*.stdout.json")):
+        benchmark_result = parse_benchmark_output(stdout_path.read_text())
+        stem = stdout_path.name.removesuffix(".stdout.json")
+        repetition_match = re.match(r"r(\d+)-", stem)
+        if repetition_match is None:
+            raise ValidationError(f"cannot parse partial result name: {stdout_path.name}")
+        repetition = int(repetition_match.group(1))
+        placement = "cross-numa" if stem.endswith("-cross-numa") else "same-numa"
+        completed_results.append(benchmark_result | {"placement": placement, "repetition": repetition, "stem": stem})
+        metrics: dict[str, float] = {
+            "benchmark.average_ns": float(benchmark_result["average_ns"]),
+            "benchmark.p50_ns": float(benchmark_result["p50_ns"]),
+            "benchmark.p95_ns": float(benchmark_result["p95_ns"]),
+            "benchmark.p99_ns": float(benchmark_result["p99_ns"]),
+        }
+        for suffix in ("cpu-perf.csv", "device-perf.csv"):
+            perf_path = run_dir / "raw" / f"{stem}.{suffix}"
+            if perf_path.is_file():
+                metrics.update(parse_perf_stat(perf_path.read_text(), separator=";"))
+        for event, value in metrics.items():
+            rows.append(
+                {
+                    "backend": benchmark_result["backend"],
+                    "mode": benchmark_result["mode"],
+                    "placement": placement,
+                    "repetition": repetition,
+                    "event": event,
+                    "value": value,
+                    "operations": benchmark_result["operations"],
+                }
+            )
+
+    with (run_dir / "partial-results.csv").open("w", newline="") as handle:
+        fieldnames = ["backend", "mode", "placement", "repetition", "event", "value", "operations"]
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    dmesg_after = _capture_command(["dmesg", "--color=never"], timeout=30)
+    aer_after = _capture_command(["lspci", "-vv", "-s", EXPECTED_BDF])
+    (run_dir / "dmesg-after.txt").write_text(dmesg_after)
+    (run_dir / "aer-after.txt").write_text(aer_after)
+    dmesg_before = (run_dir / "dmesg-before.txt").read_text()
+    aer_before = (run_dir / "aer-before.txt").read_text()
+    before_lines = set(dmesg_before.splitlines())
+    new_kernel_errors = [
+        line
+        for line in dmesg_after.splitlines()
+        if line not in before_lines
+        and re.search(r"AER|Hardware Error|Machine check|MCE|CXL.*(error|fail)", line, re.IGNORECASE)
+    ]
+    aer_pattern = re.compile(r"^\s*(DevSta|UESta|CESta|CXLSta):")
+    aer_before_status = [line.strip() for line in aer_before.splitlines() if aer_pattern.search(line)]
+    aer_after_status = [line.strip() for line in aer_after.splitlines() if aer_pattern.search(line)]
+
+    failed_results = [item for item in completed_results if int(item["errors"]) != 0]
+    blocked = {
+        "schema": "splash.cxlmem-hwcc-blocked.v1",
+        "status": "blocked",
+        "git_commit": commit,
+        "failure": failure,
+        "completed_commands": len(completed_results),
+        "failed_results": failed_results,
+        "correctness": {
+            "errors": sum(int(item["errors"]) for item in completed_results),
+            "stale": sum(int(item["stale"]) for item in completed_results),
+            "ticket_errors": sum(int(item["ticket_errors"]) for item in completed_results),
+            "cas_errors": sum(int(item["cas_errors"]) for item in completed_results),
+        },
+        "safety": {
+            "approved_length": APPROVED_LENGTH,
+            "max_written_offset": max(int(item["max_written_offset"]) for item in completed_results),
+            "device_holders_after": list(enumerate_device_holders(Path("/dev/dax0.0"))),
+            "new_kernel_errors": new_kernel_errors,
+            "aer_status_changed": aer_before_status != aer_after_status,
+            "retry_performed": False,
+        },
+    }
+    _write_json(run_dir / "blocked.json", blocked)
+    _write_json(
+        run_dir / "manifest.json",
+        {
+            "schema": "splash.cxlmem-hwcc-manifest.v1",
+            "status": "blocked",
+            "git_commit": commit,
+            "run_id": run_dir.name,
+            "device": "/dev/dax0.0",
+            "approved_range": "[0, 0x200000)",
+        },
+    )
+    _write_json(
+        run_dir / "validation.json",
+        {
+            "schema": "splash.cxlmem-hwcc-validation.v1",
+            "status": "fail",
+            "git_commit": commit,
+            "errors": [failure, "positive proof gate rejected because stale != 0"],
+        },
+    )
+    evidence = sorted(
+        str(path.relative_to(run_dir))
+        for path in run_dir.rglob("*")
+        if path.is_file() and path.name != "SHA256SUMS"
+    )
+    _write_checksums(run_dir, evidence)
+    return blocked
+
+
 def validate_run_directory(run_dir: Path, *, expected_git_commit: str | None = None) -> dict:
     run_dir = Path(run_dir)
     verified = _verify_checksums(run_dir)
@@ -908,6 +1026,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     modes.add_argument("--validate-only", type=Path, metavar="RUN_DIR")
     modes.add_argument("--preflight-only", action="store_true")
     modes.add_argument("--execute", action="store_true", help="run the approved hardware experiment")
+    modes.add_argument("--finalize-blocked", type=Path, metavar="RUN_DIR")
+    parser.add_argument("--failure", default="hardware measurement stopped at a fail-closed proof gate")
     parser.add_argument("--device", type=Path, default=Path("/dev/dax0.0"))
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--length", type=int, default=APPROVED_LENGTH)
@@ -935,6 +1055,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.preflight_only:
         result = collect_preflight(args.device, offset=args.offset, length=args.length)
         print(json.dumps(result, sort_keys=True))
+        return 0
+    if args.finalize_blocked is not None:
+        result = finalize_blocked_run(args.finalize_blocked, failure=args.failure)
+        print(json.dumps({"run_dir": str(args.finalize_blocked), "status": result["status"]}, sort_keys=True))
         return 0
     if args.repetitions <= 0 or args.iterations <= 0:
         raise ValidationError("repetitions and iterations must be positive")
