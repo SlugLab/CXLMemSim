@@ -79,9 +79,20 @@ static int submit(cxl_shm_slot_t *slot, uint32_t request, uint64_t address, cons
 }
 
 int main(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s /pgas-shm-name\n", argv[0]);
+    if (argc < 2 || argc > 3) {
+        fprintf(stderr, "usage: %s /pgas-shm-name [slots-to-touch]\n", argv[0]);
         return EXIT_FAILURE;
+    }
+
+    unsigned long slots_to_touch = 1;
+    if (argc == 3) {
+        char *end = NULL;
+        errno = 0;
+        slots_to_touch = strtoul(argv[2], &end, 10);
+        if (errno != 0 || end == argv[2] || *end != '\0' || slots_to_touch == 0) {
+            fprintf(stderr, "invalid slots-to-touch: %s\n", argv[2]);
+            return EXIT_FAILURE;
+        }
     }
 
     int fd = shm_open(argv[1], O_RDWR | O_CLOEXEC, 0);
@@ -111,6 +122,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "invalid PGAS header\n");
         goto out;
     }
+    if (slots_to_touch > header->num_slots) {
+        fprintf(stderr, "requested %lu slots but server exposes %u\n", slots_to_touch, header->num_slots);
+        goto out;
+    }
     if (wait_for_u32(&header->server_ready, 1, 10000000000ULL) != 0) {
         fprintf(stderr, "server_ready timed out\n");
         goto out;
@@ -127,6 +142,15 @@ int main(int argc, char **argv) {
         submit(slot, CXL_SHM_REQ_FENCE, 0, NULL, 0, 0, 0, NULL) != 0) {
         fprintf(stderr, "PGAS operation validation failed (returned=%" PRIu64 ")\n", returned);
         goto out;
+    }
+
+    for (unsigned long i = 1; i < slots_to_touch; ++i) {
+        uint64_t slot_value = 0;
+        if (submit(&header->slots[i], CXL_SHM_REQ_READ, 0, NULL, sizeof(slot_value), 0, 0, &slot_value) != 0 ||
+            slot_value != 9) {
+            fprintf(stderr, "PGAS slot %lu validation failed (returned=%" PRIu64 ")\n", i, slot_value);
+            goto out;
+        }
     }
 
     result = EXIT_SUCCESS;

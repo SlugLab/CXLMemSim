@@ -63,7 +63,9 @@ class ServerExitStatsTest(unittest.TestCase):
                     )
 
                     wait_for_text(log_path, "PGAS shared memory initialized", process, 10)
-                    subprocess.run([CLIENT_BIN, shm_name], check=True, timeout=10)
+                    # Touch more client slots than there are workers. Slot IDs are
+                    # request identities and must not inflate threads_created.
+                    subprocess.run([CLIENT_BIN, shm_name, "5"], check=True, timeout=10)
                     process.send_signal(signal.SIGTERM)
                     self.assertEqual(process.wait(timeout=10), 0)
 
@@ -77,7 +79,7 @@ class ServerExitStatsTest(unittest.TestCase):
                 self.assertEqual(
                     stats["server"],
                     {
-                        "reads": 1,
+                        "reads": 5,
                         "writes": 1,
                         "atomic_faa": 1,
                         "atomic_cas": 1,
@@ -85,14 +87,33 @@ class ServerExitStatsTest(unittest.TestCase):
                         "fences": 1,
                     },
                 )
-                self.assertGreaterEqual(stats["controller"]["remote"], 4)
-                self.assertEqual(stats["controller"]["threads_created"], 4)
-                self.assertTrue(stats["switches"])
-                self.assertGreater(sum(item["loads"] for item in stats["switches"]), 0)
-                self.assertGreater(sum(item["stores"] for item in stats["switches"]), 0)
-                self.assertTrue(stats["endpoints"])
-                self.assertGreater(sum(item["loads"] for item in stats["endpoints"]), 0)
-                self.assertGreater(sum(item["stores"] for item in stats["endpoints"]), 0)
+                self.assertEqual(
+                    stats["controller"],
+                    {"local": 0, "remote": 8, "hitm": 0, "threads_created": 4},
+                )
+                self.assertEqual(
+                    stats["switches"],
+                    [{"id": 0, "loads": 5, "stores": 3, "conflicts": 0}],
+                )
+                self.assertEqual(
+                    stats["endpoints"],
+                    [
+                        {
+                            "id": 0,
+                            "internal_id": 0,
+                            "loads": 5,
+                            "stores": 3,
+                            "migrate_in": 0,
+                            "migrate_out": 0,
+                            "hit_old": 0,
+                        }
+                    ],
+                )
+                self.assertIn("  Total Reads: 5", output)
+                self.assertIn("  Total Writes: 1", output)
+                self.assertIn("  Atomic FAA: 1", output)
+                self.assertIn("  Atomic CAS: 1 (success: 1)", output)
+                self.assertIn("  Fences: 1", output)
             finally:
                 if process is not None and process.poll() is None:
                     process.kill()

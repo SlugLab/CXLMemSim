@@ -25,6 +25,7 @@
 #include <cctype>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <errno.h>
 #include <fcntl.h>
@@ -191,6 +192,36 @@ private:
     CXLController *controller;
     std::atomic<bool> running;
     std::atomic<int> next_thread_id;
+    std::atomic<size_t> threads_created_{0};
+    std::mutex lifecycle_mutex_;
+    std::condition_variable lifecycle_cv_;
+    bool run_active_ = false;
+    std::mutex stop_mutex_;
+
+    class RunGuard {
+    public:
+        explicit RunGuard(ThreadPerConnectionServer &server) : server_(server) {
+            std::lock_guard<std::mutex> lock(server_.lifecycle_mutex_);
+            if (server_.run_active_) {
+                throw std::logic_error("server run loop is already active");
+            }
+            server_.run_active_ = true;
+        }
+
+        ~RunGuard() {
+            {
+                std::lock_guard<std::mutex> lock(server_.lifecycle_mutex_);
+                server_.run_active_ = false;
+            }
+            server_.lifecycle_cv_.notify_all();
+        }
+
+        RunGuard(const RunGuard &) = delete;
+        RunGuard &operator=(const RunGuard &) = delete;
+
+    private:
+        ThreadPerConnectionServer &server_;
+    };
 
     // Communication mode
     CommMode comm_mode;
@@ -1228,6 +1259,8 @@ bool ThreadPerConnectionServer::start() {
 }
 
 void ThreadPerConnectionServer::run() {
+    RunGuard run_guard(*this);
+
     switch (comm_mode) {
     case CommMode::SHM:
         SPDLOG_INFO("Running in SHM mode (no TCP accept loop)");
@@ -1276,6 +1309,7 @@ void ThreadPerConnectionServer::run() {
             std::lock_guard<std::mutex> lock(thread_list_mutex);
             // Pass thread_id to handle_client
             client_threads.emplace_back(&ThreadPerConnectionServer::handle_client, this, client_fd, thread_id);
+            threads_created_.fetch_add(1, std::memory_order_relaxed);
         }
 
         SPDLOG_INFO("Accepted new client connection, assigned thread ID {}", thread_id);
@@ -1283,6 +1317,7 @@ void ThreadPerConnectionServer::run() {
 }
 
 void ThreadPerConnectionServer::stop() {
+    std::lock_guard<std::mutex> stop_lock(stop_mutex_);
     bool was_running = running.exchange(false);
     if (was_running) {
         if (comm_mode == CommMode::TCP) {
@@ -1325,6 +1360,11 @@ void ThreadPerConnectionServer::stop() {
         }
     }
 
+    {
+        std::unique_lock<std::mutex> lock(lifecycle_mutex_);
+        lifecycle_cv_.wait(lock, [this]() { return !run_active_; });
+    }
+
     print_final_stats_once();
 }
 
@@ -1349,8 +1389,7 @@ FinalServerStats ThreadPerConnectionServer::snapshot_final_stats() {
         stats.controller_local = controller->counter.local.get();
         stats.controller_remote = controller->counter.remote.get();
         stats.controller_hitm = controller->counter.hitm.get();
-        stats.threads_created = std::max(controller->thread_map.size(),
-                                         static_cast<size_t>(next_thread_id.load(std::memory_order_relaxed)));
+        stats.threads_created = threads_created_.load(std::memory_order_relaxed);
 
         std::function<void(const CXLSwitch *)> snapshot_switches = [&](const CXLSwitch *current) {
             if (!current) {
@@ -2553,13 +2592,14 @@ void ThreadPerConnectionServer::run_shm_mode() {
     // Create worker threads for handling SHM requests
     const int num_workers = 4; // Configurable number of worker threads
     std::vector<std::thread> workers;
-    next_thread_id.fetch_add(num_workers + (coherence_v2_shm_listener_ ? 1 : 0), std::memory_order_relaxed);
-
-    if (coherence_v2_shm_listener_)
+    if (coherence_v2_shm_listener_) {
         workers.emplace_back(&ThreadPerConnectionServer::handle_coherence_v2_shm_connections, this);
+        threads_created_.fetch_add(1, std::memory_order_relaxed);
+    }
 
     for (int i = 0; i < num_workers; i++) {
         workers.emplace_back(&ThreadPerConnectionServer::handle_shm_requests, this);
+        threads_created_.fetch_add(1, std::memory_order_relaxed);
     }
 
     // Wait for workers to finish (they won't unless stopped)
@@ -2591,6 +2631,7 @@ void ThreadPerConnectionServer::handle_coherence_v2_shm_connections() {
             if (!cxlmemsim::serveCoherenceV2ShmChannel(*coherence_v2_server_, channel))
                 SPDLOG_WARN("Coherence v2 SHM channel {} ended with a protocol error", connection);
         });
+        threads_created_.fetch_add(1, std::memory_order_relaxed);
     }
 }
 
@@ -2765,8 +2806,6 @@ void ThreadPerConnectionServer::run_pgas_shm_mode() {
     // Create worker threads for handling PGAS SHM requests
     const int num_workers = 4;
     std::vector<std::thread> workers;
-    next_thread_id.fetch_add(num_workers, std::memory_order_relaxed);
-
     for (int i = 0; i < num_workers; i++) {
         workers.emplace_back([this]() {
             while (running && !shutdown_requested()) {
@@ -2777,6 +2816,7 @@ void ThreadPerConnectionServer::run_pgas_shm_mode() {
                 }
             }
         });
+        threads_created_.fetch_add(1, std::memory_order_relaxed);
     }
 
     // Wait for workers to finish
