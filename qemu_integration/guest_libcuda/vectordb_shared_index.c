@@ -654,6 +654,7 @@ int main(int argc, char **argv) {
     Gpu gpu;
     float *source = NULL;
     float *oracle_source = NULL;
+    const float *copy_source = NULL;
     float *host_queries = NULL;
     int *gpu_labels = NULL;
     int *cpu_labels = NULL;
@@ -748,6 +749,7 @@ int main(int argc, char **argv) {
     } else {
         oracle_source = source;
     }
+    copy_source = source_is_cxl ? source : oracle_source;
     {
         void *aligned_queries = NULL;
         if (posix_memalign(&aligned_queries, CACHE_LINE_BYTES, query_bytes) != 0) {
@@ -785,7 +787,7 @@ int main(int argc, char **argv) {
 
     if (options.mode != MODE_TYPE2_HWCC &&
         (!cuda_ok(cuMemAlloc_v2(&device_index, index_bytes), "cuMemAlloc_v2(index)") ||
-         !cuda_ok(cuMemcpyHtoD_v2(device_index, oracle_source, index_bytes), "cuMemcpyHtoD_v2(initial index)")))
+         !cuda_ok(cuMemcpyHtoD_v2(device_index, copy_source, index_bytes), "cuMemcpyHtoD_v2(initial index)")))
         goto cleanup;
     if (!cuda_ok(cuMemAlloc_v2(&device_queries, query_bytes), "cuMemAlloc_v2(queries)") ||
         !cuda_ok(cuMemAlloc_v2(&device_labels, label_bytes), "cuMemAlloc_v2(labels)") ||
@@ -862,10 +864,10 @@ int main(int argc, char **argv) {
                 goto cleanup;
             }
         } else if (options.mode == MODE_SOFTWARE_CC) {
-            if (!publish_software_cc(source, oracle_source, device_index, &dirty, &copied_bytes))
+            if (!publish_software_cc(source, copy_source, device_index, &dirty, &copied_bytes))
                 goto cleanup;
         } else if (options.mode == MODE_FULL_COPY) {
-            if (!cuda_ok(cuMemcpyHtoD_v2(device_index, oracle_source, index_bytes), "cuMemcpyHtoD_v2(full index)") ||
+            if (!cuda_ok(cuMemcpyHtoD_v2(device_index, copy_source, index_bytes), "cuMemcpyHtoD_v2(full index)") ||
                 !cuda_ok(cuCtxSynchronize(), "cuCtxSynchronize(full-copy)"))
                 goto cleanup;
             copied_bytes = index_bytes;

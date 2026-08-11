@@ -124,6 +124,18 @@ static void test_range_validation_is_fail_closed(void) {
     assert(lines_granted == 0);
 }
 
+static void test_htod_from_bar4_uses_bulk_command(void) {
+    reset_fake_device();
+    g_initialized = 1;
+
+    assert(cuMemcpyHtoD_v2(UINT64_C(0x12345678), fake_bar4 + 17, 81) == CUDA_SUCCESS);
+    assert(reg_read32(CXL_GPU_REG_CMD) == CXL_GPU_CMD_BULK_HTOD);
+    assert(reg_read64(CXL_GPU_REG_PARAM0) == 17);
+    assert(reg_read64(CXL_GPU_REG_PARAM1) == UINT64_C(0x12345678));
+    assert(reg_read64(CXL_GPU_REG_PARAM2) == 81);
+    g_initialized = 0;
+}
+
 int main(void) {
     test_command_numbers_match_host();
     test_acquire_uses_range_abi();
@@ -131,6 +143,7 @@ int main(void) {
     test_non_coherency_error_does_not_report_stale_results();
     test_release_uses_range_abi();
     test_range_validation_is_fail_closed();
+    test_htod_from_bar4_uses_bulk_command();
     detach_fake_device();
     puts("cxl coherent range guest tests: PASS");
     return 0;
