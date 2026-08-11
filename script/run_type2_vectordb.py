@@ -656,7 +656,8 @@ def benchmark_command(binary: str, mode: str, workload: Workload) -> list[str]:
 
 def guest_type2_probe_command() -> str:
     return (
-        "set -eu; chmod 0755 /root/vectordb/vectordb_shared_index; device=; "
+        "set -eu; chmod 0755 /root/vectordb/vectordb_shared_index; "
+        "ln -sf libcuda.so.1 /root/vectordb/libcuda.so; device=; "
         "for candidate in /sys/bus/pci/devices/*; do "
         "[ \"$(cat \"$candidate/vendor\" 2>/dev/null)\" = 0x8086 ] || continue; "
         "[ \"$(cat \"$candidate/device\" 2>/dev/null)\" = 0x0d92 ] || continue; "

@@ -451,6 +451,7 @@ class DryRunTests(unittest.TestCase):
             "resource4",
             "0x8086",
             "0x0d92",
+            "ln -sf libcuda.so.1 /root/vectordb/libcuda.so",
             "qemu-img create -f qcow2",
             "git rev-parse HEAD:lib/qemu",
             "lscpu",
