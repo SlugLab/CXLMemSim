@@ -1,0 +1,11 @@
+panel,series,backend,mode,placement,event,unit,n,median,p25,p75,stale_reads,atomic_errors
+latency,DRAM warm load,dram,warm-load,same-numa,benchmark.average_ns,ns/op,5,51.777,46.81,52.952,0,0
+latency,DRAM cold load,dram,cold-load,same-numa,benchmark.average_ns,ns/op,5,207.262,195.094,207.492,0,0
+latency,CXL warm load,cxlmem,warm-load,same-numa,benchmark.average_ns,ns/op,5,83.908,52.672,89.265,0,0
+latency,CXL cold load,cxlmem,cold-load,same-numa,benchmark.average_ns,ns/op,5,348.332,324.646,361.845,0,0
+latency,CXL handoff same NUMA,cxlmem,handoff,same-numa,benchmark.average_ns,ns/op,5,376.636,193.661,423.899,0,0
+latency,CXL handoff cross NUMA,cxlmem,handoff,cross-numa,benchmark.average_ns,ns/op,5,269.123,253.763,507.084,0,0
+pmu,CXL cold CPU CXL-read,cxlmem,cold-load,same-numa,mem_load_retired.local_cxl_mem,events/op,5,0.999961,0.999785,0.999986,0,0
+pmu,CXL cold device MemRd,cxlmem,cold-load,same-numa,cxl_pmu_mem0.0/m2s_req_memrd/,events/op,5,1.04289,1.035086,1.082777,0,0
+pmu,CXL handoff same NUMA XSNP,cxlmem,handoff,same-numa,mem_load_l3_hit_retired.xsnp_fwd,events/op,5,1.9960585,1.9902775,1.997529,0,0
+pmu,CXL handoff cross NUMA XSNP,cxlmem,handoff,cross-numa,mem_load_l3_hit_retired.xsnp_fwd,events/op,5,0.998864,0.992668,1.0001095,0,0
