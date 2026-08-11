@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+
+import csv
+import hashlib
+import json
+from pathlib import Path
+import tempfile
+import unittest
+
+from script.run_cxlmem_hwcc_validation import (
+    APPROVED_LENGTH,
+    HardwarePaths,
+    ValidationError,
+    attest_hardware,
+    validate_run_directory,
+)
+
+
+EXPECTED_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+
+
+def write_hardware_fixture(root: Path) -> HardwarePaths:
+    pci = root / "sys/bus/pci/devices/0000:64:00.0"
+    mem = root / "sys/bus/cxl/devices/mem0"
+    region = root / "sys/bus/cxl/devices/region0"
+    dax = root / "sys/bus/dax/devices/dax0.0"
+    device = root / "dev/dax0.0"
+    for directory in (pci, mem, region, dax, device.parent):
+        directory.mkdir(parents=True, exist_ok=True)
+    device.touch()
+
+    (pci / "vendor").write_text("0x1b00\n")
+    (pci / "device").write_text("0xc002\n")
+    (pci / "dvsec.txt").write_text(
+        "FBCap:\tCache- IO+ Mem+\n"
+        "CXLCap:\tCache- IO+ Mem+ MemHWInit+ HDMCount 1\n"
+    )
+    (mem / "serial").write_text("0x8a0af738c2820407\n")
+    (mem / "firmware_version").write_text("20.00.0.0609.00\n")
+    (mem / "ram").mkdir()
+    (mem / "ram/size").write_text("0x2000000000\n")
+    (region / "mode").write_text("ram\n")
+    (region / "commit").write_text("1\n")
+    (region / "resource").write_text("0x2080000000\n")
+    (region / "size").write_text("0x2000000000\n")
+    (dax / "size").write_text("137438953472\n")
+    (dax / "resource").write_text("0x2080000000\n")
+    (dax / "target_node").write_text("2\n")
+    (dax / "align").write_text("4096\n")
+    (dax / "uevent").write_text("DEVNAME=dax0.0\nDRIVER=device_dax\n")
+    return HardwarePaths(device=device, pci=pci, mem=mem, region=region, dax=dax, dvsec=pci / "dvsec.txt")
+
+
+def write_run_fixture(root: Path) -> Path:
+    run_dir = root / "run"
+    raw = run_dir / "raw"
+    raw.mkdir(parents=True)
+    (raw / "cold-cxl-perf.csv").write_text("100,,mem_load_retired.local_cxl_mem\n")
+    rows = [
+        {
+            "backend": "cxlmem",
+            "mode": "cold-load",
+            "placement": "same-socket",
+            "repetition": "0",
+            "event": "mem_load_retired.local_cxl_mem",
+            "value": "100",
+        },
+        {
+            "backend": "cxlmem",
+            "mode": "handoff",
+            "placement": "cross-socket",
+            "repetition": "0",
+            "event": "mem_load_l3_miss_retired.remote_hitm",
+            "value": "20",
+        },
+    ]
+    with (run_dir / "results.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+    summary = {
+        "schema": "splash.cxlmem-hwcc-summary.v1",
+        "git_commit": EXPECTED_COMMIT,
+        "litmus": {"stale": 0},
+        "atomic": {"ticket_errors": 0, "cas_errors": 0},
+        "pmu": {"cold_cxl_reads": 100, "cache_to_cache_events": 20},
+        "safety": {"max_written_offset": APPROVED_LENGTH, "approved_length": APPROVED_LENGTH},
+        "commands": [{"name": "cold-cxl", "returncode": 0}],
+        "raw_evidence": ["raw/cold-cxl-perf.csv"],
+    }
+    (run_dir / "summary.json").write_text(json.dumps(summary, sort_keys=True) + "\n")
+    (run_dir / "manifest.json").write_text(
+        json.dumps({"schema": "splash.cxlmem-hwcc-manifest.v1", "git_commit": EXPECTED_COMMIT}) + "\n"
+    )
+    checksummed = ["manifest.json", "results.csv", "summary.json", "raw/cold-cxl-perf.csv"]
+    with (run_dir / "SHA256SUMS").open("w") as handle:
+        for relative in checksummed:
+            digest = hashlib.sha256((run_dir / relative).read_bytes()).hexdigest()
+            handle.write(f"{digest}  {relative}\n")
+    return run_dir
+
+
+class HardwareAttestationTest(unittest.TestCase):
+    def test_accepts_exact_read_only_hardware_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = write_hardware_fixture(Path(temporary))
+            attestation = attest_hardware(paths, offset=0, length=APPROVED_LENGTH, holders=())
+        self.assertEqual(attestation.bdf, "0000:64:00.0")
+        self.assertEqual(attestation.pci_id, "1b00:c002")
+        self.assertEqual(attestation.serial, "0x8a0af738c2820407")
+        self.assertEqual(attestation.region_size, 128 * 1024**3)
+        self.assertEqual(attestation.length, APPROVED_LENGTH)
+        self.assertIn("dvsec-cache-disabled-mem-enabled", attestation.checks)
+
+    def test_rejects_mapping_beyond_two_mib(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = write_hardware_fixture(Path(temporary))
+            with self.assertRaisesRegex(ValidationError, "approved 2 MiB"):
+                attest_hardware(paths, offset=0, length=APPROVED_LENGTH + 1, holders=())
+
+    def test_rejects_nonzero_offset(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = write_hardware_fixture(Path(temporary))
+            with self.assertRaisesRegex(ValidationError, "approved 2 MiB"):
+                attest_hardware(paths, offset=4096, length=4096, holders=())
+
+    def test_rejects_each_identity_or_mode_mismatch(self):
+        mutations = {
+            "vendor": ("pci", "vendor", "0xffff\n", "PCI identity"),
+            "device": ("pci", "device", "0xffff\n", "PCI identity"),
+            "serial": ("mem", "serial", "0xdeadbeef\n", "serial"),
+            "firmware": ("mem", "firmware_version", "\n", "firmware"),
+            "dvsec": ("pci", "dvsec.txt", "FBCap: Cache+ IO+ Mem+\n", "Cache-.*Mem\\+"),
+            "region-mode": ("region", "mode", "pmem\n", "region mode"),
+            "region-commit": ("region", "commit", "0\n", "committed"),
+            "region-resource": ("region", "resource", "0x0\n", "resource"),
+            "region-size": ("region", "size", "0x1000\n", "128 GiB"),
+            "dax-size": ("dax", "size", "4096\n", "DAX size"),
+            "dax-resource": ("dax", "resource", "0x2080100000\n", "DAX resource"),
+            "dax-driver": ("dax", "uevent", "DRIVER=other\n", "device_dax"),
+        }
+        for name, (base, relative, value, message) in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                paths = write_hardware_fixture(Path(temporary))
+                (getattr(paths, base) / relative).write_text(value)
+                with self.assertRaisesRegex(ValidationError, message):
+                    attest_hardware(paths, offset=0, length=APPROVED_LENGTH, holders=())
+
+    def test_rejects_open_holder_and_unavailable_advisory_lock(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = write_hardware_fixture(Path(temporary))
+            with self.assertRaisesRegex(ValidationError, "open holder"):
+                attest_hardware(paths, offset=0, length=APPROVED_LENGTH, holders=(1234,))
+            with self.assertRaisesRegex(ValidationError, "advisory lock"):
+                attest_hardware(
+                    paths,
+                    offset=0,
+                    length=APPROVED_LENGTH,
+                    holders=(),
+                    advisory_lock_available=False,
+                )
+
+
+class ArtifactValidationTest(unittest.TestCase):
+    def test_complete_fixture_passes_and_writes_only_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = write_run_fixture(Path(temporary))
+            before = {path.relative_to(run_dir): path.read_bytes() for path in run_dir.rglob("*") if path.is_file()}
+            validation = validate_run_directory(run_dir, expected_git_commit=EXPECTED_COMMIT)
+            after = {path.relative_to(run_dir): path.read_bytes() for path in run_dir.rglob("*") if path.is_file()}
+        self.assertEqual(validation["status"], "pass")
+        self.assertEqual(set(after) - set(before), {Path("validation.json")})
+        for path, data in before.items():
+            self.assertEqual(after[path], data)
+
+    def test_proof_gates_fail_independently(self):
+        mutations = (
+            (lambda summary: summary["litmus"].update(stale=1), "stale"),
+            (lambda summary: summary["atomic"].update(ticket_errors=1), "ticket"),
+            (lambda summary: summary["pmu"].update(cold_cxl_reads=0), "cold CXL"),
+            (lambda summary: summary["pmu"].update(cache_to_cache_events=0), "cache-to-cache"),
+            (lambda summary: summary["safety"].update(max_written_offset=APPROVED_LENGTH + 1), "2 MiB"),
+            (lambda summary: summary["commands"][0].update(returncode=1), "command"),
+            (lambda summary: summary.update(raw_evidence=[]), "raw evidence"),
+            (lambda summary: summary.update(git_commit="f" * 40), "git commit"),
+        )
+        for mutate, message in mutations:
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as temporary:
+                run_dir = write_run_fixture(Path(temporary))
+                summary_path = run_dir / "summary.json"
+                summary = json.loads(summary_path.read_text())
+                mutate(summary)
+                summary_path.write_text(json.dumps(summary, sort_keys=True) + "\n")
+                self._refresh_checksum(run_dir, "summary.json")
+                with self.assertRaisesRegex(ValidationError, message):
+                    validate_run_directory(run_dir, expected_git_commit=EXPECTED_COMMIT)
+
+    def test_rejects_checksum_mismatch_and_duplicate_result_key(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = write_run_fixture(Path(temporary))
+            (run_dir / "summary.json").write_text("{}\n")
+            with self.assertRaisesRegex(ValidationError, "checksum"):
+                validate_run_directory(run_dir, expected_git_commit=EXPECTED_COMMIT)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = write_run_fixture(Path(temporary))
+            results = (run_dir / "results.csv").read_text().splitlines()
+            (run_dir / "results.csv").write_text("\n".join(results + [results[1]]) + "\n")
+            self._refresh_checksum(run_dir, "results.csv")
+            with self.assertRaisesRegex(ValidationError, "duplicate result key"):
+                validate_run_directory(run_dir, expected_git_commit=EXPECTED_COMMIT)
+
+    @staticmethod
+    def _refresh_checksum(run_dir: Path, relative: str):
+        lines = []
+        for line in (run_dir / "SHA256SUMS").read_text().splitlines():
+            _, name = line.split("  ", 1)
+            if name == relative:
+                digest = hashlib.sha256((run_dir / relative).read_bytes()).hexdigest()
+                line = f"{digest}  {relative}"
+            lines.append(line)
+        (run_dir / "SHA256SUMS").write_text("\n".join(lines) + "\n")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
