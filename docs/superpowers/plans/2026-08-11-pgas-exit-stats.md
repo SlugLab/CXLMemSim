@@ -52,7 +52,8 @@ The test must use a unique POSIX SHM name, wait for `server_ready`, run the clie
 ```python
 server = subprocess.Popen(
     [server_bin, "--comm-mode=pgas-shm", f"--pgas-shm-name={shm_name}",
-     "--capacity=16", f"--stats-json={stats_json}"],
+     "--capacity=16", "--backing-mode=file", f"--backing-file={backing_file}",
+     f"--stats-json={stats_json}"],
     stdout=log, stderr=subprocess.STDOUT, text=True,
 )
 wait_for_text(log_path, "PGAS shared memory initialized", timeout=10)
@@ -66,6 +67,10 @@ Assert exactly one `Final Server Statistics:` marker and JSON values
 `atomic_cas_success=1`, and `fences=1`.
 Also require `controller.remote >= 4`, switch/endpoint load and store counters
 to be nonzero, and `threads_created >= 1`.
+
+The temporary regular-file backing is mandatory: the test must never open,
+resize, or unlink the fixed `/dev/shm/cxlmemsim_shared` object used by another
+server. Cleanup is limited to the unique test-owned PGAS SHM name.
 
 - [ ] **Step 3: Register the fixture and test in CMake**
 

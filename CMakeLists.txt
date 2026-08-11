@@ -95,6 +95,10 @@ if(Python3_Interpreter_FOUND)
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endif()
 
+add_executable(pgas_exit_stats_client tests/pgas_exit_stats_client.c)
+target_include_directories(pgas_exit_stats_client PRIVATE include)
+target_link_libraries(pgas_exit_stats_client ${RT_LIB} ${ATOMIC_LIB})
+
 # Build latency calculator
 add_executable(cxlmemsim_latency src/calculateLatency.cc)
 set_target_properties(cxlmemsim_latency PROPERTIES
@@ -138,6 +142,16 @@ target_link_libraries(cxlmemsim_server_lib cxlmemsim spdlog::spdlog_header_only 
 add_executable(cxlmemsim_server src/main_server.cc)
 target_include_directories(cxlmemsim_server PRIVATE include src ${spdlog_INCLUDE_DIR})
 target_link_libraries(cxlmemsim_server cxlmemsim_server_lib cxlmemsim spdlog::spdlog_header_only ${RT_LIB} ${ATOMIC_LIB})
+
+if(Python3_Interpreter_FOUND)
+    add_test(NAME test_server_exit_stats
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_server_exit_stats.py
+                --server $<TARGET_FILE:cxlmemsim_server>
+                --client $<TARGET_FILE:pgas_exit_stats_client>)
+    set_tests_properties(test_server_exit_stats PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        TIMEOUT 30)
+endif()
 
 # Build legacy CXLMemSim. Linux uses perf/ptrace monitoring; other platforms
 # build a no-PMU compatibility mode.

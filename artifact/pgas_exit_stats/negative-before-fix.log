@@ -1,0 +1,70 @@
+Test project /home/victoryang00/CXLMemSim/build/worktrees/cxlmem-hwcc-validation/build
+    Start 2: test_server_exit_stats
+1/1 Test #2: test_server_exit_stats ...........***Failed    0.13 sec
+test_sigterm_emits_one_complete_snapshot (__main__.ServerExitStatsTest.test_sigterm_emits_one_complete_snapshot) ... FAIL
+
+======================================================================
+FAIL: test_sigterm_emits_one_complete_snapshot (__main__.ServerExitStatsTest.test_sigterm_emits_one_complete_snapshot)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/victoryang00/CXLMemSim/build/worktrees/cxlmem-hwcc-validation/tests/test_server_exit_stats.py", line 65, in test_sigterm_emits_one_complete_snapshot
+    wait_for_text(log_path, "PGAS shared memory initialized", process, 10)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/victoryang00/CXLMemSim/build/worktrees/cxlmem-hwcc-validation/tests/test_server_exit_stats.py", line 26, in wait_for_text
+    raise AssertionError(f"server exited before readiness (rc={process.returncode}):\n{text}")
+AssertionError: server exited before readiness (rc=1):
+Failed to parse server options: Unknown option: --stats-json
+
+Usage: /home/victoryang00/CXLMemSim/build/worktrees/cxlmem-hwcc-validation/build/cxlmemsim_server [options]
+
+Options:
+  -h, --help                         Show this help text
+  -v, --verbose <level>              Verbose level (default: 2)
+      --default_latency <ns>         Default latency (default: 100)
+      --interleave_size <bytes>      Interleave size (default: 256)
+      --capacity <MB>                CXL expander capacity (default: 256)
+  -p, --port <port>                  Server port (default: 9999)
+  -t, --topology <file>              Topology file (default: topology.txt)
+      --backing-mode <mode>          shm, file, or ssd-stream
+      --backing-file <path>          Back CXL memory with a regular file
+      --ssd-backing-file <path>      Persistent SSD streaming file or block device
+      --ssd-page-size <bytes>        SSD backend page size (default: 4096)
+      --ssd-io-chunk-size <bytes>    SSD backend I/O chunk size (default: 65536)
+      --ssd-cache-mb <MB>            Resident SSD cache budget (default: 16)
+      --ssd-read-ahead-pages <count> SSD read-ahead pages (default: 16 = 64KB)
+      --ssd-io-uring[=true|false]    Use io_uring on Linux when available
+      --ssd-odirect[=true|false]     Use O_DIRECT when backend supports it
+      --comm-mode <mode>             tcp, shm, pgas-shm, or distributed
+      --pgas-shm-name <name>         PGAS shared memory name
+      --node-id <id>                 Distributed node ID
+      --dist-shm-name <name>         Distributed shared memory name
+      --coordinator-shm <name>       Coordinator shared memory to join
+      --transport-mode <mode>        shm, tcp, rdma, or hybrid
+      --tcp-addr <addr>              Distributed TCP bind address
+      --tcp-port <port>              Distributed TCP port
+      --tcp-peers <spec>             node_id:addr:port entries separated by commas
+      --enable-dcd[=true|false]      Enable Dynamic Capacity Device model
+      --dcd-granularity-mb <MB>      DCD allocation granularity
+      --dcd-initial-capacity <MB>    Initial DCD tagged capacity
+      --enable-gfam[=true|false]     Enable GFAM model
+      --gfam-hosts <count>           Number of GFAM host ports
+      --gfam-fabric-latency <ns>     GFAM fabric traversal latency
+      --gfam-bandwidth <GB/s>        Aggregate GFAM fabric bandwidth
+      --coherence-v2[=true|false]    Enable registered MESI v2 endpoints
+      --coherence-v2-snoop-timeout-ms <ms>  Synchronous snoop timeout
+      --coherence-v2-shm-name <name> Separate v2 duplex SHM object
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.053s
+
+FAILED (failures=1)
+
+
+0% tests passed, 1 tests failed out of 1
+
+Total Test time (real) =   0.13 sec
+
+The following tests FAILED:
+	  2 - test_server_exit_stats (Failed)
+Errors while running CTest
