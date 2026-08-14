@@ -1,6 +1,7 @@
 #include "coherence_server_v2.h"
 
 #include "coherence_memory_backend.h"
+#include "coherence_trace_v2.h"
 
 #include <algorithm>
 #include <array>
@@ -199,8 +200,40 @@ struct CoherenceServerV2::Impl {
     };
 
     Impl(mesi_v2::MesiTransactionEngine &engine_value, EndpointSessionRegistry &registry_value,
-         CoherenceMemoryBackend &memory_value)
-        : engine(engine_value), registry(registry_value), memory(memory_value) {}
+         CoherenceMemoryBackend &memory_value, std::shared_ptr<CoherenceTraceV2> trace_value)
+        : engine(engine_value), registry(registry_value), memory(memory_value), trace(std::move(trace_value)) {}
+
+    void record(std::string_view event, const CoherenceFrame &frame, bool dirty_data = false) const {
+        if (trace)
+            trace->record({event, frame, dirty_data});
+    }
+
+    void updateActiveBindings() const {
+        if (trace)
+            trace->setActiveBindings(by_host.size());
+    }
+
+    void completeDirtyData(std::uint64_t line_address) {
+        if (!trace)
+            return;
+        std::lock_guard lock(trace_pending_mutex);
+        const auto found = std::find_if(pending_dirty_acks.begin(), pending_dirty_acks.end(), [&](const auto &item) {
+            return (protocol_v2::address(item.second) & ~(std::uint64_t{protocol_v2::kLineSize - 1})) == line_address;
+        });
+        if (found == pending_dirty_acks.end())
+            return;
+        record("dirty_completion", found->second, true);
+        pending_dirty_acks.erase(found);
+    }
+
+    void discardDirtyData(std::uint64_t line_address) {
+        if (!trace)
+            return;
+        std::lock_guard lock(trace_pending_mutex);
+        std::erase_if(pending_dirty_acks, [&](const auto &item) {
+            return (protocol_v2::address(item.second) & ~(std::uint64_t{protocol_v2::kLineSize - 1})) == line_address;
+        });
+    }
 
     std::shared_ptr<Connection> connection(CoherenceServerV2::ConnectionId id) const {
         std::lock_guard lock(mutex);
@@ -223,14 +256,18 @@ struct CoherenceServerV2::Impl {
     mesi_v2::MesiTransactionEngine &engine;
     EndpointSessionRegistry &registry;
     CoherenceMemoryBackend &memory;
+    std::shared_ptr<CoherenceTraceV2> trace;
     mutable std::mutex mutex;
+    std::mutex trace_pending_mutex;
+    std::unordered_map<std::uint64_t, CoherenceFrame> pending_dirty_acks;
     std::unordered_map<CoherenceServerV2::ConnectionId, std::shared_ptr<Connection>> connections;
     std::unordered_map<std::uint16_t, std::weak_ptr<Connection>> by_host;
 };
 
 CoherenceServerV2::CoherenceServerV2(mesi_v2::MesiTransactionEngine &engine, EndpointSessionRegistry &registry,
-                                     CoherenceMemoryBackend &memory, std::chrono::milliseconds snoop_timeout)
-    : impl_(std::make_unique<Impl>(engine, registry, memory)) {
+                                     CoherenceMemoryBackend &memory, std::chrono::milliseconds snoop_timeout,
+                                     std::shared_ptr<CoherenceTraceV2> trace)
+    : impl_(std::make_unique<Impl>(engine, registry, memory, std::move(trace))) {
     engine.configure(memory, *this, snoop_timeout);
 }
 
@@ -261,6 +298,7 @@ bool CoherenceServerV2::detachConnection(ConnectionId connection) {
             if (host != impl_->by_host.end() && host->second.lock() == state)
                 impl_->by_host.erase(host);
         }
+        impl_->updateActiveBindings();
     }
     if (state->session_id != 0) {
         impl_->engine.notifyDisconnect(state->host_id, state->session_id);
@@ -276,6 +314,7 @@ CoherenceServerV2::DispatchResult CoherenceServerV2::dispatch(ConnectionId conne
 
     if (protocol_v2::magic(frame) != protocol_v2::kMagic ||
         protocol_v2::version(frame) != protocol_v2::kProtocolVersion) {
+        impl_->record("protocol_error", frame);
         std::lock_guard lock(impl_->mutex);
         connection->closed = true;
         return {Status::BadProtocol, std::nullopt, true};
@@ -284,6 +323,7 @@ CoherenceServerV2::DispatchResult CoherenceServerV2::dispatch(ConnectionId conne
     if (protocol_v2::opcode(frame) == Opcode::Register) {
         const auto validation = protocol_v2::validateFrame(frame);
         if (!validation) {
+            impl_->record("protocol_error", frame);
             std::lock_guard lock(impl_->mutex);
             connection->closed = true;
             return {Status::BadProtocol, std::nullopt, true};
@@ -338,6 +378,7 @@ CoherenceServerV2::DispatchResult CoherenceServerV2::dispatch(ConnectionId conne
                 connection->binding_id = registration.binding_id;
                 if (protocol_v2::sessionId(frame) == 0)
                     impl_->by_host[connection->host_id] = connection;
+                impl_->updateActiveBindings();
             }
         }
         if (!connection_live) {
@@ -368,6 +409,9 @@ CoherenceServerV2::DispatchResult CoherenceServerV2::dispatch(ConnectionId conne
             return impl_->reject(frame, Status::StaleSession);
         }
         const auto response = registrationResponse(frame, registration);
+        auto registration_event = frame;
+        protocol_v2::setStatus(registration_event, registration.status);
+        protocol_v2::setSessionId(registration_event, registration.session_id);
         if (registration.status == Status::Ok && protocol_v2::sessionId(frame) != 0) {
             bool response_sent = false;
             try {
@@ -383,6 +427,7 @@ CoherenceServerV2::DispatchResult CoherenceServerV2::dispatch(ConnectionId conne
                     connection->session_id == registration.session_id &&
                     connection->binding_id == registration.binding_id) {
                     impl_->by_host[connection->host_id] = connection;
+                    impl_->updateActiveBindings();
                     route_published = true;
                 }
             }
@@ -393,13 +438,16 @@ CoherenceServerV2::DispatchResult CoherenceServerV2::dispatch(ConnectionId conne
                     const auto host = impl_->by_host.find(protocol_v2::srcHost(frame));
                     if (host != impl_->by_host.end() && host->second.lock() == connection)
                         impl_->by_host.erase(host);
+                    impl_->updateActiveBindings();
                 }
                 (void)impl_->registry.disconnectAbruptly(protocol_v2::srcHost(frame), registration.session_id,
                                                          registration.binding_id);
                 return {Status::IoError, std::nullopt, true, true, true};
             }
+            impl_->record("registration", registration_event);
             return {registration.status, response, false, true};
         }
+        impl_->record("registration", registration_event);
         return {registration.status, response, false};
     }
 
@@ -420,19 +468,35 @@ CoherenceServerV2::DispatchResult CoherenceServerV2::dispatch(ConnectionId conne
         return impl_->reject(frame, Status::StaleSession);
 
     if (protocol_v2::opcode(frame) == Opcode::SnoopAck) {
+        const bool dirty_candidate = protocol_v2::payloadLength(frame) == protocol_v2::kLineSize &&
+                                     protocol_v2::ackStrength(frame) == protocol_v2::AckStrength::MODEL &&
+                                     protocol_v2::status(frame) == Status::Ok;
+        std::unique_lock trace_lock(impl_->trace_pending_mutex, std::defer_lock);
+        if (dirty_candidate && impl_->trace) {
+            trace_lock.lock();
+            impl_->pending_dirty_acks[protocol_v2::snoopId(frame)] = frame;
+        }
         const auto disposition = impl_->registry.controlFrameAdmissible(session_id, binding_id, frame)
                                      ? impl_->engine.handleControlFrame(impl_->registry, session_id, binding_id, frame)
                                      : impl_->engine.handleSnoopAck(frame);
         if (disposition == AckDisposition::Accepted || disposition == AckDisposition::Deferred) {
+            impl_->record("snoop_ack", frame, dirty_candidate);
             return {Status::Ok, std::nullopt, false};
         }
+        if (dirty_candidate && impl_->trace)
+            impl_->pending_dirty_acks.erase(protocol_v2::snoopId(frame));
+        if (disposition == AckDisposition::Duplicate)
+            impl_->record("snoop_ack", frame, false);
         if (disposition == AckDisposition::Duplicate)
             return {Status::Ok, std::nullopt, false};
+        impl_->record("protocol_error", frame);
         return {Status::BadProtocol, std::nullopt, false};
     }
 
-    if (!protocol_v2::validateFrame(frame))
+    if (!protocol_v2::validateFrame(frame)) {
+        impl_->record("protocol_error", frame);
         return impl_->reject(frame, Status::BadProtocol);
+    }
 
     const auto replay_floor = impl_->registry.replayFloor(session_id);
     {
@@ -464,6 +528,7 @@ CoherenceServerV2::DispatchResult CoherenceServerV2::dispatch(ConnectionId conne
             return replayPinnedResponse();
         if (admission.result != RequestAdmissionResult::Accepted)
             return impl_->reject(frame, admissionStatus(admission.result));
+        impl_->record("request", frame);
         auto authority = std::move(admission.authority);
         const auto line_address = protocol_v2::address(frame) & ~(std::uint64_t{protocol_v2::kLineSize - 1});
         const bool holder_reserved =
@@ -516,6 +581,17 @@ CoherenceServerV2::DispatchResult CoherenceServerV2::dispatch(ConnectionId conne
             impl_->registry.abortHolderTransition(authority);
         if (result.transition.committed() && !holder_commit.reconciled)
             result.status = Status::IoError;
+        if (result.status == Status::Ok) {
+            impl_->completeDirtyData(line_address);
+        } else if (result.status == Status::CoherenceTimeout) {
+            impl_->discardDirtyData(line_address);
+            impl_->record("timeout", frame);
+        } else if (result.status == Status::IoError) {
+            impl_->discardDirtyData(line_address);
+            impl_->record("server_copy_failure", frame);
+        } else {
+            impl_->discardDirtyData(line_address);
+        }
         auto response = transactionResponse(frame, result);
         const auto pinned = impl_->registry.pinAndCompleteOperation(authority, frame, response);
         if (pinned == PinResponseResult::DeliveryFailed)
@@ -575,19 +651,31 @@ CoherenceServerV2::DispatchResult CoherenceServerV2::dispatch(ConnectionId conne
 
 bool CoherenceServerV2::sendToHost(std::uint16_t host_id, const CoherenceFrame &frame) {
     try {
+        impl_->record("snoop_send", frame);
         ResponseSender sender;
         {
             std::lock_guard lock(impl_->mutex);
             const auto found = impl_->by_host.find(host_id);
-            if (found == impl_->by_host.end())
+            if (found == impl_->by_host.end()) {
+                impl_->record("delivery_failure", frame);
                 return false;
+            }
             const auto connection = found->second.lock();
-            if (!connection || connection->closed || connection->session_id != protocol_v2::sessionId(frame))
+            if (!connection || connection->closed || connection->session_id != protocol_v2::sessionId(frame)) {
+                impl_->record("delivery_failure", frame);
                 return false;
+            }
             sender = connection->sender;
         }
-        return sender && sender(frame);
+        const bool sent = sender && sender(frame);
+        if (!sent)
+            impl_->record("delivery_failure", frame);
+        return sent;
     } catch (...) {
+        try {
+            impl_->record("delivery_failure", frame);
+        } catch (...) {
+        }
         return false;
     }
 }

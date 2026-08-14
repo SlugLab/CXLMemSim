@@ -13,6 +13,7 @@
 #include "coherence_server_v2.h"
 #include "coherence_shm_transport_v2.h"
 #include "coherence_tcp_transport_v2.h"
+#include "coherence_trace_v2.h"
 #include "cxl_backend.h"
 #include "cxlcontroller.h"
 #include "cxlendpoint.h"
@@ -167,6 +168,7 @@ private:
     std::unique_ptr<cxlmemsim::EndpointSessionRegistry> coherence_v2_registry_;
     std::unique_ptr<cxlmemsim::mesi_v2::MesiTransactionEngine> coherence_v2_engine_;
     std::unique_ptr<cxlmemsim::CoherenceServerV2> coherence_v2_server_;
+    std::shared_ptr<cxlmemsim::CoherenceTraceV2> coherence_v2_trace_;
     std::atomic<std::uint64_t> next_coherence_v2_connection_id_{1};
     std::string coherence_v2_shm_name_;
     std::unique_ptr<cxlmemsim::CoherenceShmTransportV2> coherence_v2_shm_listener_;
@@ -246,12 +248,13 @@ public:
         SharedMemoryManager::BackingMode backing_mode = SharedMemoryManager::BackingMode::SharedMemory,
         const SharedMemoryManager::SsdStreamingConfig &ssd_config = {}, bool coherence_v2_enabled = false,
         std::chrono::milliseconds coherence_v2_snoop_timeout = std::chrono::milliseconds(1000),
-        std::string coherence_v2_shm_name = "/cxlmemsim_coherence_v2")
+        std::string coherence_v2_shm_name = "/cxlmemsim_coherence_v2",
+        std::shared_ptr<cxlmemsim::CoherenceTraceV2> coherence_v2_trace = {})
         : server_fd(-1), port(port), controller(ctrl), running(true), next_thread_id(0), comm_mode(mode),
           pgas_shm_name_(pgas_shm_name), pgas_shm_fd_(-1), pgas_shm_header_(nullptr), pgas_memory_(nullptr),
           pgas_memory_size_(0), backing_file_(backing_file), backing_mode_(backing_mode), ssd_config_(ssd_config),
           coherence_v2_enabled_(coherence_v2_enabled), coherence_v2_snoop_timeout_(coherence_v2_snoop_timeout),
-          coherence_v2_shm_name_(std::move(coherence_v2_shm_name)) {
+          coherence_v2_trace_(std::move(coherence_v2_trace)), coherence_v2_shm_name_(std::move(coherence_v2_shm_name)) {
         congestion_info.active_requests = 0;
         congestion_info.total_bandwidth_used = 0;
         congestion_info.last_reset = std::chrono::steady_clock::now();
@@ -274,7 +277,8 @@ public:
             coherence_v2_engine_ =
                 std::make_unique<cxlmemsim::mesi_v2::MesiTransactionEngine>(*coherence_v2_directory_);
             coherence_v2_server_ = std::make_unique<cxlmemsim::CoherenceServerV2>(
-                *coherence_v2_engine_, *coherence_v2_registry_, *coherence_v2_memory_, coherence_v2_snoop_timeout_);
+                *coherence_v2_engine_, *coherence_v2_registry_, *coherence_v2_memory_, coherence_v2_snoop_timeout_,
+                coherence_v2_trace_);
         }
 
         // Initialize LSA storage (256KB default per CXL spec)
@@ -392,6 +396,7 @@ struct ServerOptions {
     bool coherence_v2 = false;
     std::uint64_t coherence_v2_snoop_timeout_ms = 1000;
     std::string coherence_v2_shm_name = "/cxlmemsim_coherence_v2";
+    std::string coherence_v2_trace;
 };
 
 static void print_server_help(const char *program) {
@@ -431,7 +436,8 @@ static void print_server_help(const char *program) {
               << "      --gfam-bandwidth <GB/s>        Aggregate GFAM fabric bandwidth\n"
               << "      --coherence-v2[=true|false]    Enable registered MESI v2 endpoints\n"
               << "      --coherence-v2-snoop-timeout-ms <ms>  Synchronous snoop timeout\n"
-              << "      --coherence-v2-shm-name <name> Separate v2 duplex SHM object\n";
+              << "      --coherence-v2-shm-name <name> Separate v2 duplex SHM object\n"
+              << "      --coherence-v2-trace <path>    Truncate and write MESI v2 JSONL evidence\n";
 }
 
 static bool option_has_value(const std::string &arg) { return !arg.empty() && arg[0] != '-'; }
@@ -629,6 +635,8 @@ static bool parse_server_options(int argc, char *argv[], ServerOptions &opts, st
                 opts.coherence_v2_snoop_timeout_ms = std::stoull(get_value(key));
             } else if (key == "coherence-v2-shm-name") {
                 opts.coherence_v2_shm_name = get_value(key);
+            } else if (key == "coherence-v2-trace") {
+                opts.coherence_v2_trace = get_value(key);
             } else {
                 throw std::invalid_argument("Unknown option: --" + key);
             }
@@ -686,6 +694,7 @@ int main(int argc, char *argv[]) {
     bool coherence_v2 = opts.coherence_v2;
     auto coherence_v2_snoop_timeout = std::chrono::milliseconds(opts.coherence_v2_snoop_timeout_ms);
     const auto &coherence_v2_shm_name = opts.coherence_v2_shm_name;
+    const auto &coherence_v2_trace_path = opts.coherence_v2_trace;
 
     SharedMemoryManager::BackingMode backing_mode = SharedMemoryManager::BackingMode::SharedMemory;
     if (!backing_mode_str.empty()) {
@@ -774,6 +783,10 @@ int main(int argc, char *argv[]) {
     }
     if (coherence_v2 && opts.coherence_v2_snoop_timeout_ms == 0) {
         SPDLOG_ERROR("--coherence-v2-snoop-timeout-ms must be non-zero");
+        return 1;
+    }
+    if (!coherence_v2_trace_path.empty() && (!coherence_v2 || comm_mode != CommMode::TCP)) {
+        SPDLOG_ERROR("--coherence-v2-trace requires --coherence-v2=true and --comm-mode=tcp");
         return 1;
     }
 
@@ -1033,9 +1046,12 @@ int main(int argc, char *argv[]) {
     }
 
     try {
+        std::shared_ptr<cxlmemsim::CoherenceTraceV2> coherence_v2_trace;
+        if (!coherence_v2_trace_path.empty())
+            coherence_v2_trace = std::make_shared<cxlmemsim::CoherenceTraceV2>(coherence_v2_trace_path);
         ThreadPerConnectionServer server(port, controller, capacity, backing_file, comm_mode, pgas_shm_name,
                                          backing_mode, ssd_config, coherence_v2, coherence_v2_snoop_timeout,
-                                         coherence_v2_shm_name);
+                                         coherence_v2_shm_name, std::move(coherence_v2_trace));
 
         if (!server.start()) {
             SPDLOG_ERROR("Failed to start server");
@@ -1269,6 +1285,8 @@ void ThreadPerConnectionServer::stop() {
         SPDLOG_INFO("  Invalid Ownership: {}", audit.invalid_ownership);
         SPDLOG_INFO("Legacy controller counters below exclude coherence v2 endpoint traffic");
     }
+    if (coherence_v2_trace_)
+        std::cout << "COHERENCE_V2_STATS_JSON " << coherence_v2_trace_->snapshotJson() << '\n';
 
     // Print CXL controller topology statistics (switches/expanders/counters)
     if (controller) {

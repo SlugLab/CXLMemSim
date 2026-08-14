@@ -13,6 +13,7 @@
 namespace cxlmemsim {
 
 class CoherenceMemoryBackend;
+class CoherenceTraceV2;
 
 // Transport-neutral protocol-v2 service. Wire transports decode one complete
 // frame, dispatch it here, and use the registered sender for unsolicited snoops.
@@ -33,7 +34,8 @@ public:
     };
 
     CoherenceServerV2(mesi_v2::MesiTransactionEngine &engine, EndpointSessionRegistry &registry,
-                      CoherenceMemoryBackend &memory, std::chrono::milliseconds snoop_timeout);
+                      CoherenceMemoryBackend &memory, std::chrono::milliseconds snoop_timeout,
+                      std::shared_ptr<CoherenceTraceV2> trace = {});
     ~CoherenceServerV2() override;
 
     CoherenceServerV2(const CoherenceServerV2 &) = delete;

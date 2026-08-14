@@ -58,6 +58,7 @@ set(SOURCE_FILES
     src/coherence_protocol_v2.cpp
     src/coherence_endpoint_cache.cpp
     src/coherence_server_v2.cpp
+    src/coherence_trace_v2.cpp
     src/coherence_tcp_transport_v2.cpp
     src/coherence_shm_transport_v2.cpp
     src/coherence_rdma_transport_v2.cpp
@@ -246,6 +247,11 @@ target_include_directories(test_coherence_server_v2 PRIVATE include)
 target_link_libraries(test_coherence_server_v2 cxlmemsim)
 add_test(NAME test_coherence_server_v2 COMMAND test_coherence_server_v2)
 set_tests_properties(test_coherence_server_v2 PROPERTIES TIMEOUT 30)
+
+add_executable(test_coherence_trace_v2 tests/test_coherence_trace_v2.cpp)
+target_include_directories(test_coherence_trace_v2 PRIVATE include)
+target_link_libraries(test_coherence_trace_v2 cxlmemsim)
+add_test(NAME test_coherence_trace_v2 COMMAND test_coherence_trace_v2)
 
 add_executable(test_coherence_tcp_transport_v2 tests/test_coherence_tcp_transport_v2.cpp)
 target_include_directories(test_coherence_tcp_transport_v2 PRIVATE include)

@@ -2,6 +2,7 @@
 
 #include "coherence_memory_backend.h"
 #include "coherence_protocol_v2.h"
+#include "coherence_trace_v2.h"
 #include "endpoint_session_registry.h"
 #include "mesi_directory.h"
 #include "mesi_transaction_engine.h"
@@ -15,6 +16,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <future>
 #include <iostream>
 #include <map>
@@ -24,6 +26,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -173,7 +176,11 @@ struct Harness {
     EndpointSessionRegistry registry;
     FakeMemory memory;
     MesiTransactionEngine engine{directory};
-    CoherenceServerV2 server{engine, registry, memory, kSnoopTimeout};
+    std::shared_ptr<CoherenceTraceV2> trace;
+    CoherenceServerV2 server;
+
+    explicit Harness(std::shared_ptr<CoherenceTraceV2> trace_value = {})
+        : trace(std::move(trace_value)), server(engine, registry, memory, kSnoopTimeout, trace) {}
 };
 
 using ConnectionId = CoherenceServerV2::ConnectionId;
@@ -733,6 +740,41 @@ void testDispatchesMesiWritebackAndAtomicsWithDuplexSnoops() {
           (std::vector<std::uint64_t>{kLineB, kLineC}));
 }
 
+void testDirtyBackInvalidationIsTracedAfterServerCopyCompletion() {
+    const auto path =
+        std::filesystem::temp_directory_path() / ("cxlmemsim-server-trace-" + std::to_string(getpid()) + ".jsonl");
+    auto trace = std::make_shared<CoherenceTraceV2>(path);
+    Harness harness(trace);
+    EndpointObserver owner_observer;
+    EndpointObserver requester_observer;
+    const auto owner = registerPeer(harness, 351, 8, owner_observer);
+    const auto requester = registerPeer(harness, 352, 9, requester_observer);
+    const auto clean = lineBytes(0x31);
+    const auto dirty = lineBytes(0xc7);
+    harness.memory.store(kLineA, clean);
+
+    const auto owner_getm = command(Opcode::Getm, owner.host, owner.session, 1, kLineA);
+    checkResponse(harness.server.dispatch(owner.connection, owner_getm), owner_getm, Status::Ok);
+    owner_observer.cache[kLineA].data = wireBytes(dirty);
+
+    const auto requester_getm = command(Opcode::Getm, requester.host, requester.session, 1, kLineA);
+    checkResponse(harness.server.dispatch(requester.connection, requester_getm), requester_getm, Status::Ok);
+
+    CHECK(harness.memory.inspect(kLineA) == dirty);
+    CHECK(owner_observer.snoops.size() == 1);
+    if (!owner_observer.snoops.empty())
+        CHECK(opcode(owner_observer.snoops.front()) == Opcode::SnpDataInv);
+    const auto snapshot = trace->snapshot();
+    CHECK(snapshot.registrations == 2);
+    CHECK(snapshot.getm == 2);
+    CHECK(snapshot.snp_data_inv == 1);
+    CHECK(snapshot.model_acks == 1);
+    CHECK(snapshot.dirty_data_completions == 1);
+    CHECK(snapshot.active_bindings == 2);
+    trace.reset();
+    std::filesystem::remove(path);
+}
+
 void testPutsResponseIsInvalidForReleaserWhileDirectoryKeepsOtherSharer() {
     Harness harness;
     EndpointObserver first_observer;
@@ -1271,6 +1313,7 @@ int main() {
     testThrowingActiveSnoopSenderCopyFailsClosed();
     testConnectionHostAndSessionAreExplicitlyBound();
     testDispatchesMesiWritebackAndAtomicsWithDuplexSnoops();
+    testDirtyBackInvalidationIsTracedAfterServerCopyCompletion();
     testPutsResponseIsInvalidForReleaserWhileDirectoryKeepsOtherSharer();
     testMalformedAckCannotGrantOwnership();
     testPartialAckCommitsOnlyAckedInvalidationsAndNeverGrants();
