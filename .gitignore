@@ -4,6 +4,7 @@ xctrace
 build
 cmake-*
 .vscode
+.worktrees/
 release
 benchmarks*
 Makefile
