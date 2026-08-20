@@ -34,7 +34,11 @@ public:
             return PgasPollAction::Spin;
         }
 
-        if (last_active_ns_ != 0 && (now_ns < last_active_ns_ || now_ns - last_active_ns_ < active_spin_ns_)) {
+        if (last_active_ns_ == 0) {
+            return PgasPollAction::Sleep;
+        }
+
+        if (now_ns < last_active_ns_ || now_ns - last_active_ns_ < active_spin_ns_) {
             return PgasPollAction::Spin;
         }
 
