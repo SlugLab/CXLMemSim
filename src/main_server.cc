@@ -424,6 +424,7 @@ static void print_server_help(const char *program) {
               << "      --pgas-spin-us <us>            Active PGAS busy-poll window (default: 50)\n"
               << "      --pgas-yield-count <count>     PGAS yields before idle sleep (default: 10)\n"
               << "      --pgas-idle-sleep-us <us>      PGAS fully-idle sleep (default: 100)\n"
+              << "      --pgas-record-accesses[=bool]  Run detailed controller accounting (default: true)\n"
               << "      --node-id <id>                 Distributed node ID\n"
               << "      --dist-shm-name <name>         Distributed shared memory name\n"
               << "      --coordinator-shm <name>       Coordinator shared memory to join\n"
@@ -611,6 +612,8 @@ static bool parse_server_options(int argc, char *argv[], ServerOptions &opts, st
                 opts.pgas_poll.yield_count = std::stoull(get_value(key));
             } else if (key == "pgas-idle-sleep-us") {
                 opts.pgas_poll.idle_sleep_us = std::stoull(get_value(key));
+            } else if (key == "pgas-record-accesses") {
+                opts.pgas_poll.record_accesses = parse_optional_bool_option(argc, argv, i, value, has_inline_value);
             } else if (key == "node-id") {
                 opts.node_id = static_cast<uint32_t>(std::stoul(get_value(key)));
             } else if (key == "dist-shm-name") {
@@ -877,8 +880,9 @@ int main(int argc, char *argv[]) {
     }
     if (comm_mode == CommMode::PGAS_SHM) {
         SPDLOG_INFO("  PGAS SHM Name: {}", pgas_shm_name);
-        SPDLOG_INFO("  PGAS polling: workers={}, spin={} us, yields={}, idle sleep={} us", opts.pgas_poll.workers,
-                    opts.pgas_poll.spin_us, opts.pgas_poll.yield_count, opts.pgas_poll.idle_sleep_us);
+        SPDLOG_INFO("  PGAS polling: workers={}, spin={} us, yields={}, idle sleep={} us, record accesses={}",
+                    opts.pgas_poll.workers, opts.pgas_poll.spin_us, opts.pgas_poll.yield_count,
+                    opts.pgas_poll.idle_sleep_us, opts.pgas_poll.record_accesses);
     }
     if (comm_mode == CommMode::DISTRIBUTED) {
         SPDLOG_INFO("  Node ID: {}", node_id);
@@ -2645,7 +2649,9 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
 
             total_reads++;
 
-            controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, false);
+            if (pgas_poll_config_.record_accesses) {
+                controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, false);
+            }
 
             log_periodic_stats("PGAS_READ", total_reads.load());
             __atomic_thread_fence(__ATOMIC_RELEASE);
@@ -2687,7 +2693,9 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
             slot->latency_ns = (uint64_t)(base_latency + fabric_latency_ns);
             total_writes++;
 
-            controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, true);
+            if (pgas_poll_config_.record_accesses) {
+                controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, true);
+            }
 
             log_periodic_stats("PGAS_WRITE", total_writes.load());
             __atomic_thread_fence(__ATOMIC_RELEASE);
@@ -2731,7 +2739,9 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 __atomic_thread_fence(__ATOMIC_RELEASE);
                 slot->resp_status = CXL_SHM_RESP_OK;
                 total_atomic_faa++;
-                controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, true);
+                if (pgas_poll_config_.record_accesses) {
+                    controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, true);
+                }
                 log_periodic_stats("PGAS_FAA", total_atomic_faa.load());
             } else {
                 slot->resp_status = CXL_SHM_RESP_ERROR;
@@ -2775,7 +2785,9 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 __atomic_thread_fence(__ATOMIC_RELEASE);
                 slot->resp_status = CXL_SHM_RESP_OK;
                 total_atomic_cas++;
-                controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, true);
+                if (pgas_poll_config_.record_accesses) {
+                    controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, true);
+                }
                 log_periodic_stats("PGAS_CAS", total_atomic_cas.load());
             } else {
                 slot->resp_status = CXL_SHM_RESP_ERROR;

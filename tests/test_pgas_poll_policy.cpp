@@ -49,6 +49,8 @@ static void testNewActivityResetsIdleBackoff() {
 static void testWorkerCountValidationProtectsSlotOwnership() {
     PgasPollConfig config;
 
+    expectCondition(config.record_accesses, "detailed controller accounting must remain enabled by default");
+
     config.workers = 0;
     expectCondition(!isValidPgasPollConfig(config, 256), "zero workers must be rejected");
 

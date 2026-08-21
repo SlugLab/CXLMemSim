@@ -15,6 +15,7 @@ struct PgasPollConfig {
     std::uint64_t spin_us = 50;
     std::size_t yield_count = 10;
     std::uint64_t idle_sleep_us = 100;
+    bool record_accesses = true;
 };
 
 inline bool isValidPgasPollConfig(const PgasPollConfig &config, std::size_t max_workers) noexcept {
