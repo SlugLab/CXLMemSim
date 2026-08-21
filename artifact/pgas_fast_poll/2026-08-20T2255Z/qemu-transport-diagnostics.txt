@@ -1,0 +1,2 @@
+qemu-system-x86_64: CXL Type3: SHM response timeout
+qemu-system-x86_64: info: CXL Type3: PGAS response waits @ 771000000 ops: avg=497.7 ns, max=36712215 ns

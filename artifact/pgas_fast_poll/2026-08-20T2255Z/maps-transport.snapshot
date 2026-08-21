@@ -1,0 +1,6 @@
+PID=589
+/root/lmbench/bin/x86_64-linux-gnu/lat_mem_rd -t -N 4 128 64
+7fc085a00000-7fc095400000 rw-s 00000000 00:06 438                        /dev/dax0.0
+PID=605
+/root/lmbench/bin/x86_64-linux-gnu/lat_mem_rd -t -N 4 128 64
+7fc085a00000-7fc095400000 rw-s 00000000 00:06 438                        /dev/dax0.0

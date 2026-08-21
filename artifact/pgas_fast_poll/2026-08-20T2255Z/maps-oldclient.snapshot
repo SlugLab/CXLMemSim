@@ -1,0 +1,3 @@
+pid=630
+75d095a00000-75d0a5400000 rw-s 00000000 00:06 438                        /dev/dax0.0
+/sys/bus/dax/drivers/device_dax

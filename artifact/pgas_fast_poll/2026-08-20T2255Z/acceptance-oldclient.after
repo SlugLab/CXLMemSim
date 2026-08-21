@@ -1,0 +1,5 @@
+boot_id=e1794343-43fe-41f0-bc19-bc1c84486528
+dmesg_lines=675
+invalid_opcode=0
+segfaults=0
+driver=/sys/bus/dax/drivers/device_dax
