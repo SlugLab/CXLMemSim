@@ -1,0 +1,5 @@
+boot_id=c2b882dc-d738-4944-ba75-4154c730b392
+dmesg_lines=672
+invalid_opcode=0
+segfaults=0
+driver=/sys/bus/dax/drivers/device_dax

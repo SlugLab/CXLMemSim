@@ -1,0 +1,6 @@
+[2026-08-20 23:34:28.086] Communication Mode: PGAS Shared Memory (cxl_backend.h)
+[2026-08-20 23:34:28.086] PGAS SHM Name: /cxlmemsim_pgas
+[2026-08-20 23:34:28.086] PGAS polling: workers=1, spin=1000 us, yields=10, idle sleep=100 us, record accesses=false
+[2026-08-20 23:34:28.086] Capacity: 256 MB
+[2026-08-20 23:34:28.086] Backing Mode: POSIX shared memory
+[2026-08-20 23:34:28.086] Default latency: 100 ns

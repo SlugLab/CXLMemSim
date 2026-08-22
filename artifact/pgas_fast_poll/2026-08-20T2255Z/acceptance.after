@@ -1,0 +1,14 @@
+2026-08-21T00:39:00Z
+bc9911b6-4ca8-4da6-bd9f-97d1e35daeed
+675
+0
+0
+[
+  {
+    "chardev":"dax0.0",
+    "size":262144000,
+    "target_node":1,
+    "align":2097152,
+    "mode":"devdax"
+  }
+]

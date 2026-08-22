@@ -17,6 +17,7 @@
 #include "cxlcontroller.h"
 #include "cxlendpoint.h"
 #include "distributed_server.h"
+#include "pgas_poll_policy.h"
 #include "policy.h"
 #include "shm_communication.h"
 #include <algorithm>
@@ -151,6 +152,7 @@ private:
     cxl_shm_header_t *pgas_shm_header_;
     void *pgas_memory_;
     size_t pgas_memory_size_;
+    PgasPollConfig pgas_poll_config_;
 
     // Shared memory manager for real memory allocation
     std::unique_ptr<SharedMemoryManager> shm_manager;
@@ -243,14 +245,16 @@ public:
     ThreadPerConnectionServer(
         int port, CXLController *ctrl, size_t capacity_mb, const std::string &backing_file = "",
         CommMode mode = CommMode::TCP, const std::string &pgas_shm_name = "/cxlmemsim_pgas",
+        const PgasPollConfig &pgas_poll_config = {},
         SharedMemoryManager::BackingMode backing_mode = SharedMemoryManager::BackingMode::SharedMemory,
         const SharedMemoryManager::SsdStreamingConfig &ssd_config = {}, bool coherence_v2_enabled = false,
         std::chrono::milliseconds coherence_v2_snoop_timeout = std::chrono::milliseconds(1000),
         std::string coherence_v2_shm_name = "/cxlmemsim_coherence_v2")
         : server_fd(-1), port(port), controller(ctrl), running(true), next_thread_id(0), comm_mode(mode),
           pgas_shm_name_(pgas_shm_name), pgas_shm_fd_(-1), pgas_shm_header_(nullptr), pgas_memory_(nullptr),
-          pgas_memory_size_(0), backing_file_(backing_file), backing_mode_(backing_mode), ssd_config_(ssd_config),
-          coherence_v2_enabled_(coherence_v2_enabled), coherence_v2_snoop_timeout_(coherence_v2_snoop_timeout),
+          pgas_memory_size_(0), pgas_poll_config_(pgas_poll_config), backing_file_(backing_file),
+          backing_mode_(backing_mode), ssd_config_(ssd_config), coherence_v2_enabled_(coherence_v2_enabled),
+          coherence_v2_snoop_timeout_(coherence_v2_snoop_timeout),
           coherence_v2_shm_name_(std::move(coherence_v2_shm_name)) {
         congestion_info.active_requests = 0;
         congestion_info.total_bandwidth_used = 0;
@@ -373,6 +377,7 @@ struct ServerOptions {
     bool ssd_odirect = true;
     std::string comm_mode_str = "tcp";
     std::string pgas_shm_name = "/cxlmemsim_pgas";
+    PgasPollConfig pgas_poll;
     uint32_t node_id = 0;
     std::string dist_shm_name = "/cxlmemsim_dist";
     std::string coordinator_shm;
@@ -415,6 +420,11 @@ static void print_server_help(const char *program) {
               << "      --ssd-odirect[=true|false]     Use O_DIRECT when backend supports it\n"
               << "      --comm-mode <mode>             tcp, shm, pgas-shm, or distributed\n"
               << "      --pgas-shm-name <name>         PGAS shared memory name\n"
+              << "      --pgas-workers <count>         PGAS worker threads (default: 4)\n"
+              << "      --pgas-spin-us <us>            Active PGAS busy-poll window (default: 50)\n"
+              << "      --pgas-yield-count <count>     PGAS yields before idle sleep (default: 10)\n"
+              << "      --pgas-idle-sleep-us <us>      PGAS fully-idle sleep (default: 100)\n"
+              << "      --pgas-record-accesses[=bool]  Run detailed controller accounting (default: true)\n"
               << "      --node-id <id>                 Distributed node ID\n"
               << "      --dist-shm-name <name>         Distributed shared memory name\n"
               << "      --coordinator-shm <name>       Coordinator shared memory to join\n"
@@ -594,6 +604,16 @@ static bool parse_server_options(int argc, char *argv[], ServerOptions &opts, st
                 opts.comm_mode_str = get_value(key);
             } else if (key == "pgas-shm-name") {
                 opts.pgas_shm_name = get_value(key);
+            } else if (key == "pgas-workers") {
+                opts.pgas_poll.workers = std::stoull(get_value(key));
+            } else if (key == "pgas-spin-us") {
+                opts.pgas_poll.spin_us = std::stoull(get_value(key));
+            } else if (key == "pgas-yield-count") {
+                opts.pgas_poll.yield_count = std::stoull(get_value(key));
+            } else if (key == "pgas-idle-sleep-us") {
+                opts.pgas_poll.idle_sleep_us = std::stoull(get_value(key));
+            } else if (key == "pgas-record-accesses") {
+                opts.pgas_poll.record_accesses = parse_optional_bool_option(argc, argv, i, value, has_inline_value);
             } else if (key == "node-id") {
                 opts.node_id = static_cast<uint32_t>(std::stoul(get_value(key)));
             } else if (key == "dist-shm-name") {
@@ -776,6 +796,10 @@ int main(int argc, char *argv[]) {
         SPDLOG_ERROR("--coherence-v2-snoop-timeout-ms must be non-zero");
         return 1;
     }
+    if (!isValidPgasPollConfig(opts.pgas_poll, CXL_SHM_MAX_SLOTS)) {
+        SPDLOG_ERROR("PGAS polling requires 1..{} workers and a representable spin interval", CXL_SHM_MAX_SLOTS);
+        return 1;
+    }
 
     // Initialize policies
     std::array<Policy *, 4> policies = {new AllocationPolicy(), new MigrationPolicy(), new PagingPolicy(),
@@ -856,6 +880,9 @@ int main(int argc, char *argv[]) {
     }
     if (comm_mode == CommMode::PGAS_SHM) {
         SPDLOG_INFO("  PGAS SHM Name: {}", pgas_shm_name);
+        SPDLOG_INFO("  PGAS polling: workers={}, spin={} us, yields={}, idle sleep={} us, record accesses={}",
+                    opts.pgas_poll.workers, opts.pgas_poll.spin_us, opts.pgas_poll.yield_count,
+                    opts.pgas_poll.idle_sleep_us, opts.pgas_poll.record_accesses);
     }
     if (comm_mode == CommMode::DISTRIBUTED) {
         SPDLOG_INFO("  Node ID: {}", node_id);
@@ -1043,8 +1070,8 @@ int main(int argc, char *argv[]) {
 
     try {
         ThreadPerConnectionServer server(port, controller, capacity, backing_file, comm_mode, pgas_shm_name,
-                                         backing_mode, ssd_config, coherence_v2, coherence_v2_snoop_timeout,
-                                         coherence_v2_shm_name);
+                                         opts.pgas_poll, backing_mode, ssd_config, coherence_v2,
+                                         coherence_v2_snoop_timeout, coherence_v2_shm_name);
 
         if (!server.start()) {
             SPDLOG_ERROR("Failed to start server");
@@ -2491,16 +2518,26 @@ void ThreadPerConnectionServer::run_pgas_shm_mode() {
     __atomic_store_n(&pgas_shm_header_->server_ready, 1, __ATOMIC_RELEASE);
 
     // Create worker threads for handling PGAS SHM requests
-    const int num_workers = 4;
     std::vector<std::thread> workers;
+    workers.reserve(pgas_poll_config_.workers);
 
-    for (int i = 0; i < num_workers; i++) {
+    for (std::size_t i = 0; i < pgas_poll_config_.workers; i++) {
         workers.emplace_back([this]() {
+            PgasPollPolicy policy(pgas_poll_config_.spin_us * 1000, pgas_poll_config_.yield_count);
             while (running && !shutdown_requested()) {
                 int processed = poll_pgas_shm_requests();
-                if (processed == 0) {
-                    // No requests - sleep briefly to reduce CPU usage
-                    usleep(100); // 100us
+                const auto now_ns = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                                   std::chrono::steady_clock::now().time_since_epoch())
+                                                                   .count());
+                switch (policy.next(processed > 0, now_ns)) {
+                case PgasPollAction::Spin:
+                    break;
+                case PgasPollAction::Yield:
+                    std::this_thread::yield();
+                    break;
+                case PgasPollAction::Sleep:
+                    std::this_thread::sleep_for(std::chrono::microseconds(pgas_poll_config_.idle_sleep_us));
+                    break;
                 }
             }
         });
@@ -2612,7 +2649,9 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
 
             total_reads++;
 
-            controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, false);
+            if (pgas_poll_config_.record_accesses) {
+                controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, false);
+            }
 
             log_periodic_stats("PGAS_READ", total_reads.load());
             __atomic_thread_fence(__ATOMIC_RELEASE);
@@ -2654,7 +2693,9 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
             slot->latency_ns = (uint64_t)(base_latency + fabric_latency_ns);
             total_writes++;
 
-            controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, true);
+            if (pgas_poll_config_.record_accesses) {
+                controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, true);
+            }
 
             log_periodic_stats("PGAS_WRITE", total_writes.load());
             __atomic_thread_fence(__ATOMIC_RELEASE);
@@ -2698,7 +2739,9 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 __atomic_thread_fence(__ATOMIC_RELEASE);
                 slot->resp_status = CXL_SHM_RESP_OK;
                 total_atomic_faa++;
-                controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, true);
+                if (pgas_poll_config_.record_accesses) {
+                    controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, true);
+                }
                 log_periodic_stats("PGAS_FAA", total_atomic_faa.load());
             } else {
                 slot->resp_status = CXL_SHM_RESP_ERROR;
@@ -2742,7 +2785,9 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
                 __atomic_thread_fence(__ATOMIC_RELEASE);
                 slot->resp_status = CXL_SHM_RESP_OK;
                 total_atomic_cas++;
-                controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, true);
+                if (pgas_poll_config_.record_accesses) {
+                    controller->record_cxl_access(request_ts, static_cast<uint64_t>(i), addr, true);
+                }
                 log_periodic_stats("PGAS_CAS", total_atomic_cas.load());
             } else {
                 slot->resp_status = CXL_SHM_RESP_ERROR;

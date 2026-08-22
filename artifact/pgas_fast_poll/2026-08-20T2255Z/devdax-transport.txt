@@ -1,0 +1,29 @@
+{
+  "region":"region0",
+  "resource":45365592064,
+  "size":268435456,
+  "type":"pmem",
+  "interleave_ways":1,
+  "interleave_granularity":256,
+  "decode_state":"commit",
+  "mappings":[
+    {
+      "position":0,
+      "memdev":"mem0",
+      "decoder":"decoder2.0"
+    }
+  ],
+  "qos_class_mismatch":true
+}
+crw------- 1 root root 250, 0 Aug 20 23:37 /dev/dax0.0
+[
+  {
+    "chardev":"dax0.0",
+    "size":262144000,
+    "target_node":1,
+    "align":2097152,
+    "mode":"devdax"
+  }
+]
+driver=device_dax
+trap_count=0

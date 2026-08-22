@@ -1,0 +1,6 @@
+numeric_rows=115
+zero_rows=0
+final=128.00000 5009.636
+exit_status=0
+qemu_timeout_lines=1
+qemu_last_wait=qemu-system-x86_64: info: CXL Type3: PGAS response waits @ 771000000 ops: avg=497.7 ns, max=36712215 ns
