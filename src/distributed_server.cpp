@@ -110,29 +110,41 @@ bool DistributedMessageManager::initialize(bool create_new) {
 
     shm_header_ = static_cast<dist_shm_header_t *>(mapped);
 
-    // Initialize header
-    memset(shm_header_, 0, DIST_SHM_SIZE);
-    shm_header_->magic = DIST_SHM_MAGIC;
-    shm_header_->version = DIST_SHM_VERSION;
-    shm_header_->num_nodes = 0;
-    shm_header_->coordinator_node = local_node_id_;
-    shm_header_->global_epoch = 0;
-    shm_header_->system_ready = 0;
-    shm_header_->shutdown_requested = 0;
+    if (create_new) {
+        // Only the coordinator owns initialization.  A joining node must not
+        // erase registrations and queues that are already live in this SHM.
+        memset(shm_header_, 0, DIST_SHM_SIZE);
+        shm_header_->magic = DIST_SHM_MAGIC;
+        shm_header_->version = DIST_SHM_VERSION;
+        shm_header_->num_nodes = 0;
+        shm_header_->coordinator_node = local_node_id_;
+        shm_header_->global_epoch = 0;
+        shm_header_->system_ready = 0;
+        shm_header_->shutdown_requested = 0;
 
-    // Initialize all queues
-    for (int i = 0; i < DIST_MAX_NODES * DIST_MAX_NODES; i++) {
-        shm_header_->queues[i].head = 0;
-        shm_header_->queues[i].tail = 0;
-        shm_header_->queues[i].msg_count = 0;
-        shm_header_->queues[i].capacity = DIST_MSG_QUEUE_SIZE;
-        shm_header_->queues[i].total_sent = 0;
-        shm_header_->queues[i].total_received = 0;
-        shm_header_->queues[i].total_dropped = 0;
+        for (int i = 0; i < DIST_MAX_NODES * DIST_MAX_NODES; i++) {
+            shm_header_->queues[i].head = 0;
+            shm_header_->queues[i].tail = 0;
+            shm_header_->queues[i].msg_count = 0;
+            shm_header_->queues[i].capacity = DIST_MSG_QUEUE_SIZE;
+            shm_header_->queues[i].total_sent = 0;
+            shm_header_->queues[i].total_received = 0;
+            shm_header_->queues[i].total_dropped = 0;
+        }
+
+        is_coordinator_ = true;
+        SPDLOG_INFO("Initialized as coordinator node {}", local_node_id_);
+    } else {
+        if (shm_header_->magic != DIST_SHM_MAGIC ||
+            shm_header_->version != DIST_SHM_VERSION) {
+            SPDLOG_ERROR("Invalid distributed SHM header for {}", shm_name_);
+            return false;
+        }
+        is_coordinator_ = false;
+        const uint32_t coordinator_node = shm_header_->coordinator_node;
+        SPDLOG_INFO("Joined distributed SHM {} at coordinator node {}",
+                    shm_name_, coordinator_node);
     }
-
-    is_coordinator_ = true;
-    SPDLOG_INFO("Initialized as coordinator node {}", local_node_id_);
 
     return true;
 }

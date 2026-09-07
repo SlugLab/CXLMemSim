@@ -85,7 +85,10 @@ constexpr uint8_t OP_SWITCH_MATMUL_I32 = 23; // Near-switch AI-core int32 matmul
 constexpr uint8_t OP_SWITCH_QUERY = 24; // Return switch-runtime stats in response
 constexpr uint8_t OP_SWITCH_HWJIT = 25; // Damer Hardware-JIT switchlet descriptor in data
 constexpr uint8_t OP_SWITCH_HWJIT_QUERY = 26; // Return Hardware-JIT switchlet stats
-constexpr uint8_t OP_MAX = OP_SWITCH_HWJIT_QUERY;
+constexpr uint8_t OP_FAULT_QUERY = 27; // Return caller identity and fault-injection statistics
+constexpr uint8_t OP_FAULT_FENCE = 28; // Fence a TCP client identity; value=target client id
+constexpr uint8_t OP_FAULT_UNFENCE = 29; // Re-enable a TCP client identity; value=target client id
+constexpr uint8_t OP_MAX = OP_FAULT_UNFENCE;
 
 // Server request/response structures (matching qemu_integration)
 struct __attribute__((packed)) ServerRequest {
@@ -309,6 +312,16 @@ private:
     std::set<int> bi_enabled_clients;
     std::mutex bi_mutex;
 
+    // Deterministic fail-stop injection for switched multi-host experiments.
+    // A fenced client may keep its socket open, but no data, atomic, or switch
+    // request from that incarnation is allowed to reach the memory pool.
+    bool fault_injection_enabled_;
+    std::set<int> fenced_clients_;
+    std::mutex fault_injection_mutex_;
+    std::atomic<uint64_t> fault_fence_requests_{0};
+    std::atomic<uint64_t> fault_unfence_requests_{0};
+    std::atomic<uint64_t> fault_denied_requests_{0};
+
     // Statistics
     std::atomic<uint64_t> total_reads{0};
     std::atomic<uint64_t> total_writes{0};
@@ -357,10 +370,11 @@ private:
 public:
     ThreadPerConnectionServer(int port, CXLController *ctrl, size_t capacity_mb, const std::string &backing_file = "",
                               CommMode mode = CommMode::TCP, const std::string &pgas_shm_name = "/cxlmemsim_pgas",
-                              const SwitchRuntimeConfig &switch_config = {})
+                              const SwitchRuntimeConfig &switch_config = {}, bool fault_injection_enabled = false)
         : server_fd(-1), port(port), controller(ctrl), running(true), next_thread_id(0), comm_mode(mode),
           pgas_shm_name_(pgas_shm_name), pgas_shm_fd_(-1), pgas_shm_header_(nullptr), pgas_memory_(nullptr),
-          pgas_memory_size_(0), backing_file_(backing_file), switch_runtime(switch_config) {
+          pgas_memory_size_(0), backing_file_(backing_file), fault_injection_enabled_(fault_injection_enabled),
+          switch_runtime(switch_config) {
         congestion_info.active_requests = 0;
         congestion_info.total_bandwidth_used = 0;
         congestion_info.last_reset = std::chrono::steady_clock::now();
@@ -414,6 +428,9 @@ private:
     void handle_bi_request(int thread_id, const ServerRequest &req, ServerResponse &resp);
     bool is_switch_op(uint8_t op_type) const;
     void handle_switch_request(int thread_id, const ServerRequest &req, ServerResponse &resp);
+    bool is_fault_control_op(uint8_t op_type) const;
+    void handle_fault_control_request(int thread_id, const ServerRequest &req, ServerResponse &resp);
+    bool reject_fenced_client(int thread_id, ServerResponse &resp);
     bool check_switch_range_access(int thread_id, const ServerRequest &req, uint64_t addr, uint64_t size,
                                    bool is_write, bool is_atomic, ServerResponse &resp, double &fabric_latency_ns);
     bool switch_read_bytes(uint64_t addr, uint8_t *buffer, size_t size, int core_id, uint64_t timestamp,
@@ -487,6 +504,7 @@ struct ServerOptions {
     uint32_t gfam_hosts = 16;
     double gfam_fabric_latency = 80.0;
     double gfam_bandwidth = 64.0;
+    bool enable_fault_injection = false;
     SwitchRuntimeConfig switch_config;
 };
 
@@ -517,6 +535,8 @@ static void print_server_help(const char *program) {
               << "      --gfam-hosts <count>           Number of GFAM host ports\n"
               << "      --gfam-fabric-latency <ns>     GFAM fabric traversal latency\n"
               << "      --gfam-bandwidth <GB/s>        Aggregate GFAM fabric bandwidth\n"
+              << "      --enable-fault-injection[=true|false]\n"
+              << "                                      Enable TCP client fencing controls\n"
               << "      --enable-switch-cores[=true|false]\n"
               << "                                      Enable near-switch offload cores\n"
               << "      --switch-general-cores <count> General-purpose cores near the switch\n"
@@ -709,6 +729,8 @@ static bool parse_server_options(int argc, char *argv[], ServerOptions &opts, st
                 opts.gfam_fabric_latency = std::stod(get_value(key));
             } else if (key == "gfam-bandwidth") {
                 opts.gfam_bandwidth = std::stod(get_value(key));
+            } else if (key == "enable-fault-injection") {
+                opts.enable_fault_injection = parse_optional_bool_option(argc, argv, i, value, has_inline_value);
             } else if (key == "enable-switch-cores") {
                 opts.switch_config.enabled = parse_optional_bool_option(argc, argv, i, value, has_inline_value);
             } else if (key == "switch-general-cores") {
@@ -786,6 +808,7 @@ int main(int argc, char *argv[]) {
     uint32_t gfam_hosts = opts.gfam_hosts;
     double gfam_fabric_latency = opts.gfam_fabric_latency;
     double gfam_bandwidth = opts.gfam_bandwidth;
+    bool enable_fault_injection = opts.enable_fault_injection;
     const auto &switch_config = opts.switch_config;
 
     // Map transport mode string to enum
@@ -922,6 +945,7 @@ int main(int argc, char *argv[]) {
     SPDLOG_INFO("  DCD: {}", controller->dcd_enabled() ? "enabled" : "disabled");
     SPDLOG_INFO("  GFAM: {}", controller->gfam_enabled() ? "enabled" : "disabled");
     SPDLOG_INFO("  Switch cores: {}", switch_config.enabled ? "enabled" : "disabled");
+    SPDLOG_INFO("  Fault injection: {}", enable_fault_injection ? "enabled" : "disabled");
     if (switch_config.enabled) {
         SPDLOG_INFO("    General cores: {}, base latency: {} ns, bandwidth: {:.2f} GB/s",
                     switch_config.general_cores, switch_config.general_base_latency_ns,
@@ -1064,7 +1088,7 @@ int main(int argc, char *argv[]) {
 
     try {
         ThreadPerConnectionServer server(port, controller, capacity, backing_file, comm_mode, pgas_shm_name,
-                                         switch_config);
+                                         switch_config, enable_fault_injection);
 
         if (!server.start()) {
             SPDLOG_ERROR("Failed to start server");
@@ -1502,10 +1526,99 @@ bool ThreadPerConnectionServer::check_fabric_access(int thread_id, const ServerR
     return true;
 }
 
+bool ThreadPerConnectionServer::is_fault_control_op(uint8_t op_type) const {
+    return op_type == OP_FAULT_QUERY || op_type == OP_FAULT_FENCE || op_type == OP_FAULT_UNFENCE;
+}
+
+void ThreadPerConnectionServer::handle_fault_control_request(int thread_id, const ServerRequest &req,
+                                                             ServerResponse &resp) {
+    auto write_u64 = [&resp](size_t offset, uint64_t value) {
+        if (offset + sizeof(value) <= sizeof(resp.data)) {
+            memcpy(resp.data + offset, &value, sizeof(value));
+        }
+    };
+
+    resp.status = 0;
+    resp.latency_ns = static_cast<uint64_t>(controller->dramlatency);
+    resp.old_value = static_cast<uint64_t>(thread_id);
+
+    if (!fault_injection_enabled_) {
+        resp.status = 1;
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(fault_injection_mutex_);
+    switch (req.op_type) {
+    case OP_FAULT_QUERY:
+        write_u64(0, fenced_clients_.size());
+        write_u64(8, fault_fence_requests_.load());
+        write_u64(16, fault_unfence_requests_.load());
+        write_u64(24, fault_denied_requests_.load());
+        break;
+    case OP_FAULT_FENCE: {
+        int target = static_cast<int>(req.value);
+        if (target < 0 || target >= next_thread_id.load()) {
+            resp.status = 1;
+            break;
+        }
+        fenced_clients_.insert(target);
+        fault_fence_requests_++;
+        resp.old_value = static_cast<uint64_t>(target);
+        SPDLOG_INFO("Fault injection: client {} fenced by client {}", target, thread_id);
+        break;
+    }
+    case OP_FAULT_UNFENCE: {
+        int target = static_cast<int>(req.value);
+        fenced_clients_.erase(target);
+        fault_unfence_requests_++;
+        resp.old_value = static_cast<uint64_t>(target);
+        SPDLOG_INFO("Fault injection: client {} unfenced by client {}", target, thread_id);
+        break;
+    }
+    default:
+        resp.status = 1;
+        break;
+    }
+}
+
+bool ThreadPerConnectionServer::reject_fenced_client(int thread_id, ServerResponse &resp) {
+    if (!fault_injection_enabled_) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(fault_injection_mutex_);
+    if (!fenced_clients_.contains(thread_id)) {
+        return false;
+    }
+
+    fault_denied_requests_++;
+    resp.status = 0xfe;
+    resp.latency_ns = static_cast<uint64_t>(controller->dramlatency);
+    resp.old_value = static_cast<uint64_t>(thread_id);
+    SPDLOG_DEBUG("Fault injection: rejected request from fenced client {}", thread_id);
+    return true;
+}
+
 void ThreadPerConnectionServer::handle_request(int client_fd, int thread_id, ServerRequest &req, ServerResponse &resp) {
     // CRITICAL: Memory barrier before reading from shared memory
     // This ensures we see all updates from other guests
     std::atomic_thread_fence(std::memory_order_seq_cst);
+
+    // Identity/statistics remain observable after fencing, but a fenced
+    // incarnation cannot issue an UNFENCE for itself or alter another host.
+    if (req.op_type == OP_FAULT_QUERY) {
+        handle_fault_control_request(thread_id, req, resp);
+        return;
+    }
+
+    if (reject_fenced_client(thread_id, resp)) {
+        return;
+    }
+
+    if (is_fault_control_op(req.op_type)) {
+        handle_fault_control_request(thread_id, req, resp);
+        return;
+    }
 
     // Dispatch atomic operations to dedicated handler
     if (req.op_type == OP_ATOMIC_FAA || req.op_type == OP_ATOMIC_CAS || req.op_type == OP_FENCE) {

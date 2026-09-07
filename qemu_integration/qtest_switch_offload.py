@@ -221,6 +221,20 @@ def bridge_prefetch_window(base: int, size: int) -> tuple[int, int, int]:
     return low, (base >> 32) & 0xFFFFFFFF, (limit >> 32) & 0xFFFFFFFF
 
 
+def configure_pci_bridge(qt: QTest, bus: int, dev: int, fn: int,
+                         primary: int, secondary: int, subordinate: int,
+                         window_base: int, window_size: int) -> None:
+    """Assign buses and a 64-bit prefetch window to an unconfigured bridge."""
+    pci_write(qt, bus, dev, fn, 0x18,
+              (subordinate << 16) | (secondary << 8) | primary)
+    low, high_base, high_limit = bridge_prefetch_window(window_base, window_size)
+    pci_write(qt, bus, dev, fn, 0x24, low)
+    pci_write(qt, bus, dev, fn, 0x28, high_base)
+    pci_write(qt, bus, dev, fn, 0x2C, high_limit)
+    command = pci_read(qt, bus, dev, fn, 0x04)
+    pci_write(qt, bus, dev, fn, 0x04, command | 0x6)
+
+
 def map_type2_bar2(qt: QTest, bar2_base: int, bar2_size: int) -> int:
     devices = scan_pci(qt)
     root_ports = [d for d in devices if d[0] == 0x0C and d[6] == 0x060400]
@@ -228,13 +242,8 @@ def map_type2_bar2(qt: QTest, bar2_base: int, bar2_size: int) -> int:
         raise RuntimeError("CXL root port not found on bus 0x0c")
 
     for bus, dev, fn, *_ in root_ports:
-        pci_write(qt, bus, dev, fn, 0x18, 0x000D0D0C)
-        low, high_base, high_limit = bridge_prefetch_window(bar2_base, bar2_size)
-        pci_write(qt, bus, dev, fn, 0x24, low)
-        pci_write(qt, bus, dev, fn, 0x28, high_base)
-        pci_write(qt, bus, dev, fn, 0x2C, high_limit)
-        command = pci_read(qt, bus, dev, fn, 0x04)
-        pci_write(qt, bus, dev, fn, 0x04, command | 0x6)
+        configure_pci_bridge(qt, bus, dev, fn, 0x0C, 0x0D, 0x0D,
+                             bar2_base, bar2_size)
 
     devices = scan_pci(qt)
     matches = [d for d in devices if d[3] == TYPE2_VENDOR_ID and d[4] == TYPE2_DEVICE_ID]
@@ -253,6 +262,56 @@ def map_type2_bar2(qt: QTest, bar2_base: int, bar2_size: int) -> int:
     if (caps & CXL_GPU_CAP_SWITCH_CORES) == 0:
         raise RuntimeError(f"BAR2 caps missing switch-core bit: 0x{caps:x}")
     print(f"PASS qemu_bar2_caps: 0x{caps:x}")
+    return bar2_base
+
+
+def map_type2_bar2_through_switch(qt: QTest, bar2_base: int,
+                                  bar2_size: int) -> int:
+    """Enumerate root port -> CXL upstream -> downstream -> Type2.
+
+    Qtest does not run firmware, so the three bridge levels have to be given
+    bus numbers and prefetchable windows explicitly before BAR2 can be used.
+    """
+    devices = scan_pci(qt)
+    root_ports = [d for d in devices if d[0] == 0x0C and d[6] == 0x060400]
+    if len(root_ports) != 1:
+        raise RuntimeError(f"expected one CXL root port on bus 0x0c, got {root_ports}")
+
+    bus, dev, fn, *_ = root_ports[0]
+    configure_pci_bridge(qt, bus, dev, fn, 0x0C, 0x0D, 0x0F,
+                         bar2_base, bar2_size)
+
+    upstream = [d for d in scan_pci(qt) if d[0] == 0x0D and d[6] == 0x060400]
+    if len(upstream) != 1:
+        raise RuntimeError(f"expected one CXL upstream port on bus 0x0d, got {upstream}")
+    bus, dev, fn, *_ = upstream[0]
+    configure_pci_bridge(qt, bus, dev, fn, 0x0D, 0x0E, 0x0F,
+                         bar2_base, bar2_size)
+
+    downstream = [d for d in scan_pci(qt) if d[0] == 0x0E and d[6] == 0x060400]
+    if len(downstream) != 1:
+        raise RuntimeError(f"expected one CXL downstream port on bus 0x0e, got {downstream}")
+    bus, dev, fn, *_ = downstream[0]
+    configure_pci_bridge(qt, bus, dev, fn, 0x0E, 0x0F, 0x0F,
+                         bar2_base, bar2_size)
+
+    matches = [d for d in scan_pci(qt)
+               if d[3] == TYPE2_VENDOR_ID and d[4] == TYPE2_DEVICE_ID]
+    if len(matches) != 1:
+        raise RuntimeError(f"expected one CXL Type2 endpoint behind switch, got {matches}")
+
+    bus, dev, fn, *_ = matches[0]
+    pci_write(qt, bus, dev, fn, 0x18, bar2_base & 0xFFFFFFFF)
+    pci_write(qt, bus, dev, fn, 0x1C, (bar2_base >> 32) & 0xFFFFFFFF)
+    command = pci_read(qt, bus, dev, fn, 0x04)
+    pci_write(qt, bus, dev, fn, 0x04, command | 0x6)
+
+    magic = qt.readl(bar2_base + CXL_GPU_REG_MAGIC)
+    caps = qt.readl(bar2_base + CXL_GPU_REG_CAPS)
+    expect("qemu_switch_bar2_magic", f"0x{magic:08x}", f"0x{CXL_GPU_MAGIC:08x}")
+    if (caps & CXL_GPU_CAP_SWITCH_CORES) == 0:
+        raise RuntimeError(f"BAR2 caps missing switch-core bit: 0x{caps:x}")
+    print(f"PASS qemu_switch_bar2_caps: 0x{caps:x}")
     return bar2_base
 
 
@@ -320,6 +379,8 @@ def main() -> int:
     parser.add_argument("--server", default=str(repo / "build" / "cxlmemsim_server"))
     parser.add_argument("--qemu", default=str(repo / "lib" / "qemu" / "build" / "qemu-system-x86_64"))
     parser.add_argument("--bar2-base", type=lambda v: int(v, 0), default=0x80000000)
+    parser.add_argument("--through-switch", action="store_true",
+                        help="place Type2 behind QEMU CXL upstream/downstream switch ports")
     args = parser.parse_args()
 
     run_dir = Path(args.run_dir)
@@ -380,6 +441,17 @@ def main() -> int:
 
         qtest_dir = Path(tempfile.mkdtemp(prefix="qtest-", dir=run_dir))
         qtest_path = qtest_dir / "qtest.sock"
+        topology_args = [
+            "-device", "cxl-rp,port=0,bus=cxl.0,id=type2_rp,chassis=0,slot=2",
+        ]
+        type2_bus = "type2_rp"
+        if args.through_switch:
+            topology_args += [
+                "-device", "cxl-upstream,port=0,sn=1234,bus=type2_rp,id=type2_us",
+                "-device", "cxl-downstream,port=0,bus=type2_us,id=type2_ds,slot=3",
+            ]
+            type2_bus = "type2_ds"
+
         qemu_args = [
             args.qemu,
             "-qtest", f"unix:{qtest_path}",
@@ -392,10 +464,10 @@ def main() -> int:
             "-nodefaults",
             "-accel", "qtest",
             "-device", "pxb-cxl,bus_nr=12,bus=pcie.0,id=cxl.0",
-            "-device", "cxl-rp,port=0,bus=cxl.0,id=type2_rp,chassis=0,slot=2",
+            *topology_args,
             "-device",
             (
-                "cxl-type2,bus=type2_rp,id=cxl-type2-qtest,sn=201,gpu-mode=0,"
+                f"cxl-type2,bus={type2_bus},id=cxl-type2-qtest,sn=201,gpu-mode=0,"
                 "cache-size=16M,mem-size=64M,cxlmemsim-addr=127.0.0.1,"
                 f"cxlmemsim-port={args.port},coherency-enabled=true,dcd=on,"
                 "dcd-granularity=1M,dcd-initial-size=64M,gfam=on,gfam-hosts=4,"
@@ -403,7 +475,11 @@ def main() -> int:
             ),
         ]
         qemu_proc, qt, qemu_log = launch_qemu(qemu_args, qtest_path, qemu_log_path)
-        bar2 = map_type2_bar2(qt, args.bar2_base, 16 * 1024 * 1024)
+        if args.through_switch:
+            bar2 = map_type2_bar2_through_switch(
+                qt, args.bar2_base, 16 * 1024 * 1024)
+        else:
+            bar2 = map_type2_bar2(qt, args.bar2_base, 16 * 1024 * 1024)
 
         result, latency = qemu_gpu_cmd(qt, bar2, CXL_GPU_CMD_SWITCH_REDUCE_ADD64, [reduce_addr, 32])
         expect("qemu_reduce_add64", result, 10)

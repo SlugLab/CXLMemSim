@@ -234,6 +234,7 @@ MMIO without booting a guest:
 
 ```bash
 python3 ./qtest_switch_offload.py
+python3 ./qtest_switch_offload.py --through-switch
 ```
 
 The script starts a switch-enabled `cxlmemsim_server`, launches
@@ -242,6 +243,11 @@ prefetchable window, writes the BAR2 command registers for memcpy, memset,
 reduce, dot, matmul, hardware-JIT KV pack, and stats, then verifies the
 resulting CXLMemSim memory contents. Logs are written under
 `build/qtest-switch-offload/`.
+
+With `--through-switch`, the Type2 endpoint is placed behind a QEMU
+`cxl-upstream`/`cxl-downstream` pair. Because qtest does not execute firmware,
+the helper explicitly assigns all three bridge bus ranges and 64-bit
+prefetchable windows before mapping BAR2.
 
 Run the broader Damer-mapped benchmark suite from the same host-side QEMU qtest
 path:
@@ -257,6 +263,9 @@ pipeline cases: cacheline memcpy, memset, add64 reduction, dot product, GEMM,
 hash-join probe, and distributed KV get/put batches. When `/root/Damer` is
 present, the result rows include the matching
 `workloads/concordia/ptxspatial/*.ptxspatial.json` trace path and event count.
+The benchmark enumerates the same root-port -> CXL upstream -> downstream ->
+Type2 switch chain as the switched offload test and explicitly programs every
+qtest bridge window before issuing BAR2 commands.
 Use `--quick` for smaller matrices/vectors, or
 `--cases=ai_gemm_i32,mixed_qwen_prefill_gemm` to select a subset. Results are
 written under `build/qtest-switch-bench/` as `switch_benchmark.csv` and

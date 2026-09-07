@@ -33,10 +33,9 @@ Helper helper{};
 CXLController* controller = nullptr;
 Monitors* monitors = nullptr;
 
-static constexpr uint64_t NODE0_BASE = 0x100000000ULL; // 4GB
-static constexpr uint64_t NODE1_BASE = 0x200000000ULL; // 8GB
 static constexpr size_t CAPACITY_MB = 64;
-    // 64MB per node
+static constexpr uint64_t NODE0_BASE = 0;
+static constexpr uint64_t NODE1_BASE = CAPACITY_MB * 1024ULL * 1024ULL;
 
 struct TestResult {
     int passed = 0;
@@ -95,8 +94,6 @@ int main(int argc, char* argv[]) {
     // ====================================================================
     std::cout << "--- Phase 2: Initialize Distributed Servers ---" << std::endl;
 
-    // Set base addresses via environment variable before initializing
-    setenv("CXL_BASE_ADDR", std::to_string(NODE0_BASE).c_str(), 1);
     DistributedMemoryServer server0(0, "/cxltest_dist", 9990, CAPACITY_MB, &ctrl0,
                                      DistTransportMode::SHM);
 
@@ -108,9 +105,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Now initialize node 1 with different base address
-    // Node 1 uses the SAME dist SHM name since they share the message bus
-    setenv("CXL_BASE_ADDR", std::to_string(NODE1_BASE).c_str(), 1);
+    // Node 1 uses the same distributed SHM bus.  The implementation assigns
+    // each node a contiguous node_id * capacity address range.
     DistributedMemoryServer server1(1, "/cxltest_dist", 9991, CAPACITY_MB, &ctrl1,
                                      DistTransportMode::SHM);
 

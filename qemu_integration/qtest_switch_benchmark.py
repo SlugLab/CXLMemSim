@@ -802,10 +802,14 @@ def case_hash_join_probe(ctx: BenchmarkContext) -> dict[str, object]:
     hash_total, _ = ctx.offload("join_reduce_hashes",
                                 qtest.CXL_GPU_CMD_SWITCH_REDUCE_ADD64,
                                 [hash_addr, hash_count * 8])
-    predicate_score, _ = ctx.offload("join_predicate_dot",
-                                     qtest.CXL_GPU_CMD_SWITCH_DOT_I32,
-                                     [pred_a_addr, pred_b_addr,
-                                      predicate_count])
+    predicate_raw, _ = ctx.offload("join_predicate_dot",
+                                   qtest.CXL_GPU_CMD_SWITCH_DOT_I32,
+                                   [pred_a_addr, pred_b_addr,
+                                    predicate_count])
+    # BAR2 result registers are unsigned 64-bit values.  DOT_I32 is signed,
+    # so decode its two's-complement result before comparing negative scores.
+    predicate_score = (predicate_raw if predicate_raw < (1 << 63)
+                       else predicate_raw - (1 << 64))
     ctx.offload("join_materialize", qtest.CXL_GPU_CMD_SWITCH_MEMCPY,
                 [output, build_scratch, bucket_bytes])
 
@@ -1174,9 +1178,11 @@ def qemu_args(args: argparse.Namespace, qtest_path: Path) -> list[str]:
         "-accel", "qtest",
         "-device", "pxb-cxl,bus_nr=12,bus=pcie.0,id=cxl.0",
         "-device", "cxl-rp,port=0,bus=cxl.0,id=type2_rp,chassis=0,slot=2",
+        "-device", "cxl-upstream,port=0,sn=1234,bus=type2_rp,id=type2_us",
+        "-device", "cxl-downstream,port=0,bus=type2_us,id=type2_ds,slot=3",
         "-device",
         (
-            "cxl-type2,bus=type2_rp,id=cxl-type2-bench,sn=202,gpu-mode=0,"
+            "cxl-type2,bus=type2_ds,id=cxl-type2-bench,sn=202,gpu-mode=0,"
             "cache-size=16M,mem-size=64M,cxlmemsim-addr=127.0.0.1,"
             f"cxlmemsim-port={args.port},coherency-enabled=true,dcd=on,"
             "dcd-granularity=1M,dcd-initial-size=64M,gfam=on,gfam-hosts=4,"
@@ -1275,7 +1281,8 @@ def main() -> int:
         qtest_path = qtest_dir / "qtest.sock"
         qemu_proc, qt, qemu_log = qtest.launch_qemu(
             qemu_args(args, qtest_path), qtest_path, qemu_log_path)
-        bar2 = qtest.map_type2_bar2(qt, args.bar2_base, 16 * 1024 * 1024)
+        bar2 = qtest.map_type2_bar2_through_switch(
+            qt, args.bar2_base, 16 * 1024 * 1024)
 
         profile = {
             "kimi_layers": args.kimi_layers,
@@ -1303,6 +1310,10 @@ def main() -> int:
             "cases": [spec.name for spec in specs],
             "server_cmd": server_cmd,
             "qemu": args.qemu,
+            "qemu_topology": (
+                "pxb-cxl -> cxl-rp -> cxl-upstream -> "
+                "cxl-downstream -> cxl-type2"
+            ),
             "damer_root": args.damer_root,
             "damer_hwjit_report": str(Path(args.damer_root) / "out" / "hwjit-qwen27b-final" /
                                       "cxl_switch_hwjit_sim_report.json"),

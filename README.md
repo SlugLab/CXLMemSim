@@ -93,6 +93,15 @@ Supported request classes include:
 - Dynamic Capacity Device add, release, and query operations.
 - GFAM host map, unmap, access-check, and query operations.
 - optional near-switch offload operations for general cores and AI cores.
+- opt-in test controls that identify, fence, and unfence TCP client
+  incarnations for deterministic fail-stop injection.
+
+Enable the test-only fencing controls with `--enable-fault-injection`. A
+fenced client keeps its TCP connection but receives status `0xfe` for data,
+atomic, and switch requests, which lets a recovery harness prove that the old
+incarnation cannot touch the pool after fence completion. Control opcodes
+27--29 query the caller identity/statistics, fence a target identity, and
+unfence a target identity, respectively. The controls are disabled by default.
 
 The server supports several communication modes:
 

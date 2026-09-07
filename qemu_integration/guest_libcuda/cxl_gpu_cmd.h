@@ -130,6 +130,7 @@ typedef enum {
     CXL_GPU_CMD_CACHE_FLUSH = 0x80, /* Flush cache lines to device */
     CXL_GPU_CMD_CACHE_INVALIDATE = 0x81, /* Invalidate cache lines */
     CXL_GPU_CMD_CACHE_WRITEBACK = 0x82, /* Writeback dirty cache lines */
+    CXL_GPU_CMD_CACHE_PREFETCH = 0x83, /* Prefetch cache lines into Type2 cache */
 
     /* P2P DMA commands (GPU <-> Type3 CXL memory) */
     CXL_GPU_CMD_P2P_DISCOVER = 0x90, /* Discover P2P peers */
