@@ -1,0 +1,64 @@
+{
+  "schema": "c2sight.sharing_motivation.v1",
+  "device_config": "cxl-type2,bus=rp,addr=0,id=t2,sn=201,gpu-mode=0,cache-size=256K,mem-size=256M,latency-enabled=true,read-latency-ns=120,write-latency-ns=250,coherency-latency-ns=112,bandwidth-gbps=51,cxlmemsim-port={port}",
+  "updates_per_measurement": 256,
+  "structure_bytes": 262144,
+  "rows": [
+    {
+      "object_bytes": 64,
+      "share_ns_per_update": 371.46875,
+      "publish_ns_per_update": 622.0,
+      "replicate_ns_per_update": 1029511.0,
+      "publish_over_share": 1.6744342559098175,
+      "replicate_over_share": 2771.4605871960966
+    },
+    {
+      "object_bytes": 256,
+      "share_ns_per_update": 371.0,
+      "publish_ns_per_update": 1376.0,
+      "replicate_ns_per_update": 1029511.0,
+      "publish_over_share": 3.7088948787061993,
+      "replicate_over_share": 2774.9622641509436
+    },
+    {
+      "object_bytes": 1024,
+      "share_ns_per_update": 371.0,
+      "publish_ns_per_update": 4391.0,
+      "replicate_ns_per_update": 1029511.0,
+      "publish_over_share": 11.835579514824797,
+      "replicate_over_share": 2774.9622641509436
+    },
+    {
+      "object_bytes": 4096,
+      "share_ns_per_update": 371.0,
+      "publish_ns_per_update": 16451.0,
+      "replicate_ns_per_update": 1029511.0,
+      "publish_over_share": 44.34231805929919,
+      "replicate_over_share": 2774.9622641509436
+    },
+    {
+      "object_bytes": 16384,
+      "share_ns_per_update": 371.0,
+      "publish_ns_per_update": 64692.0,
+      "replicate_ns_per_update": 1029511.0,
+      "publish_over_share": 174.37196765498652,
+      "replicate_over_share": 2774.9622641509436
+    },
+    {
+      "object_bytes": 65536,
+      "share_ns_per_update": 371.0,
+      "publish_ns_per_update": 257656.0,
+      "replicate_ns_per_update": 1029511.0,
+      "publish_over_share": 694.4905660377359,
+      "replicate_over_share": 2774.9622641509436
+    },
+    {
+      "object_bytes": 262144,
+      "share_ns_per_update": 371.0,
+      "publish_ns_per_update": 1029511.0,
+      "replicate_ns_per_update": 1029511.0,
+      "publish_over_share": 2774.9622641509436,
+      "replicate_over_share": 2774.9622641509436
+    }
+  ]
+}

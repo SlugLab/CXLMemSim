@@ -1,0 +1,112 @@
+{
+  "description": "Measurements extracted from 'Understanding and Profiling CXL.cache Using C2 Sight' (/root/Splash/paper.pdf, 25pp). Calibration source platform: two-socket Intel Sapphire Rapids (Xeon Gold 6438Y+, 32c, SNC on) + Agilex 7 R-Tile CXL Type-2 FPGA endpoint. Cores pinned 4.0 GHz, uncore 2.3 GHz, prefetchers off, FPGA clock 400 MHz.",
+  "provenance_legend": {
+    "reported": "Number appears verbatim in paper text or figure",
+    "inferred": "Derived here from reported stage costs; derivation shown in 'derivation'"
+  },
+  "host_rails": {
+    "source": "Section 4.1, Figure 4b",
+    "l1d_latency_ns": {"value": 1.25, "provenance": "reported"},
+    "l2_latency_ns": {"value": 4.0, "provenance": "reported"},
+    "llc_latency_ns": {"value": 25.0, "provenance": "reported"},
+    "llc_capacity_mib": {"value": 60, "provenance": "reported", "note": "per socket, 32 slices"},
+    "dram_local_latency_ns": {"value": 103.0, "provenance": "reported", "note": "IntraC"},
+    "dram_remote_latency_ns": {"value": 165.0, "provenance": "reported", "note": "InterC, UPI adds 62ns"},
+    "host_uncached_read_intra_ns": {"value": 117.0, "provenance": "reported", "note": "Path2, one CHA pass + one memory access"},
+    "host_uncached_read_inter_ns": {"value": 537.0, "provenance": "reported", "note": "Path2, InterD device-requester rail 537ns; host InterC equivalents 151/178ns in Path3/4"},
+    "host_dram_read_bw_local_gbps": {"value": 137.4, "provenance": "reported", "note": "89% of DDR5 wire rate; 8ch DDR5-4800 = 153.6 GB/s wire"},
+    "host_dram_read_bw_local_32core_gbps": {"value": 134.0, "provenance": "reported", "note": "Figure 4b, all 32 cores"},
+    "host_dram_read_bw_far_home_gbps": {"value": 96.0, "provenance": "reported", "note": "Path4; far channels sustain 134 GB/s for local cores"},
+    "host_dram_read_bw_far_dirwrite_gbps": {"value": 62.0, "provenance": "reported", "note": "flush-and-reread forcing ~1 directory write per read; 124 GB/s aggregate"},
+    "host_store_bw_local_gbps": {"value": 63.4, "provenance": "reported", "note": "ownership transfer + dirty writeback"},
+    "host_ntw_bw_gbps": {"value": 117.5, "provenance": "reported", "note": "non-temporal full-line write, peak at 6 cores; 1059 ns oversubscribed"},
+    "host_store_bw_remote_holder_gbps": {"value": 44.2, "provenance": "reported"}
+  },
+  "device_rails": {
+    "source": "Sections 4.1, 4.2, 4.4, 4.6, 4.8",
+    "hmc_capacity_kib": {"value": 256, "provenance": "reported", "note": "Host Memory Cache; two request ports"},
+    "hmc_hit_latency_ns": {"value": 120.0, "provenance": "reported"},
+    "hmc_hit_bw_gbps": {"value": 50.0, "provenance": "reported"},
+    "device_read_near_dram_latency_ns": {"value": 855.0, "provenance": "reported", "note": "InterD streaming plateau beyond HMC"},
+    "device_read_far_dram_latency_ns": {"value": 914.0, "provenance": "reported", "note": "InterC/D; UPI adds 59ns, no BW penalty"},
+    "device_rdcurr_uncached_near_ns": {"value": 406.0, "provenance": "reported", "note": "non-allocating, 16MiB working set, line homed LS"},
+    "device_rdshared_alloc_near_ns": {"value": 851.0, "provenance": "reported", "note": "allocating; 6.2x gap vs RdCurr"},
+    "device_common_prefix_ns": {"value": 200.0, "provenance": "reported", "note": "HMC lookup + miss before each device request; latency bars omit it"},
+    "host_issue_prefix_ns": {"value": 25.0, "provenance": "reported", "note": "host request issue + private-cache lookup"},
+    "device_rdshared_held_m_homed_ls_ns": {"value": 477.0, "provenance": "reported", "note": "Path1 RdShared; only ~60ns at home CHA"}
+  },
+  "device_op_bandwidths": {
+    "source": "Figures 5b, 7b, 9b, 11b; Sections 4.2, 4.4, 4.6, 4.8",
+    "rdcurr_nonalloc_near_gbps": {"value": 51.0, "provenance": "reported", "note": "99% of CXL flit rate; saturates device request engines + CXL link, not host coherence"},
+    "rdcurr_nonalloc_remote_gbps": {"value": 49.7, "provenance": "reported"},
+    "rdshared_alloc_near_gbps": {"value": 8.16, "provenance": "reported", "note": "DCOH admits one HMC allocation every 7.9ns (127M ops/s)"},
+    "rdshared_alloc_far_gbps": {"value": 8.12, "provenance": "reported"},
+    "rdown_near_gbps": {"value": 10.3, "provenance": "reported"},
+    "rdown_remote_gbps": {"value": 10.5, "provenance": "reported"},
+    "ncp_itomwr_near_gbps": {"value": 46.3, "provenance": "reported", "note": "ItoMWr push write; saturates device-to-host link"},
+    "ncp_itomwr_remote_gbps": {"value": 45.7, "provenance": "reported"},
+    "nc_wowrinvf_near_gbps": {"value": 25.3, "provenance": "reported", "note": "shared CXL-IP write path, two memory writes per line"},
+    "host_intrac_read_bw_gbps": {"value": 247.0, "provenance": "reported", "note": "intra-socket snoop-and-forward ceiling"}
+  },
+  "stage_costs": {
+    "source": "Figures 5c, 7c, 9c, 11c (per-stage latency bars)",
+    "torpipe_host_ns": {"value": 22, "provenance": "reported"},
+    "torpipe_device_ns": {"value": 45, "provenance": "reported"},
+    "snoop_holder_ns": {"value": 38, "provenance": "reported", "note": "22-38ns range across paths"},
+    "hmc_fill_ns": {"value": 30, "provenance": "reported"},
+    "cxl_cross_ns": {"value": 45, "provenance": "reported", "note": "one CXL link traversal"},
+    "ext_cmp_ns": {"value": 56, "provenance": "reported"},
+    "comp_device_ns": {"value": 125, "provenance": "reported", "note": "device completion incl. HDM/media update"},
+    "upi_cross_ns": {"value": 32, "provenance": "reported", "note": "Path4: two ~32ns UPI crossings = +61/55ns over Path2"},
+    "home_cha_mem_far_ns": {"value": 67, "provenance": "reported", "note": "far-home CHA processing overlaps its 67ns memory access"}
+  },
+  "coherency_structures": {
+    "source": "Section A.3 / A.5",
+    "cha_per_socket": {"value": 32, "provenance": "reported", "note": "2 SNC clusters x 16; ingress IRQ/PRQ/IPQ/RRQ/WBQ/ISMQ"},
+    "local_sf_sets": {"value": 2048, "provenance": "reported"},
+    "local_sf_ways": {"value": 25, "provenance": "reported", "note": "3.125 MiB tracking per slice; additive to LLC 15 ways"},
+    "local_sf_knee_mib_per_snc": {"value": 46.0, "provenance": "reported", "note": "44-48MiB knee; 46.3/50.8 crossings"},
+    "hitme_sets": {"value": 2048, "provenance": "reported"},
+    "hitme_ways": {"value": 24, "provenance": "reported"},
+    "hitme_warm_latency_ns": {"value": 217.0, "provenance": "reported", "note": "hit removes dir read (imc_rd 0.952->0.017/op) but latency unchanged; counter-visible latency-invisible"},
+    "rsf_entries": {"value": 262144, "provenance": "reported", "note": "32 slices x 2048 sets x 4 ways = 16MiB coverage"},
+    "rsf_effective_residency_mib": {"value": 16.0, "provenance": "reported", "note": "14-18MiB effective boundary; 16-24MiB stable threshold"},
+    "rsf_replacement": {"model": "random", "N": 220000, "provenance": "reported", "note": "p_evict = 1 - e^(-K/N)"},
+    "rsf_stale_snoop_premium_ns": {"value": 79.0, "provenance": "reported"},
+    "rsf_first_touch_premium_ns": {"value": 75.0, "provenance": "reported"},
+    "in_memory_dir_bits_per_line": {"value": 2, "provenance": "reported", "note": "host-DRAM ECC metadata; I/S/A states"},
+    "remote_hdm_bw_gbps_below_rsf": {"value": 665.0, "provenance": "reported", "note": "abstract: HDM media throughput"},
+    "remote_hdm_bw_gbps_above_rsf": {"value": 39.5, "provenance": "reported", "note": "past host tracking capacity cliff"},
+    "dcoh_hmc_alloc_period_ns": {"value": 7.9, "provenance": "reported"}
+  },
+  "cha_pressure": {
+    "source": "Section 4.3, Figure 6",
+    "lookup_pressure_sat_gbps_per_cha": {"value": 12.46, "provenance": "reported", "note": "+91.6ns IntraC (66.7->158.3), 84ns of it TOR residency"},
+    "alloc_pressure_sat_gbps_per_cha": {"value": 2.7, "provenance": "reported", "note": "55M inserts/s, 8.7 retries/insert, 42M SF evictions/s at 2.68GB/s; +79.2ns IntraC"},
+    "interd_probe_insensitivity_lookup_ns": {"value": 4.1, "provenance": "reported", "note": "CXL uses PRQ ingress, isolated from IRQ pressure"},
+    "interd_probe_insensitivity_alloc_ns": {"value": 8.2, "provenance": "reported"},
+    "device_sf_competition_onset_mib_per_core": {"value": 3.5, "provenance": "reported", "note": "beyond 3.125MiB SF-slice capacity"}
+  },
+  "imc_interference": {
+    "source": "Section 4.5, Figure 8; Section 4.8, Figure 12",
+    "read_pressure_add_intra_ns": {"value": 218, "provenance": "reported", "note": "at 29GB/s, RPQ 4->41"},
+    "read_pressure_add_inter_ns": {"value": 151, "provenance": "reported"},
+    "write_pressure_add_intra_ns": {"value": 379, "provenance": "reported", "note": "at only 25.5GB/s, WPQ 6->53; 2.9x read penalty"},
+    "write_pressure_add_inter_ns": {"value": 236, "provenance": "reported"},
+    "write_tail_stall_ns": {"min": 700, "max": 900, "provenance": "reported", "note": "bimodal posted-write stall; p95 176ns already at 6.5GB/s"},
+    "neighbor_imc_control_ns": {"value": 15, "provenance": "reported", "note": "interference confined to home iMC"}
+  },
+  "cha_address_hash": {
+    "source": "Section A.5",
+    "index_bits": 5,
+    "set_index": "PA[16:6]",
+    "note": "Same mapping for host DRAM and device HDM; SNC constrains bit 4 to the 16-CHA cluster; no additive constant.",
+    "masks": {
+      "cha0": [6, 10, 12, 14, 16, 17, 18, 20, 22, 24, 25, 26, 27, 28, 30, 32, 33, 35, 36, 38],
+      "cha1": [7, 11, 13, 15, 17, 19, 20, 21, 22, 23, 24, 26, 28, 29, 31, 33, 34, 35, 37, 38],
+      "cha2": [8, 12, 13, 16, 19, 22, 23, 26, 27, 30, 31, 34, 35, 36, 37, 38],
+      "cha3": [9, 12, 16, 17, 19, 21, 22, 23, 25, 26, 27, 29, 31, 32, 36, 37, 38],
+      "cha4": [8, 11, 17, 25]
+    }
+  }
+}

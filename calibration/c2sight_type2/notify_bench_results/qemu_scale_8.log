@@ -1,0 +1,9 @@
+CXL Type2: GPU mode = 0 (NONE=0, VFIO=1, HETGPU=2, AUTO=3)
+CXL Type2: GPU mode = 0 (NONE=0, VFIO=1, HETGPU=2, AUTO=3)
+CXL Type2: GPU mode = 0 (NONE=0, VFIO=1, HETGPU=2, AUTO=3)
+CXL Type2: GPU mode = 0 (NONE=0, VFIO=1, HETGPU=2, AUTO=3)
+CXL Type2: GPU mode = 0 (NONE=0, VFIO=1, HETGPU=2, AUTO=3)
+CXL Type2: GPU mode = 0 (NONE=0, VFIO=1, HETGPU=2, AUTO=3)
+CXL Type2: GPU mode = 0 (NONE=0, VFIO=1, HETGPU=2, AUTO=3)
+CXL Type2: GPU mode = 0 (NONE=0, VFIO=1, HETGPU=2, AUTO=3)
+qemu-system-x86_64: GLib: g_timer_elapsed: assertion 'timer != NULL' failed

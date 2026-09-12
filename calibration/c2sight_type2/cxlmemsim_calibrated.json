@@ -1,0 +1,106 @@
+{
+  "schema": "cxlmemsim.c2sight_type2_calibration.v1",
+  "source_paper": "/root/Splash/paper.pdf (C2 Sight, SPR + Agilex CXL Type-2 testbed)",
+  "source_measurements": "paper_measurements.json",
+  "notes": "Every parameter carries provenance: paper (reported), derived (inferred from reported stage costs, derivation given), or cxlmemsim_default (kept at CXLMemSim default because the paper does not constrain it). Parameters the current CXLMemSim code cannot express are listed in gaps.",
+
+  "legacy_cli": {
+    "description": "Application-level CXLMemSim invocation reproducing the paper's SPR+Type-2 platform. Vectors are (read,write) pairs per expander in topology order (see src/main.cc capacity/latency/bandwidth expansion).",
+    "argv": [
+      "-d", "103",
+      "-f", "4000",
+      "-o", "(1)",
+      "-q", "256,32",
+      "-l", "220,250",
+      "-b", "51,51",
+      "--mlc-bandwidth", "51,51,46,0.80",
+      "--bandwidth-window-ns", "100000"
+    ],
+    "parameters": {
+      "dramlatency_ns": {"value": 103, "provenance": "paper",
+        "source": "host_rails.dram_local_latency_ns (Section 4.1)"},
+      "frequency_mhz": {"value": 4000, "provenance": "paper",
+        "source": "cores pinned 4.0 GHz (Section 4.1)"},
+      "topology": {"value": "(1)", "provenance": "paper",
+        "source": "single CXL endpoint = the Type-2 device's HDM (paper testbed has one device). Topology numbers are 1-indexed expanders from the capacity vector (src/cxlcontroller.cpp construct_topo); the root CPU/socket is implicit. Two-endpoint variant for Path3/4-style experiments: -o (1,2) -q 256,32,256 -l 220,250,165,190 -b 51,51,96,96 with expander 2 = remote-socket DRAM at the InterC rails (165 ns / 96 GB/s)."},
+      "capacity_gb": {"value": [256, 32], "provenance": "cxlmemsim_default",
+        "source": "local DRAM + HDM sizes are not reported in the paper; 32GB matches a typical Agilex dev-platform HDM. Adjust -q to the actual boards."},
+      "expander_read_write_latency_ns": {"value": [220, 250], "provenance": "derived",
+        "derivation": "host->HDM is not directly reported. Sum of reported stage costs for the LS->HDM path: host issue 25 + TORPipe 22 + CXL crossing 45 + device DMC/media ~80 + return CXL 45 ~= 217ns, rounded to 220. Write adds one HDM media write (~30ns, HMCFill-class) -> 250. Replace with Figure 13a LS->HDM / RS->HDM readouts when digitized.",
+        "refine_from": "Figure 13(a) RS->HDM and LS->HDM curves"},
+      "expander_read_write_bandwidth_gbps": {"value": [51, 51], "provenance": "paper",
+        "source": "device_op_bandwidths.rdcurr_nonalloc_near_gbps: 51.0 GB/s = 99% of the CXL flit rate, the link/engine ceiling both directions (PCIe 5.0 x16). Per-direction link cap, applied symmetrically to read and write."},
+      "mlc_bandwidth_read_write_mixed": {"value": [51, 51, 46], "provenance": "derived",
+        "derivation": "read/write = reported 51 GB/s link ceiling. Mixed = 51 * 0.9 (heuristic 10% turn penalty); the paper does not report a mixed read/write device figure."},
+      "bandwidth_knee": {"value": 0.80, "provenance": "cxlmemsim_default",
+        "source": "not reported; CXLMemSim default. The paper's saturation knee (Figure 7d) is ~59/137 = 0.43 of the host-DRAM path ceiling; use --bandwidth-knee 0.43 when reproducing host-DRAM queueing instead of device paths."},
+      "bandwidth_window_ns": {"value": 100000, "provenance": "cxlmemsim_default"}
+    }
+  },
+
+  "qemu_type2_device": {
+    "description": "cxl-type2 QEMU device properties reproducing the paper's Agilex endpoint. Note: this device is functionally timed only today -- see gaps.latency_fields_dead.",
+    "properties": {
+      "cache-size": {"value": "256K", "provenance": "paper",
+        "source": "device_rails.hmc_capacity_kib: HMC = 256KiB. Default 128M is 512x too large and would hide the HMC-miss/HMCFill regime (Figure 6a knee at 3.5MiB/core)."},
+      "mem-size": {"value": "32G", "provenance": "cxlmemsim_default",
+        "source": "HDM capacity not reported; matches Agilex dev-platform DIMMs. Adjust to the actual board."},
+      "coherency-enabled": {"value": true, "provenance": "paper",
+        "source": "CXL.cache is the paper's whole subject"},
+      "gfam-latency-ns": {"value": 170, "provenance": "derived",
+        "derivation": "GFAM fabric access ~ CXL crossing 45ns (stage_costs.cxl_cross_ns) + completion incl. media update 125ns (stage_costs.comp_device_ns) = 170ns. Close to the observed device-side HDM/Comp path; device-observed end-to-end rails (406-855ns) additionally include the 200ns HMC prefix and host-side work, which this property must not double-count."},
+      "gfam-bandwidth-mbps": {"value": 52224, "provenance": "paper",
+        "source": "51 GB/s link ceiling (device_op_bandwidths.rdcurr_nonalloc_near_gbps); property unit is MiB/s (default 32768 = 32 GiB/s), so 51 GB/s = 52224."},
+      "mhsld-coh-latency-ns": {"value": 112, "provenance": "derived",
+        "derivation": "H2D snoop round trip ~ CXL crossing 45 + holder snoop 22 + CXL crossing 45 = 112ns, from stage_costs. Same order as the reported RSF stale-snoop premium (79ns on the critical path)."},
+      "x-speed": {"value": 32, "provenance": "paper",
+        "source": "paper platform is PCIe 5.0 / CXL 2.0 (32 GT/s); 51 GB/s = 80% of x16 raw 64 GB/s, consistent with '99% of the CXL flit rate'"},
+      "x-width": {"value": 16, "provenance": "paper",
+        "source": "PCIe x16 link; 51 GB/s saturating device engines implies x16"},
+      "x-256b-flit": {"value": false, "provenance": "paper",
+        "source": "CXL 2.0 uses 68B flits; 256B flits are a CXL 3.0 feature the paper's R-Tile platform does not use"},
+      "hdm-db": {"value": false, "provenance": "paper",
+        "source": "the paper's HDM maintains no device-side directory (Section 2.1: 'HDM maintains no coherence directory; all coherence decisions are handled by the host'); the model additionally requires hdm-db=false when x-256b-flit=off"},
+      "dcd": {"value": false, "provenance": "cxlmemsim_default",
+        "source": "paper platform is a fixed-capacity Type-2, not DCD"},
+      "gfam": {"value": false, "provenance": "cxlmemsim_default",
+        "source": "GFAM/multi-host fabric is off for a single-host Type-2 endpoint; gfam-latency-ns / gfam-bandwidth-mbps are only consumed when gfam=true. The calibrated values are ready if you enable it."},
+      "mhsld": {"value": false, "provenance": "cxlmemsim_default",
+        "source": "same: multi-head switch offload is off for a single-host endpoint"}
+    }
+  },
+
+  "server_cli": {
+    "description": "cxlmemsim_server for the Type-3/DCD path when the Type-2 device fronts a memory pool (README server flags).",
+    "argv": [
+      "--default_latency=220",
+      "--gfam-fabric-latency=170",
+      "--gfam-bandwidth=51"
+    ],
+    "parameters": {
+      "default_latency_ns": {"value": 220, "provenance": "derived",
+        "source": "same derivation as legacy expander_read_write_latency_ns read value"},
+      "gfam_fabric_latency_ns": {"value": 170, "provenance": "derived",
+        "source": "same derivation as qemu_type2_device.gfam-latency-ns"},
+      "gfam_bandwidth_gbps": {"value": 51, "provenance": "paper"}
+    }
+  },
+
+  "coherency_event_costs_ns": {
+    "description": "Stage costs for interpreting/extending the coherency engine; the current engine charges per-message latency, not per-stage. Use these when wiring cxl_type2_coherency.c message costs or coherency_engine.cpp calculate_coherency_msg_latency.",
+    "snoop_h2d_round_trip": {"value": 112, "provenance": "derived", "derivation": "45 + 22 + 45 (CXL cross, holder snoop, CXL cross)"},
+    "hmc_fill": {"value": 30, "provenance": "paper"},
+    "device_completion": {"value": 125, "provenance": "paper"},
+    "hmc_alloc_backpressure_period": {"value": 7.9, "provenance": "paper",
+      "note": "RdShared ceiling 8.16 GB/s = one HMC install per 7.9ns; the single most important Type-2 behavior: allocating reads are 6.2x slower than non-allocating (51 -> 8.16 GB/s)"},
+    "stale_entry_snoop": {"value": 79, "provenance": "paper"},
+    "first_touch_install": {"value": 75, "provenance": "paper"}
+  },
+
+  "gaps": {
+    "latency_fields_wired_2026_09_11": "RESOLVED: latency_enabled/read_latency_ns/write_latency_ns/coherency_latency_ns are now QEMU properties (latency-enabled, read-latency-ns, write-latency-ns, coherency-latency-ns) plus a new bandwidth-gbps cap, consumed by the coherent read/write paths as device-side modeled-time accounting (hit 120ns / miss +112ns fill / write 250ns). Verified by qtest_notify_smoke.py; the functional qtest suite passes unchanged with latency-enabled off. See README.md 'Timing model patch'.",
+    "alloc_vs_nonalloc_resolved_2026_09_12": "RESOLVED: hmc-install-ns property (default 8ns, paper 7.9) charges one install per device-cache fill, and allocate-on-miss=false models the non-allocating (RdCurr) class. Verified exactly by qtest_notify_smoke.py (install 1/fill, 240=232+8 total; non-allocating: 0 installs, repeated accesses still miss) and streamed by qtest_dcoh_bench.py (installs == misses; fill ceiling 64B/8ns = 8.0 GB/s vs 51 GB/s link = 6.4x, the paper's 6.2x structure).",
+    "cha_side_modeling": "CXLMemSim's fabric model has no CHA/TOR/SF/HitMe/RSF equivalent; per-CHA saturation (2.7 vs 12.46 GB/s) and RSF capacity (16MiB, 665->39.5 GB/s cliff) need switch_runtime/expander-side models if those experiments are to be reproduced. The numbers are in paper_measurements.json ready to be wired.",
+    "host_hdm_latency_not_reported": "Figure 13(a) reports LS->HDM and RS->HDM latency/BW curves but the values are not in the text layer. The 220/250ns derived values should be replaced by digitized readouts. The real-host notification bench (Splash/bench/cxl_notify_bench) measured CXL roundtrip 647ns/notification unbatched on this Threadripper+Montage node as an additional anchor."
+  }
+}

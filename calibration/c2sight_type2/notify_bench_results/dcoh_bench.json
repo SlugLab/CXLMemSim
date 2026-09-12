@@ -1,0 +1,118 @@
+{
+  "schema": "c2sight.dcoh_bench.v1",
+  "hmc_install_ns": 8,
+  "bandwidth_gbps": 51,
+  "rounds": 2,
+  "rows": [
+    {
+      "allocate": true,
+      "working_set": 65536,
+      "cache_bytes": 262144,
+      "lines": 1024,
+      "per_line_ns": 180.0,
+      "misses": 1024,
+      "per_miss_ns": 232.0,
+      "installs": 1024,
+      "implied_fill_gbps": 0.35555555555555557
+    },
+    {
+      "allocate": true,
+      "working_set": 262144,
+      "cache_bytes": 262144,
+      "lines": 4096,
+      "per_line_ns": 165.0,
+      "misses": 3072,
+      "per_miss_ns": 232.0,
+      "installs": 3072,
+      "implied_fill_gbps": 0.3878787878787879
+    },
+    {
+      "allocate": true,
+      "working_set": 1048576,
+      "cache_bytes": 262144,
+      "lines": 16384,
+      "per_line_ns": 165.0,
+      "misses": 12288,
+      "per_miss_ns": 232.0,
+      "installs": 12288,
+      "implied_fill_gbps": 0.3878787878787879
+    },
+    {
+      "allocate": true,
+      "working_set": 4194304,
+      "cache_bytes": 262144,
+      "lines": 65536,
+      "per_line_ns": 165.0,
+      "misses": 49152,
+      "per_miss_ns": 232.0,
+      "installs": 49152,
+      "implied_fill_gbps": 0.3878787878787879
+    },
+    {
+      "allocate": true,
+      "working_set": 16777216,
+      "cache_bytes": 262144,
+      "lines": 262144,
+      "per_line_ns": 165.0,
+      "misses": 196608,
+      "per_miss_ns": 232.0,
+      "installs": 196608,
+      "implied_fill_gbps": 0.3878787878787879
+    },
+    {
+      "allocate": false,
+      "working_set": 65536,
+      "cache_bytes": 262144,
+      "lines": 1024,
+      "per_line_ns": 232.0,
+      "misses": 2048,
+      "per_miss_ns": 232.0,
+      "installs": 0,
+      "implied_fill_gbps": 0.27586206896551724
+    },
+    {
+      "allocate": false,
+      "working_set": 262144,
+      "cache_bytes": 262144,
+      "lines": 4096,
+      "per_line_ns": 232.0,
+      "misses": 8192,
+      "per_miss_ns": 232.0,
+      "installs": 0,
+      "implied_fill_gbps": 0.27586206896551724
+    },
+    {
+      "allocate": false,
+      "working_set": 1048576,
+      "cache_bytes": 262144,
+      "lines": 16384,
+      "per_line_ns": 232.0,
+      "misses": 32768,
+      "per_miss_ns": 232.0,
+      "installs": 0,
+      "implied_fill_gbps": 0.27586206896551724
+    },
+    {
+      "allocate": false,
+      "working_set": 4194304,
+      "cache_bytes": 262144,
+      "lines": 65536,
+      "per_line_ns": 232.0,
+      "misses": 131072,
+      "per_miss_ns": 232.0,
+      "installs": 0,
+      "implied_fill_gbps": 0.27586206896551724
+    },
+    {
+      "allocate": false,
+      "working_set": 16777216,
+      "cache_bytes": 262144,
+      "lines": 262144,
+      "per_line_ns": 232.0,
+      "misses": 524288,
+      "per_miss_ns": 232.0,
+      "installs": 0,
+      "implied_fill_gbps": 0.27586206896551724
+    }
+  ]
+}

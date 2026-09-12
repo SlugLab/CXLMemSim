@@ -1,0 +1,276 @@
+{
+  "schema": "c2sight.notify_bench.v1",
+  "device_config": "cxl-type2,bus=rp,addr=0,id=t2,sn=201,gpu-mode=0,cache-size=256K,mem-size=256M,latency-enabled=true,read-latency-ns=120,write-latency-ns=250,coherency-latency-ns=112,bandwidth-gbps=51,cxlmemsim-port={port}",
+  "rails": {
+    "hit_ns": 120,
+    "miss_ns": 232,
+    "write_ns": 250
+  },
+  "paper_rails": {
+    "hit_ns": 120,
+    "miss_ns": 232,
+    "write_ns": 250,
+    "coherency_ns": 112,
+    "bandwidth_gbps": 51
+  },
+  "count": 262144,
+  "batches": [
+    1,
+    2,
+    4,
+    8,
+    16,
+    32,
+    64,
+    128,
+    256,
+    512,
+    1024
+  ],
+  "runs": [
+    {
+      "count": 262144,
+      "batch": 1,
+      "payload": 64,
+      "modeled_total_ns": 95158272,
+      "modeled_per_notify_ns": 363,
+      "batches": 262144,
+      "modeled_stream_gbps": 0.1763085399449036,
+      "wall_ns": 8734625,
+      "repeat": 0
+    },
+    {
+      "count": 262144,
+      "batch": 2,
+      "payload": 64,
+      "modeled_total_ns": 80478208,
+      "modeled_per_notify_ns": 307,
+      "batches": 131072,
+      "modeled_stream_gbps": 0.20846905537459284,
+      "wall_ns": 993579,
+      "repeat": 0
+    },
+    {
+      "count": 262144,
+      "batch": 4,
+      "payload": 64,
+      "modeled_total_ns": 73138176,
+      "modeled_per_notify_ns": 279,
+      "batches": 65536,
+      "modeled_stream_gbps": 0.22939068100358423,
+      "wall_ns": 639381,
+      "repeat": 0
+    },
+    {
+      "count": 262144,
+      "batch": 8,
+      "payload": 64,
+      "modeled_total_ns": 69468160,
+      "modeled_per_notify_ns": 265,
+      "batches": 32768,
+      "modeled_stream_gbps": 0.24150943396226415,
+      "wall_ns": 523906,
+      "repeat": 0
+    },
+    {
+      "count": 262144,
+      "batch": 16,
+      "payload": 64,
+      "modeled_total_ns": 67633152,
+      "modeled_per_notify_ns": 258,
+      "batches": 16384,
+      "modeled_stream_gbps": 0.24806201550387597,
+      "wall_ns": 476924,
+      "repeat": 0
+    },
+    {
+      "count": 262144,
+      "batch": 32,
+      "payload": 64,
+      "modeled_total_ns": 66715648,
+      "modeled_per_notify_ns": 254,
+      "batches": 8192,
+      "modeled_stream_gbps": 0.25147347740667975,
+      "wall_ns": 498077,
+      "repeat": 0
+    },
+    {
+      "count": 262144,
+      "batch": 64,
+      "payload": 64,
+      "modeled_total_ns": 66256896,
+      "modeled_per_notify_ns": 252,
+      "batches": 4096,
+      "modeled_stream_gbps": 0.2532146389713155,
+      "wall_ns": 485708,
+      "repeat": 0
+    },
+    {
+      "count": 262144,
+      "batch": 128,
+      "payload": 64,
+      "modeled_total_ns": 66027520,
+      "modeled_per_notify_ns": 251,
+      "batches": 2048,
+      "modeled_stream_gbps": 0.2540942928039702,
+      "wall_ns": 492568,
+      "repeat": 0
+    },
+    {
+      "count": 262144,
+      "batch": 256,
+      "payload": 64,
+      "modeled_total_ns": 65912832,
+      "modeled_per_notify_ns": 251,
+      "batches": 1024,
+      "modeled_stream_gbps": 0.2545364156102411,
+      "wall_ns": 469443,
+      "repeat": 0
+    },
+    {
+      "count": 262144,
+      "batch": 512,
+      "payload": 64,
+      "modeled_total_ns": 65855488,
+      "modeled_per_notify_ns": 251,
+      "batches": 512,
+      "modeled_stream_gbps": 0.2547580544843886,
+      "wall_ns": 473219,
+      "repeat": 0
+    },
+    {
+      "count": 262144,
+      "batch": 1024,
+      "payload": 64,
+      "modeled_total_ns": 65826816,
+      "modeled_per_notify_ns": 251,
+      "batches": 256,
+      "modeled_stream_gbps": 0.25486901872938833,
+      "wall_ns": 462953,
+      "repeat": 0
+    }
+  ],
+  "summary": {
+    "1": {
+      "count": 262144,
+      "batch": 1,
+      "payload": 64,
+      "modeled_total_ns": 95158272,
+      "modeled_per_notify_ns": 363,
+      "batches": 262144,
+      "modeled_stream_gbps": 0.1763085399449036,
+      "wall_ns": 8734625,
+      "repeat": 0
+    },
+    "2": {
+      "count": 262144,
+      "batch": 2,
+      "payload": 64,
+      "modeled_total_ns": 80478208,
+      "modeled_per_notify_ns": 307,
+      "batches": 131072,
+      "modeled_stream_gbps": 0.20846905537459284,
+      "wall_ns": 993579,
+      "repeat": 0
+    },
+    "4": {
+      "count": 262144,
+      "batch": 4,
+      "payload": 64,
+      "modeled_total_ns": 73138176,
+      "modeled_per_notify_ns": 279,
+      "batches": 65536,
+      "modeled_stream_gbps": 0.22939068100358423,
+      "wall_ns": 639381,
+      "repeat": 0
+    },
+    "8": {
+      "count": 262144,
+      "batch": 8,
+      "payload": 64,
+      "modeled_total_ns": 69468160,
+      "modeled_per_notify_ns": 265,
+      "batches": 32768,
+      "modeled_stream_gbps": 0.24150943396226415,
+      "wall_ns": 523906,
+      "repeat": 0
+    },
+    "16": {
+      "count": 262144,
+      "batch": 16,
+      "payload": 64,
+      "modeled_total_ns": 67633152,
+      "modeled_per_notify_ns": 258,
+      "batches": 16384,
+      "modeled_stream_gbps": 0.24806201550387597,
+      "wall_ns": 476924,
+      "repeat": 0
+    },
+    "32": {
+      "count": 262144,
+      "batch": 32,
+      "payload": 64,
+      "modeled_total_ns": 66715648,
+      "modeled_per_notify_ns": 254,
+      "batches": 8192,
+      "modeled_stream_gbps": 0.25147347740667975,
+      "wall_ns": 498077,
+      "repeat": 0
+    },
+    "64": {
+      "count": 262144,
+      "batch": 64,
+      "payload": 64,
+      "modeled_total_ns": 66256896,
+      "modeled_per_notify_ns": 252,
+      "batches": 4096,
+      "modeled_stream_gbps": 0.2532146389713155,
+      "wall_ns": 485708,
+      "repeat": 0
+    },
+    "128": {
+      "count": 262144,
+      "batch": 128,
+      "payload": 64,
+      "modeled_total_ns": 66027520,
+      "modeled_per_notify_ns": 251,
+      "batches": 2048,
+      "modeled_stream_gbps": 0.2540942928039702,
+      "wall_ns": 492568,
+      "repeat": 0
+    },
+    "256": {
+      "count": 262144,
+      "batch": 256,
+      "payload": 64,
+      "modeled_total_ns": 65912832,
+      "modeled_per_notify_ns": 251,
+      "batches": 1024,
+      "modeled_stream_gbps": 0.2545364156102411,
+      "wall_ns": 469443,
+      "repeat": 0
+    },
+    "512": {
+      "count": 262144,
+      "batch": 512,
+      "payload": 64,
+      "modeled_total_ns": 65855488,
+      "modeled_per_notify_ns": 251,
+      "batches": 512,
+      "modeled_stream_gbps": 0.2547580544843886,
+      "wall_ns": 473219,
+      "repeat": 0
+    },
+    "1024": {
+      "count": 262144,
+      "batch": 1024,
+      "payload": 64,
+      "modeled_total_ns": 65826816,
+      "modeled_per_notify_ns": 251,
+      "batches": 256,
+      "modeled_stream_gbps": 0.25486901872938833,
+      "wall_ns": 462953,
+      "repeat": 0
+    }
+  }
+}

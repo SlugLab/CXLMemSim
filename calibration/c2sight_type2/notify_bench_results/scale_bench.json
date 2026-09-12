@@ -1,0 +1,57 @@
+{
+  "schema": "c2sight.scale_bench.v1",
+  "rows": [
+    {
+      "devices": 1,
+      "experiment": "notify",
+      "per_device_ns": 16564224,
+      "agg_modeled_gbps": 0.2532146389713155,
+      "scaling_efficiency": 1.0008483753806938,
+      "driver_wall_ns": 2383439
+    },
+    {
+      "devices": 1,
+      "experiment": "share",
+      "per_device_ns": 371.46875,
+      "agg_modeled_gbps": 11.026499537309666,
+      "scaling_efficiency": 1.0,
+      "driver_wall_ns": 56158906
+    },
+    {
+      "devices": 4,
+      "experiment": "notify",
+      "per_device_ns": 16564224,
+      "agg_modeled_gbps": 1.012858555885262,
+      "scaling_efficiency": 1.0008483753806938,
+      "driver_wall_ns": 9406275
+    },
+    {
+      "devices": 4,
+      "experiment": "share",
+      "per_device_ns": 371.46875,
+      "agg_modeled_gbps": 44.105998149238665,
+      "scaling_efficiency": 1.0,
+      "driver_wall_ns": 221737221
+    },
+    {
+      "devices": 32,
+      "experiment": "notify",
+      "per_device_ns": 16564224,
+      "agg_modeled_gbps": 8.102868447082097,
+      "scaling_efficiency": 1.0008483753806938,
+      "driver_wall_ns": 85850937
+    },
+    {
+      "devices": 32,
+      "experiment": "share",
+      "per_device_ns": 371.46875,
+      "agg_modeled_gbps": 352.8479851939093,
+      "scaling_efficiency": 1.0,
+      "driver_wall_ns": 1968564115
+    }
+  ],
+  "notify_batch": 64,
+  "notify_count": 65536,
+  "updates": 256,
+  "object_bytes": 4096
+}
