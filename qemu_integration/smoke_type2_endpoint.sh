@@ -81,6 +81,7 @@ env CXL_TRANSPORT_MODE=tcp \
         -smp 1 \
         -nodefaults \
         -display none \
+        -d guest_errors \
         -serial none \
         -monitor none \
         -S \
