@@ -152,7 +152,10 @@ add_executable(test_dax_litmus_sb test_dax_litmus_sb.c)
 target_compile_options(test_dax_litmus_sb PRIVATE -std=gnu11)
 
 add_executable(test_dax_litmus_atomic test_dax_litmus_atomic.c)
-target_compile_options(test_dax_litmus_atomic PRIVATE -std=gnu11)
+target_compile_options(test_dax_litmus_atomic PRIVATE
+    -std=gnu11
+    -include ${CMAKE_SOURCE_DIR}/include/cxl_type3_atomic_compat.h)
+target_link_libraries(test_dax_litmus_atomic cxlmemsim_type3_atomic)
 
 add_executable(test_dax_litmus_tearing test_dax_litmus_tearing.c)
 target_compile_options(test_dax_litmus_tearing PRIVATE -std=gnu11)

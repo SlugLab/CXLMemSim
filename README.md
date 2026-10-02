@@ -96,6 +96,99 @@ Supported request classes include:
 - opt-in test controls that identify, fence, and unfence TCP client
   incarnations for deterministic fail-stop injection.
 
+### Explicit Type 3 Atomics
+
+The QEMU Type 3 device exposes an experimental 4 KiB command BAR (PCI BAR 5)
+for server-serialized 64-bit fetch-and-add, compare-and-swap, and fence
+requests.  The BAR is enabled by default and can be controlled with the QEMU
+device property `memsim-atomics=on|off`.
+
+This interface is explicit by design.  A guest
+`atomic_fetch_add_explicit()` on `/dev/dax` still appears to QEMU as ordinary
+memory reads and writes.  In particular, a KVM MMIO exit does not carry enough
+instruction semantics for QEMU to recover that the accesses came from
+`LOCK XADD` or `CMPXCHG`.  TCG also cannot make an atomic read/write sequence
+indivisible across two independent QEMU processes.  Workloads that require
+both correct cross-VM serialization and an `OP_ATOMIC_*` operation count must
+therefore use the command BAR, either through its API or the compile-time C11
+compatibility layer below.
+
+The guest helper is built as `libcxlmemsim_type3_atomic.a` and installed with
+`cxl_type3_atomic.h`.  It accepts device-relative DPA byte offsets:
+
+```c
+#include <cxlmemsim/cxl_type3_atomic.h>
+
+cxl_type3_atomic_t *atomic;
+uint64_t old_value;
+
+if (cxl_type3_atomic_open_auto(&atomic) != 0)
+    return 1;
+if (cxl_type3_atomic_fetch_add_u64(atomic, counter_dpa, 1,
+                                   &old_value) != 0)
+    return 1;
+cxl_type3_atomic_close(atomic);
+```
+
+Existing C source can keep an ordinary 64-bit
+`atomic_fetch_add_explicit()` expression.  Force-include the compatibility
+header and link the helper library:
+
+```bash
+cc app.c \
+  -include cxlmemsim/cxl_type3_atomic_compat.h \
+  -lcxlmemsim_type3_atomic \
+  -o app
+```
+
+The wrapper evaluates the original arguments once.  At runtime it looks up the
+object in `/proc/self/maps`.  A pointer in `/dev/dax*` is translated as:
+
+```text
+DPA = CXL_TYPE3_ATOMIC_DPA_BASE + mapping file offset
+      + (object address - mapping start)
+```
+
+It then lazily discovers BAR5 and sends `OP_ATOMIC_FAA`.  A pointer outside a
+DAX mapping retains the native compiler-atomic implementation.  Failure to
+open or execute the command for a DAX pointer terminates the program instead
+of silently performing a non-atomic fallback.  `CXL_TYPE3_ATOMIC_DPA_BASE`
+defaults to zero.
+
+This is source-compatible translation, not KVM instruction decoding: the
+application must be recompiled with the compatibility header.  The current
+wrapper supports GNU C/Clang C and 64-bit `atomic_fetch_add_explicit()`;
+C++, other atomic widths, and other RMW operations still use the direct API or
+need corresponding wrappers.
+
+Automatic discovery looks for QEMU's Intel `8086:0d93` Type 3 device.  A
+specific device can be selected with `CXL_TYPE3_ATOMIC_BDF=0000:xx:yy.z`, or
+the BAR can be selected directly with:
+
+```bash
+export CXL_TYPE3_ATOMIC_RESOURCE=/sys/bus/pci/devices/0000:xx:yy.z/resource5
+```
+
+The updated `test_dax_litmus_atomic` benchmark contains an ordinary C11
+`atomic_fetch_add_explicit()` and is compiled with this compatibility layer.
+For a Type 3 device whose DAX mapping starts at device DPA zero, run the same
+command in both guests with roles `A` and `B`:
+
+```bash
+sudo CXL_TYPE3_ATOMIC_RESOURCE=/sys/bus/pci/devices/0000:xx:yy.z/resource5 \
+  ./test_dax_litmus_atomic A /dev/dax0.0 100000 0
+```
+
+Both QEMU instances must connect to the same CXLMemSim server/pool.  The
+server then receives one `OP_ATOMIC_FAA` per helper call and serializes the
+operation with its per-cacheline metadata lock.  BAR register programming is
+also serialized between guest processes with an advisory lock on `resource5`.
+If the DAX range does not begin at server DPA zero, set
+`CXL_TYPE3_ATOMIC_DPA_BASE` for automatic translation, or translate the offset
+before calling the direct API.  The atomic command path currently supports TCP
+and PGAS-SHM; the legacy RDMA request ABI does not carry the required `value`
+and `expected` operands and is rejected.
+
 Enable the test-only fencing controls with `--enable-fault-injection`. A
 fenced client keeps its TCP connection but receives status `0xfe` for data,
 atomic, and switch requests, which lets a recovery harness prove that the old

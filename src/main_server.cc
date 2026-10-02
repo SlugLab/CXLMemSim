@@ -3234,6 +3234,7 @@ int ThreadPerConnectionServer::poll_pgas_shm_requests() {
             if (slot->addr + sizeof(uint64_t) <= num_cachelines * 64) {
                 uint64_t *ptr = (uint64_t *)(entry->data + (addr % 64));
                 uint64_t old = __atomic_fetch_add(ptr, slot->value, __ATOMIC_SEQ_CST);
+                slot->value = old;
                 memcpy((void *)slot->data, &old, sizeof(old));
 
                 entry->metadata.access_count++;

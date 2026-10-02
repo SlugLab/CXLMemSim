@@ -3,7 +3,12 @@
 #include "dax_litmus_common.h"
 
 static void usage(const char *argv0) {
-    fprintf(stderr, "Usage: %s <role:A|B> <path:/dev/daxX.Y|shm> [adds] [offset_bytes]\n", argv0);
+    fprintf(stderr,
+            "Usage: %s <role:A|B> <path:/dev/daxX.Y|shm> [adds] "
+            "[offset_bytes] [atomic_resource]\n"
+            "  atomic_resource selects the Type-3 PCI resource5 used by the "
+            "automatic C11 atomic compatibility layer.\n",
+            argv0);
 }
 
 int main(int argc, char **argv) {
@@ -15,6 +20,12 @@ int main(int argc, char **argv) {
     const char *path = argv[2];
     uint64_t adds = (argc > 3) ? strtoull(argv[3], NULL, 0) : 1000000ULL;
     size_t offset = (argc > 4) ? strtoull(argv[4], NULL, 0) : 0ULL;
+    const char *atomic_resource = (argc > 5) ? argv[5] : getenv("CXL_TYPE3_ATOMIC_RESOURCE");
+
+    if (argc > 5 && setenv("CXL_TYPE3_ATOMIC_RESOURCE", atomic_resource, 1) != 0) {
+        perror("setenv CXL_TYPE3_ATOMIC_RESOURCE");
+        return 2;
+    }
 
     size_t size = 4 * 1024 * 1024;
     map_handle_t mh;
@@ -29,19 +40,23 @@ int main(int argc, char **argv) {
     if (role == ROLE_A) {
         atomic_store_explicit(&ctrl->counter, 0, memory_order_relaxed);
         atomic_store_explicit(&ctrl->ready_a, 1, memory_order_release);
-        while (atomic_load_explicit(&ctrl->ready_b, memory_order_acquire) == 0) busy_pause();
+        while (atomic_load_explicit(&ctrl->ready_b, memory_order_acquire) == 0)
+            busy_pause();
         atomic_store_explicit(&ctrl->magic, 0xA71A71A7u, memory_order_release);
     } else {
         atomic_store_explicit(&ctrl->ready_b, 1, memory_order_release);
-        while (atomic_load_explicit(&ctrl->ready_a, memory_order_acquire) == 0) busy_pause();
-        while (atomic_load_explicit(&ctrl->magic, memory_order_acquire) != 0xA71A71A7u) busy_pause();
+        while (atomic_load_explicit(&ctrl->ready_a, memory_order_acquire) == 0)
+            busy_pause();
+        while (atomic_load_explicit(&ctrl->magic, memory_order_acquire) != 0xA71A71A7u)
+            busy_pause();
     }
 
     // Start signal
     if (role == ROLE_A) {
         atomic_store_explicit(&ctrl->seq, 1, memory_order_release);
     } else {
-        while (atomic_load_explicit(&ctrl->seq, memory_order_acquire) != 1) busy_pause();
+        while (atomic_load_explicit(&ctrl->seq, memory_order_acquire) != 1)
+            busy_pause();
     }
 
     // RMW loop
@@ -52,17 +67,20 @@ int main(int argc, char **argv) {
     // Signal done
     if (role == ROLE_A) {
         atomic_store_explicit(&ctrl->flag, 1, memory_order_release);
-        while (atomic_load_explicit(&ctrl->ready_b, memory_order_acquire) != 2) busy_pause();
-        uint64_t v = atomic_load_explicit(&ctrl->counter, memory_order_acquire);
-        printf("[ATOMIC] final=%" PRIu64 " expected=%" PRIu64 "\n", v, adds * 2ULL);
-        return (v == adds * 2ULL) ? 0 : 5;
+        while (atomic_load_explicit(&ctrl->ready_b, memory_order_acquire) != 2)
+            busy_pause();
+        uint64_t v = atomic_fetch_add_explicit(&ctrl->counter, 0, memory_order_acquire);
+        printf("[ATOMIC] final=%" PRIu64 " expected=%" PRIu64 "\n", v, (uint64_t)(adds * 2ULL));
+        int result = (v == adds * 2ULL) ? 0 : 5;
+        unmap_region(&mh);
+        return result;
     } else {
         // reuse ready_b as done flag to keep ctrl compact
         atomic_store_explicit(&ctrl->ready_b, 2, memory_order_release);
-        while (atomic_load_explicit(&ctrl->flag, memory_order_acquire) != 1) busy_pause();
+        while (atomic_load_explicit(&ctrl->flag, memory_order_acquire) != 1)
+            busy_pause();
     }
 
     unmap_region(&mh);
     return 0;
 }
-

@@ -39,7 +39,7 @@ exec "$QEMU_BINARY" \
     -device virtio-9p-pci,id=fs0,fsdev=fsdev0,mount_tag=hostrepo,bus=pcie.0 \
     -device pxb-cxl,bus_nr=12,bus=pcie.0,id=cxl.1 \
     -device cxl-rp,port=0,bus=cxl.1,id=root_port13,chassis=0,slot=0 \
-    -device cxl-type3,bus=root_port13,persistent-memdev=cxl-mem1,lsa=cxl-lsa1,id=cxl-pmem0,sn=0x1 \
+    -device cxl-type3,bus=root_port13,persistent-memdev=cxl-mem1,lsa=cxl-lsa1,id=cxl-pmem0,sn=0x1,memsim-atomics=on \
     -object memory-backend-file,id=cxl-mem1,share=on,mem-path="$CXL_BACKING",size="$CXL_BACKING_SIZE" \
     -object memory-backend-file,id=cxl-lsa1,share=on,mem-path="$CXL_LSA",size="$CXL_LSA_SIZE" \
     -M cxl-fmw.0.targets.0=cxl.1,cxl-fmw.0.size="$CXL_FMW_SIZE" \

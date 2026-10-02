@@ -29,6 +29,10 @@ add_compile_definitions(SPDLOG_USE_STD_FORMAT)
 # Use header-only spdlog to avoid library mismatch
 add_compile_definitions(SPDLOG_HEADER_ONLY)
 
+# Guest-side helper for explicit Type-3 server atomics through QEMU BAR5.
+add_library(cxlmemsim_type3_atomic STATIC src/cxl_type3_atomic.c)
+target_include_directories(cxlmemsim_type3_atomic PUBLIC include)
+
 if(CXLMEMSIM_BUILD_MICROBENCHMARKS)
     add_subdirectory(microbench)
 endif()
@@ -78,6 +82,14 @@ target_include_directories(cxlmemsim PUBLIC include ${spdlog_INCLUDE_DIR})
 target_link_libraries(cxlmemsim spdlog::spdlog_header_only)
 
 enable_testing()
+
+add_executable(test_cxl_type3_atomic_client tests/test_cxl_type3_atomic_client.cpp)
+target_link_libraries(test_cxl_type3_atomic_client cxlmemsim_type3_atomic pthread)
+add_test(NAME test_cxl_type3_atomic_client COMMAND test_cxl_type3_atomic_client)
+
+add_executable(test_cxl_type3_atomic_compat tests/test_cxl_type3_atomic_compat.c)
+target_link_libraries(test_cxl_type3_atomic_compat cxlmemsim_type3_atomic)
+add_test(NAME test_cxl_type3_atomic_compat COMMAND test_cxl_type3_atomic_compat)
 
 # Build latency calculator
 add_executable(cxlmemsim_latency src/calculateLatency.cc)
@@ -163,5 +175,7 @@ target_link_libraries(test_dax_back_invalidation ${RT_LIB} ${ATOMIC_LIB})
 install(TARGETS cxlmemsim_server
         RUNTIME DESTINATION bin)
 
+install(TARGETS cxlmemsim_type3_atomic ARCHIVE DESTINATION lib)
 install(FILES include/tcp_communication.h include/rdma_communication.h include/dcd_gfam.h
+              include/cxl_type3_atomic.h include/cxl_type3_atomic_compat.h
         DESTINATION include/cxlmemsim)
