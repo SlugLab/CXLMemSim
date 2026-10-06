@@ -2,11 +2,11 @@
 
 Rust OOT 驱动在 `~/zettbridge`，目标内核为 `~/linux`。标准 CXL Type 3 位于 Host A；独立 `zettbridge` 管理 function 位于两端，Host B 的同一 function 负责经 IOMMU 执行 DMA。
 
-驱动源码：[Zettai-US/zettbridge](https://github.com/Zettai-US/zettbridge)，配套提交 `b2d43a6eee74ff6b4e04d46586015d7aed80f8c1`。新环境先将驱动克隆到 `~/zettbridge`，并初始化本分支固定的 QEMU 子模块：
+驱动源码：[Zettai-US/zettbridge](https://github.com/Zettai-US/zettbridge)，配套提交 `88ea30458c6520bc125fcbb752b5b71f7e26d1e7`。新环境先将驱动克隆到 `~/zettbridge`，并初始化本分支固定的 QEMU 子模块：
 
 ```sh
 git clone git@github.com:Zettai-US/zettbridge.git ~/zettbridge
-git -C ~/zettbridge checkout b2d43a6eee74ff6b4e04d46586015d7aed80f8c1
+git -C ~/zettbridge checkout 88ea30458c6520bc125fcbb752b5b71f7e26d1e7
 git submodule update --init lib/qemu
 ```
 
