@@ -2,11 +2,11 @@
 
 Rust OOT 驱动在 `~/zettbridge`，目标内核为 `~/linux`。标准 CXL Type 3 位于 Host A；独立 `zettbridge` 管理 function 位于两端，Host B 的同一 function 负责经 IOMMU 执行 DMA。
 
-驱动源码：[Zettai-US/zettbridge](https://github.com/Zettai-US/zettbridge)，配套提交 `e319c768fe1f9f34362545deff1b46ac4009602a`。新环境先将驱动克隆到 `~/zettbridge`，并初始化本分支固定的 QEMU 子模块：
+驱动源码：[Zettai-US/zettbridge](https://github.com/Zettai-US/zettbridge)，配套提交 `b2d43a6eee74ff6b4e04d46586015d7aed80f8c1`。新环境先将驱动克隆到 `~/zettbridge`，并初始化本分支固定的 QEMU 子模块：
 
 ```sh
 git clone git@github.com:Zettai-US/zettbridge.git ~/zettbridge
-git -C ~/zettbridge checkout e319c768fe1f9f34362545deff1b46ac4009602a
+git -C ~/zettbridge checkout b2d43a6eee74ff6b4e04d46586015d7aed80f8c1
 git submodule update --init lib/qemu
 ```
 
@@ -53,3 +53,14 @@ python3 ~/zettbridge/tools/stop_pair.py /tmp/zettbridge-8g
 驱动使用目标内核的原生 Rust PCI、MiscDevice、Arc/Mutex、工作队列和 DMA 接口；仅为缺失的内核宏/inline 和私有 DAX ABI 保留无状态 C helper，未修改目标内核。
 
 ATS 的启用由 `~/linux` 的 Intel IOMMU 驱动管理，Rust OOT 驱动检查并持续监测；不启用 PASID/PRI/SVA。Host A 的 lease 用量仍每约 200 ms 中继到 Host B，2 秒未更新即失效。新只读诊断位于 `/sys/class/rpu/rpu0/ats_*`，包括 enabled、requests、hits、invalidations、cached_entries、faults 和 transitions。详细说明见 [驱动 ATS 文档](https://github.com/Zettai-US/zettbridge/blob/main/docs/ats.md)。
+
+边界修复包含 Rust VMA 撤销批次隔离、局部撤销期间收到全局 revoke 的二次 zap、幂等故障处理，以及 QEMU 的 ATS notifier 注册失败、发布前复位和 ATTACH 前断连处理。用量过期后显示 unknown，报告恢复后重新有效；peer 丢失时保留隔离资源，ATS 诊断不再把全 1 MMIO 当成 enabled。验证结果及边界见 [驱动边界测试记录](https://github.com/Zettai-US/zettbridge/blob/main/docs/edge-cases.md)。
+
+```sh
+# 13 项硬件模型边界测试
+python3 lib/qemu/tests/qtest/zettbridge-edge-test.py lib/qemu/build/qemu-system-x86_64
+# 新建专用双 VM：4 线程 128 轮 mmap 回收、报告过期/恢复、两端断连隔离
+python3 ~/zettbridge/tools/edge_pair.py --output /tmp/zettbridge-edge-new
+```
+
+边界脚本要求新的输出目录；它只关闭本次创建的测试实例。更新源码和构建不会替换已运行 VM 的模型或驱动，常驻 8 GiB pair 保留原二进制。
