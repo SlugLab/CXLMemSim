@@ -2,11 +2,11 @@
 
 Rust OOT 驱动在 `~/zettbridge`，目标内核为 `~/linux`。标准 CXL Type 3 位于 Host A；独立 `zettbridge` 管理 function 位于两端，Host B 的同一 function 负责经 IOMMU 执行 DMA。
 
-驱动源码：[Zettai-US/zettbridge](https://github.com/Zettai-US/zettbridge)，配套提交 `88ea30458c6520bc125fcbb752b5b71f7e26d1e7`。新环境先将驱动克隆到 `~/zettbridge`，并初始化本分支固定的 QEMU 子模块：
+驱动源码：[Zettai-US/zettbridge](https://github.com/Zettai-US/zettbridge)，配套提交 `a667007c16971fe4542c52eb7f857294529e5fe3`。新环境先将驱动克隆到 `~/zettbridge`，并初始化本分支固定的 QEMU 子模块：
 
 ```sh
 git clone git@github.com:Zettai-US/zettbridge.git ~/zettbridge
-git -C ~/zettbridge checkout 88ea30458c6520bc125fcbb752b5b71f7e26d1e7
+git -C ~/zettbridge checkout a667007c16971fe4542c52eb7f857294529e5fe3
 git submodule update --init lib/qemu
 ```
 
@@ -64,3 +64,18 @@ python3 ~/zettbridge/tools/edge_pair.py --output /tmp/zettbridge-edge-new
 ```
 
 边界脚本要求新的输出目录；它只关闭本次创建的测试实例。更新源码和构建不会替换已运行 VM 的模型或驱动，常驻 8 GiB pair 保留原二进制。
+
+## llama.cpp agent 与直接共享 KV
+
+驱动仓库提供固定版本 llama.cpp/Qwen2.5-0.5B-Instruct Q8_0 的独立测试程序：
+
+```sh
+python3 ~/zettbridge/tools/build_llama_agent.py
+python3 ~/zettbridge/tools/run_llama_agent.py \
+    --model ~/zettbridge/artifacts/llama-models/qwen2.5-0.5b-instruct-q8_0.gguf \
+    --output /tmp/zettbridge-agent-new
+```
+
+它新建两台 VM，在 Host A 完成 `read_order → multiply → final` 三轮生成。共享路径的全部 48 个 K/V tensor、共 3 MiB，从上下文创建到销毁一直使用 Rust consumer 的 lease mmap；每个 CPU attention 工作线程仅使用 256 字节的当前 K/V 行计算暂存。程序比较本地参考与共享路径的全部输出 token 和每步完整 logits 指纹，同时采样 Host B 用量和 ATS，最后检查释放及安全回收。
+
+模型和应用通过 consumer 专用的只读 workload 磁盘加载；共享 KV 仍走 CXL → QEMU 互连 → Host B ATS/DMA。成功打印 `LLAMA AGENT E2E PASS`，输出目录保留 `result.json`、两端日志和二进制校验和。当前是 UC MMIO 功能验收，耗时不能作为物理 CXL 性能指标；实现与验收细节见 [驱动 llama.cpp 文档](https://github.com/Zettai-US/zettbridge/blob/main/docs/llama-agent.md)。
