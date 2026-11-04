@@ -1,14 +1,24 @@
-# Zettai RPU v0.2 双 QEMU
+# Zettai RPU v0.2: Two QEMU Guests
 
-Rust OOT 驱动在 `~/zettbridge`，目标内核为 `~/linux`。标准 CXL Type 3 位于 Host A；独立 `zettbridge` 管理 function 位于两端，Host B 的同一 function 负责经 IOMMU 执行 DMA。
+English | [简体中文](README_zettbridge.zh-CN.md)
 
-驱动源码：[Zettai-US/zettbridge](https://github.com/Zettai-US/zettbridge)，配套提交 `a667007c16971fe4542c52eb7f857294529e5fe3`。新环境先将驱动克隆到 `~/zettbridge`，并初始化本分支固定的 QEMU 子模块：
+The Rust out-of-tree driver lives in `~/zettbridge` and targets the kernel in
+`~/linux`. Host A exposes a standard CXL Type 3 device. Each host also has a
+separate `zettbridge` management function; the Host B function performs DMA
+through its IOMMU.
+
+The driver is in [Zettai-US/zettbridge](https://github.com/Zettai-US/zettbridge).
+This integration pins driver commit `a1071003b899fbdc1a1ac35f9ea6b398daee5a09`
+and QEMU submodule commit `c16508c908fc5761ea158d8386db738978c36390`.
+For a fresh environment:
 
 ```sh
 git clone git@github.com:Zettai-US/zettbridge.git ~/zettbridge
-git -C ~/zettbridge checkout a667007c16971fe4542c52eb7f857294529e5fe3
-git submodule update --init lib/qemu
+git -C ~/zettbridge checkout a1071003b899fbdc1a1ac35f9ea6b398daee5a09
+git -C ~/CXLMemSim submodule update --init lib/qemu
 ```
+
+Build and run the basic pair:
 
 ```sh
 make -C ~/zettbridge KDIR=~/linux LLVM=1
@@ -17,23 +27,28 @@ ninja -C lib/qemu/build qemu-system-x86_64 -j 12
 ./qemu_integration/run_zettbridge_pair.sh --output /tmp/zettbridge-demo
 ```
 
-脚本实际启动两个 VM，用各自的内核、内存和一次性 initramfs 测试 CXL mmap、用量中继及安全回收，不使用现有磁盘镜像。成功打印 `PAIR PASS`，输出目录保留两端日志及启动命令。
+The launcher boots two VMs with separate RAM and temporary initramfs images.
+It tests CXL mmap, usage relay and safe reclamation without the existing disk
+image. Success prints `PAIR PASS`; the output directory retains both guests'
+logs and exact launch commands.
+
+## Failure and lifecycle tests
 
 ```sh
-# ACK 丢失后利用带外查询恢复
+# Recover after a lost ACK by querying the result.
 ./qemu_integration/run_zettbridge_pair.sh --drop-commit-ack --output /tmp/zettbridge-ack
-# 结果无法确认时保留 backing / DMA mapping
+# Keep backing and DMA mappings when the result cannot be determined.
 ./qemu_integration/run_zettbridge_pair.sh --drop-commit-ack --query-unknown \
     --output /tmp/zettbridge-quarantine
-# Rust FD / PCI 解绑 / 模块卸载生命周期
+# Check Rust FD, PCI unbind and module unload lifetime.
 ./qemu_integration/run_zettbridge_pair.sh --lifetime --output /tmp/zettbridge-lifetime
-# 管理 ABI 回归，启动两个 qtest QEMU，不依赖 guest 内核
+# Management ABI regression using two qtest QEMUs; no guest kernel needed.
 python3 lib/qemu/tests/qtest/zettbridge-test.py lib/qemu/build/qemu-system-x86_64
-# ATS 翻译、失效、权限和回收测试
+# ATS translation, invalidation, permissions and reclamation.
 python3 lib/qemu/tests/qtest/zettbridge-ats-test.py lib/qemu/build/qemu-system-x86_64
 ```
 
-扩大到 8 GiB 并保持运行：
+## Larger persistent pair
 
 ```sh
 ./qemu_integration/run_zettbridge_pair.sh --ats on --capacity 8G \
@@ -44,30 +59,95 @@ python3 ~/zettbridge/tools/guest_console.py /tmp/zettbridge-8g consumer \
 python3 ~/zettbridge/tools/stop_pair.py /tmp/zettbridge-8g
 ```
 
-`PAIR RUNNING` 表示全 aperture 分窗采样和持续读写已就绪，两个进程会保持运行。串口及 QMP 使用输出目录里的本地 Unix sockets；没有开放网络端口。正式测试覆盖 256 MiB 和 8 GiB，单个 lease 最大 4 GiB，大池通过多个 lease 使用。
+`PAIR RUNNING` means that windowed sampling over the full aperture and
+continuous reads/writes are ready. Both QEMU processes remain running. Serial
+consoles and QMP use local Unix sockets in the output directory; no network
+port is opened. Validated pool sizes are 256 MiB and 8 GiB. A lease is limited
+to 4 GiB, so larger pools use multiple leases.
 
-可用 `ZETTBRIDGE_DIR`、`KDIR`、`QEMU_BINARY` 覆盖路径。详细 UAPI、unsafe/锁序审计、部署 manifest 和已验证/未验证的 K0–K6 边界在驱动仓库的 `README.md` 与 `docs/`。
+`ZETTBRIDGE_DIR`, `KDIR` and `QEMU_BINARY` override the default paths. See the
+driver repository's README and `docs/` for the UAPI, unsafe and lock-order
+audit, deployment manifest, and the validated and unvalidated K0–K6 boundaries.
 
-当前默认模式为 x86-64、256 MiB / 8 GiB、单路静态 volatile CXL、Host B DRAM、UC lease 映射、IOMMU 和 ATS 持续开启。`--ats off` 可复现原基线。Host B 使用 requester 域内的 ATS 翻译缓存，按 VT-d 的设备失效通知删除条目，RETIRE 清空 ATC 后保持 ATS 进行 DMA unmap/free；活动期间关闭 ATS 会使导出故障。QEMU 的 Unix SEQPACKET 是模型内部互连。同步完成仅是功能验证，不能视为物理 FPGA posted-write drain 或硬件时延验收。
+## Separate kernel builds
 
-驱动使用目标内核的原生 Rust PCI、MiscDevice、Arc/Mutex、工作队列和 DMA 接口；仅为缺失的内核宏/inline 和私有 DAX ABI 保留无状态 C helper，未修改目标内核。
-
-ATS 的启用由 `~/linux` 的 Intel IOMMU 驱动管理，Rust OOT 驱动检查并持续监测；不启用 PASID/PRI/SVA。Host A 的 lease 用量仍每约 200 ms 中继到 Host B，2 秒未更新即失效。新只读诊断位于 `/sys/class/rpu/rpu0/ats_*`，包括 enabled、requests、hits、invalidations、cached_entries、faults 和 transitions。详细说明见 [驱动 ATS 文档](https://github.com/Zettai-US/zettbridge/blob/main/docs/ats.md)。
-
-边界修复包含 Rust VMA 撤销批次隔离、局部撤销期间收到全局 revoke 的二次 zap、幂等故障处理，以及 QEMU 的 ATS notifier 注册失败、发布前复位和 ATTACH 前断连处理。用量过期后显示 unknown，报告恢复后重新有效；peer 丢失时保留隔离资源，ATS 诊断不再把全 1 MMIO 当成 enabled。验证结果及边界见 [驱动边界测试记录](https://github.com/Zettai-US/zettbridge/blob/main/docs/edge-cases.md)。
+The two guests may use different built Linux kernel trees. Build a matching
+`zettbridge.ko` for each kernel. The launcher checks module vermagic before
+boot and packages a separate initramfs for each guest:
 
 ```sh
-# 13 项硬件模型边界测试
+PROVIDER_KDIR=/path/to/provider-linux \
+CONSUMER_KDIR=/path/to/consumer-linux \
+PROVIDER_ZETTBRIDGE_KO=/path/to/provider/zettbridge.ko \
+CONSUMER_ZETTBRIDGE_KO=/path/to/consumer/zettbridge.ko \
+./qemu_integration/run_zettbridge_pair.sh --output /tmp/zettbridge-two-kernels
+```
+
+`run.json` records each role's kernel release, source commit, kernel image
+SHA-256 and module SHA-256 under `kernels.provider` and `kernels.consumer`.
+Without these overrides, both guests use the default kernel build and module.
+
+## Zettbridge vfio-user CXL transport
+
+```sh
+ninja -C lib/qemu/build qemu-system-x86_64
+./qemu_integration/run_zettbridge_pair.sh --transport vfio-user-cxl \
+    --output /tmp/zettbridge-vfio-user-demo
+```
+
+This mode sends management BAR operations as standard vfio-user region
+messages and CXL.mem DPA reads/writes as negotiated Zettbridge-private
+commands. The separate backend relays them to Host B QEMU, which remains the
+IOMMU/ATS requester. It is a Zettbridge-specific transport, not a generic
+`vfio-user-pci` CXL Type 3 passthrough device. See the
+[design and validation record](../docs/vfio-user-cxl-zettbridge.md).
+
+## Model boundaries
+
+The default profile is x86-64 with a 256 MiB or 8 GiB, single-way static
+volatile CXL aperture, Host B DRAM backing, UC lease mappings, IOMMU and
+continuously enabled ATS. `--ats off` reproduces the original baseline.
+Host B caches translations in the requester domain and removes entries on
+VT-d device invalidation. RETIRE flushes the ATC while ATS stays enabled for
+DMA unmap/free. Disabling ATS during an active export faults it. The native
+QEMU-to-QEMU link uses Unix SEQPACKET. Synchronous completion validates the
+functional model; it does not establish physical FPGA posted-write drain or
+hardware latency.
+
+The driver uses the target kernel's native Rust PCI, MiscDevice, Arc/Mutex,
+workqueue and DMA interfaces. Stateless C helpers cover missing kernel
+macros/inlines and a private DAX ABI. The target kernel is not modified.
+
+The Intel IOMMU driver in `~/linux` enables ATS; the Rust module verifies and
+monitors it. PASID, PRI and SVA are disabled. Host A relays lease usage to
+Host B about every 200 ms; reports become invalid after 2 seconds without an
+update. Read-only `/sys/class/rpu/rpu0/ats_*` diagnostics report enabled,
+requests, hits, invalidations, cached entries, faults and transitions. See the
+[driver ATS documentation](https://github.com/Zettai-US/zettbridge/blob/main/docs/ats.md).
+
+Boundary fixes cover Rust VMA revocation batches, a global revoke arriving
+during a local revoke, idempotent fault handling, and QEMU ATS notifier
+registration failure, reset before publication and disconnect before ATTACH.
+Expired usage reports show `unknown` and become valid again after recovery.
+Peer loss retains quarantined resources; ATS diagnostics no longer mistake
+all-ones MMIO for enabled ATS. See the
+[driver edge-case record](https://github.com/Zettai-US/zettbridge/blob/main/docs/edge-cases.md).
+
+```sh
+# Thirteen hardware-model edge tests.
 python3 lib/qemu/tests/qtest/zettbridge-edge-test.py lib/qemu/build/qemu-system-x86_64
-# 新建专用双 VM：4 线程 128 轮 mmap 回收、报告过期/恢复、两端断连隔离
+# New isolated pair: four threads, 128 mmap/reclaim rounds, usage expiry/recovery and peer-loss quarantine.
 python3 ~/zettbridge/tools/edge_pair.py --output /tmp/zettbridge-edge-new
 ```
 
-边界脚本要求新的输出目录；它只关闭本次创建的测试实例。更新源码和构建不会替换已运行 VM 的模型或驱动，常驻 8 GiB pair 保留原二进制。
+The edge script requires a fresh output directory and shuts down only the
+instances it creates. Rebuilding does not replace the model or driver in a
+running VM; a persistent 8 GiB pair continues using its original binaries.
 
-## llama.cpp agent 与直接共享 KV
+## llama.cpp agent with directly shared KV
 
-驱动仓库提供固定版本 llama.cpp/Qwen2.5-0.5B-Instruct Q8_0 的独立测试程序：
+The driver repository includes an isolated test pinned to
+llama.cpp/Qwen2.5-0.5B-Instruct Q8_0:
 
 ```sh
 python3 ~/zettbridge/tools/build_llama_agent.py
@@ -76,6 +156,17 @@ python3 ~/zettbridge/tools/run_llama_agent.py \
     --output /tmp/zettbridge-agent-new
 ```
 
-它新建两台 VM，在 Host A 完成 `read_order → multiply → final` 三轮生成。共享路径的全部 48 个 K/V tensor、共 3 MiB，从上下文创建到销毁一直使用 Rust consumer 的 lease mmap；每个 CPU attention 工作线程仅使用 256 字节的当前 K/V 行计算暂存。程序比较本地参考与共享路径的全部输出 token 和每步完整 logits 指纹，同时采样 Host B 用量和 ATS，最后检查释放及安全回收。
+It starts two new VMs and performs the `read_order → multiply → final` sequence
+on Host A. All 48 shared K/V tensors, totaling 3 MiB, stay in the Rust
+consumer's lease mmap from context creation to destruction. Each CPU attention
+worker uses only a 256-byte scratch row for its current K/V calculation. The
+test compares every output token and full per-step logits fingerprint with a
+local reference, samples Host B usage and ATS, then checks release and safe
+reclamation.
 
-模型和应用通过 consumer 专用的只读 workload 磁盘加载；共享 KV 仍走 CXL → QEMU 互连 → Host B ATS/DMA。成功打印 `LLAMA AGENT E2E PASS`，输出目录保留 `result.json`、两端日志和二进制校验和。当前是 UC MMIO 功能验收，耗时不能作为物理 CXL 性能指标；实现与验收细节见 [驱动 llama.cpp 文档](https://github.com/Zettai-US/zettbridge/blob/main/docs/llama-agent.md)。
+The model and application are loaded from a read-only workload disk attached
+only to the consumer; shared KV still travels through CXL, the QEMU bridge,
+and Host B ATS/DMA. Success prints `LLAMA AGENT E2E PASS`. The output directory
+retains `result.json`, both logs and binary checksums. UC MMIO timings are
+functional results, not physical CXL performance measurements. See the
+[driver llama.cpp record](https://github.com/Zettai-US/zettbridge/blob/main/docs/llama-agent.md).

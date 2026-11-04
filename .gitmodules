@@ -30,7 +30,7 @@
 	url = https://github.com/SlugLab/Drywall
 [submodule "lib/qemu"]
 	path = lib/qemu
-	url = https://github.com/CXLMemUring/qemu
+	url = https://github.com/Zettai-US/qemu-cxl-type2
 [submodule "workloads/tigon"]
 	path = workloads/tigon
 	url = https://github.com/CXLMemUring/tigon
